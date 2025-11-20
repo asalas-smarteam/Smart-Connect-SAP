@@ -12,6 +12,11 @@ const customLevels = {
   debug: 3,
 };
 
+const fallbackLogger = winston.createLogger({
+  level: 'error',
+  transports: [new winston.transports.Console({ level: 'error' })],
+});
+
 class LogEntryTransport extends winston.Transport {
   constructor(options = {}) {
     super(options);
@@ -29,8 +34,7 @@ class LogEntryTransport extends winston.Transport {
         level,
       });
     } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error('Failed to persist log entry:', error);
+      fallbackLogger.error('Failed to persist log entry:', error);
     }
 
     if (callback) {

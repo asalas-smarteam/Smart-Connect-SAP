@@ -1,5 +1,6 @@
 const { Sequelize } = require('sequelize');
 const { DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, DB_PORT } = require('./env');
+const logger = require('../core/logger');
 
 const sequelize = new Sequelize(DB_NAME, DB_USER, DB_PASSWORD, {
   host: DB_HOST,
@@ -10,9 +11,9 @@ const sequelize = new Sequelize(DB_NAME, DB_USER, DB_PASSWORD, {
 async function connect() {
   try {
     await sequelize.authenticate();
-    console.log('Database connected');
+    logger.info('Database connected');
   } catch (error) {
-    console.error('Error connecting to the database:', error);
+    logger.error('Error connecting to the database:', error);
   }
 }
 
