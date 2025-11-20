@@ -1,6 +1,6 @@
 const echoController = require('../controllers/echo.controller');
 
-function echoRoutes(fastify) {
+async function echoRoutes(fastify, opts) {
   fastify.post('/echo_test', echoController.echoTest);
 }
 
