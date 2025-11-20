@@ -2,6 +2,7 @@ const fastify = require('fastify')();
 const dotenv = require('dotenv');
 const { connect } = require('./config/database');
 const echoRoutes = require('./routes/echo.routes');
+const logger = require('./core/logger');
 
 dotenv.config();
 
@@ -13,11 +14,11 @@ async function start() {
   const port = process.env.PORT || 3000;
 
   try {
-    
+
     await fastify.listen({ port, host: '0.0.0.0' });
-    console.log(`Server running on port ${port}`);
+    logger.info(`Server running on port ${port}`);
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     process.exit(1);
   }
 }
