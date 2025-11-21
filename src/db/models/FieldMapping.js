@@ -1,5 +1,5 @@
-function FieldMapping(sequelize, DataTypes) {
-  const FieldMapping = sequelize.sequelize.define(
+export default function FieldMapping({ sequelize }, DataTypes) {
+  return sequelize.define(
     'FieldMapping',
     {
       id: {
@@ -24,8 +24,4 @@ function FieldMapping(sequelize, DataTypes) {
       timestamps: false,
     }
   );
-
-  return FieldMapping;
 }
-
-export default FieldMapping;

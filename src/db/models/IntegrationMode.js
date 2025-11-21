@@ -1,5 +1,5 @@
-function IntegrationMode(sequelize, DataTypes) {
-  const IntegrationMode = sequelize.sequelize.define(
+export default function defineIntegrationMode({ sequelize }, DataTypes) {
+  return sequelize.define(
     'IntegrationMode',
     {
       id: {
@@ -19,8 +19,4 @@ function IntegrationMode(sequelize, DataTypes) {
       timestamps: false,
     }
   );
-
-  return IntegrationMode;
 }
-
-export default IntegrationMode;

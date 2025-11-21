@@ -1,5 +1,5 @@
-function ClientConfig(sequelize, DataTypes) {
-  const ClientConfig = sequelize.sequelize.define(
+export default function ClientConfig({ sequelize }, DataTypes) {
+  return sequelize.define(
     'ClientConfig',
     {
       id: {
@@ -44,7 +44,4 @@ function ClientConfig(sequelize, DataTypes) {
     }
   );
 
-  return ClientConfig;
 }
-
-export default ClientConfig;
