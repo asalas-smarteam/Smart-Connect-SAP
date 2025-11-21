@@ -29,4 +29,4 @@ function LogEntry(sequelize, DataTypes) {
   return LogEntry;
 }
 
-export default = LogEntry;
+export default LogEntry;
