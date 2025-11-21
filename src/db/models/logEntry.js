@@ -1,5 +1,5 @@
 function LogEntry(sequelize, DataTypes) {
-  const LogEntry = sequelize.sequelize.define(
+  const LogEntry = sequelize.define(
     'LogEntry',
     {
       id: {
