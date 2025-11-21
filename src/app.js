@@ -1,26 +1,32 @@
-const fastify = require('fastify')();
-const dotenv = require('dotenv');
-const { connect } = require('./config/database');
-const echoRoutes = require('./routes/echo.routes');
-const logger = require('./core/logger');
+import Fastify from 'fastify';
+import routes from './routes/index.js';
+import winstonLogger from './core/logger.js';
 
-dotenv.config();
+const app = Fastify({
+  logger: true
+});
 
-fastify.register(echoRoutes);
-
-async function start() {
-  await connect();
-
-  const port = process.env.PORT || 3000;
-
+// 🧩 Asegura que Fastify pueda leer JSON (importante para Power BI y Postman)
+app.addContentTypeParser('application/json', { parseAs: 'string' }, function (req, body, done) {
   try {
-
-    await fastify.listen({ port, host: '0.0.0.0' });
-    logger.info(`Server running on port ${port}`);
-  } catch (error) {
-    logger.error(error);
-    process.exit(1);
+    const json = JSON.parse(body);
+    done(null, json);
+  } catch (err) {
+    done(err, undefined);
   }
-}
+});
 
-start();
+// Middleware opcional de auditoría
+app.addHook('onRequest', async (req, reply) => {
+  winstonLogger.info({
+    msg: 'Incoming request',
+    method: req.method,
+    url: req.url,
+    ip: req.ip
+  });
+});
+
+// Rutas principales
+app.register(routes, { prefix: '/api' });
+
+export default app;

@@ -1,11 +1,11 @@
-const { DataTypes } = require('sequelize');
-const { sequelize } = require('../config/database');
-const logger = require('../core/logger');
-const defineLogEntry = require('../db/models/LogEntry');
+import DataTypes from 'sequelize';
+import sequelize from '../config/database.js';
+import logger from '../core/logger.js';
+import defineLogEntry from '../db/models/logEntry.js';
 
 const LogEntry = defineLogEntry(sequelize, DataTypes);
 
-async function echoTest(req, reply) {
+export const echoTest = async (req, reply) => {
   const { body } = req;
 
   logger.info('Echo test received', body);
@@ -18,5 +18,3 @@ async function echoTest(req, reply) {
 
   return reply.send({ ok: true, body });
 }
-
-module.exports = { echoTest };

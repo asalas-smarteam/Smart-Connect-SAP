@@ -1,7 +1,7 @@
-const winston = require('winston');
-const { DataTypes } = require('sequelize');
-const { sequelize } = require('../config/database');
-const defineLogEntry = require('../db/models/LogEntry');
+import winston from 'winston';
+import DataTypes from 'sequelize';
+import sequelize from '../config/database.js';
+import defineLogEntry from '../db/models/logEntry.js';
 
 const LogEntry = defineLogEntry(sequelize, DataTypes);
 
@@ -56,4 +56,4 @@ const logger = winston.createLogger({
   ],
 });
 
-module.exports = logger;
+export default logger;

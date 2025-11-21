@@ -1,5 +1,5 @@
 function LogEntry(sequelize, DataTypes) {
-  const LogEntry = sequelize.define(
+  const LogEntry = sequelize.sequelize.define(
     'LogEntry',
     {
       id: {
@@ -29,4 +29,4 @@ function LogEntry(sequelize, DataTypes) {
   return LogEntry;
 }
 
-module.exports = LogEntry;
+export default LogEntry;

@@ -1,16 +1,21 @@
 {
   "name": "sap-hubspot-connector",
   "version": "1.0.0",
-  "description": "Conector bidireccional entre SAP y HubSpot utilizando Fastify y Sequelize.",
+  "description": "Conector bidireccional entre SAP y HubSpot ",
   "main": "src/app.js",
+  "type": "module",
   "scripts": {
-    "dev": "node src/app.js",
+    "dev": "npx nodemon src/server.js",
     "start": "NODE_ENV=production node src/app.js"
   },
+  "keywords": [],
+  "author": "Ing. Alejandro Salas",
+  "license": "ISC",
   "dependencies": {
     "dotenv": "^16.4.5",
     "fastify": "^4.29.1",
     "mysql2": "^3.11.0",
+    "nodemon": "^3.1.11",
     "sequelize": "^6.37.4",
     "winston": "^3.14.2"
   }

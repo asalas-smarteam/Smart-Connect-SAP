@@ -1,7 +1,5 @@
-const echoController = require('../controllers/echo.controller');
+import { echoTest } from '../controllers/echo.controller.js';
 
-async function echoRoutes(fastify, opts) {
-  fastify.post('/echo_test', echoController.echoTest);
+export default async function routes(app) {
+    app.post('/', echoTest);
 }
-
-module.exports = echoRoutes;
