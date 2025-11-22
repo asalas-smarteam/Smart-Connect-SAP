@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import sapService from '../integrations/sap/sapService.js';
+import syncService from '../services/syncService.js';
 import { ClientConfig } from '../config/database.js';
 
 export function startSapSync() {
@@ -9,7 +9,7 @@ export function startSapSync() {
       const activeConfigs = await ClientConfig.findAll({ where: { active: true } });
 
       for (const config of activeConfigs) {
-        await sapService.fetchData(config.id);
+        await syncService.run(config.id);
       }
     },
     { scheduled: false }
