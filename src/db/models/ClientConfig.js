@@ -28,6 +28,24 @@ export default function ClientConfig({ sequelize }, DataTypes) {
       intervalMinutes: {
         type: DataTypes.INTEGER,
       },
+      externalDbHost: {
+        type: DataTypes.STRING,
+      },
+      externalDbPort: {
+        type: DataTypes.INTEGER,
+      },
+      externalDbUser: {
+        type: DataTypes.STRING,
+      },
+      externalDbPassword: {
+        type: DataTypes.STRING,
+      },
+      externalDbName: {
+        type: DataTypes.STRING,
+      },
+      externalDbDialect: {
+        type: DataTypes.STRING,
+      },
       active: {
         type: DataTypes.BOOLEAN,
         defaultValue: true,
