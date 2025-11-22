@@ -1,5 +1,5 @@
 import logger from '../../../core/logger.js';
-import createExternalConnection from '../../utils/externalDb.js';
+import createExternalConnection from '../../../utils/externalDb.js';
 
 const scriptMode = {
   async execute(config) {
