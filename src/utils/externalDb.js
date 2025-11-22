@@ -17,4 +17,17 @@ function createExternalConnection(config) {
   });
 }
 
+export async function testExternalConnection(config) {
+  const externalSequelize = createExternalConnection(config);
+
+  try {
+    await externalSequelize.authenticate();
+    await externalSequelize.close();
+    return { ok: true };
+  } catch (error) {
+    await externalSequelize.close();
+    return { ok: false, error: error.message };
+  }
+}
+
 export default createExternalConnection;
