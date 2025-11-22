@@ -1,18 +1,21 @@
-import sequelize from '../../../config/database.js';
 import logger from '../../../core/logger.js';
+import createExternalConnection from '../../utils/externalDb.js';
 
 const scriptMode = {
   async execute(config) {
     try {
-      const { sqlQuery } = config || {};
-
-      if (!sqlQuery) {
+      if (!config?.sqlQuery) {
         return [];
       }
 
-      const result = await sequelize.query(sqlQuery, {
-        type: sequelize.QueryTypes.SELECT,
+      const externalSequelize = createExternalConnection(config);
+
+      const result = await externalSequelize.query(config.sqlQuery, {
+        type: externalSequelize.QueryTypes.SELECT,
       });
+
+      await externalSequelize.close();
+
       return result;
     } catch (error) {
       logger.error('Error executing SAP script mode query', { error });
