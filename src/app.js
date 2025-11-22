@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import routes from './routes/index.js';
 import winstonLogger from './core/logger.js';
+import startSapSync from './tasks/sapSyncTask.js';
 
 const app = Fastify({
   logger: true
@@ -28,5 +29,10 @@ app.addHook('onRequest', async (req, reply) => {
 
 // Rutas principales
 app.register(routes, { prefix: '/api' });
+
+app.addHook('onReady', async () => {
+  const job = startSapSync();
+  job.start();
+});
 
 export default app;
