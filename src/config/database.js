@@ -4,6 +4,7 @@ import defineIntegrationMode from '../db/models/IntegrationMode.js';
 import defineClientConfig from '../db/models/ClientConfig.js';
 import defineFieldMapping from '../db/models/FieldMapping.js';
 import defineLogEntry from '../db/models/LogEntry.js';
+import defineSyncLog from '../db/models/SyncLog.js';
 
 const {
   DB_HOST,
@@ -23,6 +24,7 @@ const IntegrationMode = defineIntegrationMode({ sequelize }, DataTypes);
 const ClientConfig = defineClientConfig({ sequelize }, DataTypes);
 const FieldMapping = defineFieldMapping({ sequelize }, DataTypes);
 const LogEntry = defineLogEntry({ sequelize }, DataTypes);
+const SyncLog = defineSyncLog({ sequelize }, DataTypes);
 
 ClientConfig.belongsTo(IntegrationMode, { foreignKey: 'integrationModeId' });
 FieldMapping.belongsTo(ClientConfig, { foreignKey: 'clientConfigId' });
@@ -37,6 +39,6 @@ async function connect() {
   }
 }
 
-export { sequelize, IntegrationMode, ClientConfig, FieldMapping, LogEntry };
+export { sequelize, IntegrationMode, ClientConfig, FieldMapping, LogEntry, SyncLog };
 
-export default { sequelize, connect, IntegrationMode, ClientConfig, FieldMapping, LogEntry };
+export default { sequelize, connect, IntegrationMode, ClientConfig, FieldMapping, LogEntry, SyncLog };
