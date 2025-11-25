@@ -5,6 +5,7 @@ import defineClientConfig from '../db/models/ClientConfig.js';
 import defineFieldMapping from '../db/models/FieldMapping.js';
 import defineLogEntry from '../db/models/LogEntry.js';
 import defineSyncLog from '../db/models/SyncLog.js';
+import defineHubspotCredentials from '../db/models/HubspotCredentials.js';
 
 const {
   DB_HOST,
@@ -25,6 +26,7 @@ const ClientConfig = defineClientConfig({ sequelize }, DataTypes);
 const FieldMapping = defineFieldMapping({ sequelize }, DataTypes);
 const LogEntry = defineLogEntry({ sequelize }, DataTypes);
 const SyncLog = defineSyncLog({ sequelize }, DataTypes);
+const HubspotCredentials = defineHubspotCredentials({ sequelize }, DataTypes);
 
 ClientConfig.belongsTo(IntegrationMode, { foreignKey: 'integrationModeId' });
 FieldMapping.belongsTo(ClientConfig, { foreignKey: 'clientConfigId' });
@@ -39,6 +41,6 @@ async function connect() {
   }
 }
 
-export { sequelize, IntegrationMode, ClientConfig, FieldMapping, LogEntry, SyncLog };
+export { sequelize, IntegrationMode, ClientConfig, FieldMapping, LogEntry, SyncLog, HubspotCredentials };
 
-export default { sequelize, connect, IntegrationMode, ClientConfig, FieldMapping, LogEntry, SyncLog };
+export default { sequelize, connect, IntegrationMode, ClientConfig, FieldMapping, LogEntry, SyncLog, HubspotCredentials };
