@@ -1,4 +1,4 @@
-module.exports = function HubspotCredentials({ sequelize }, DataTypes) {
+export default function HubspotCredentials({ sequelize }, DataTypes) {
   return sequelize.define(
     'HubspotCredentials',
     {
