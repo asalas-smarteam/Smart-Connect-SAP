@@ -1,32 +1,24 @@
-import { FieldMapping, ClientConfig, HubspotCredentials } from '../config/database.js';
+import { FieldMapping } from '../config/database.js';
+
+const mapFields = (inputData, mappings) => {
+  const result = {};
+
+  mappings.forEach((m) => {
+    result[m.targetField] = inputData[m.sourceField] || null;
+  });
+
+  return result;
+};
 
 const mappingService = {
-  async getMappings(clientConfigId, objectType) {
+  async getMappings(hubspotCredentialId, objectType) {
     try {
-      if (clientConfigId) {
-        const config = await ClientConfig.findByPk(clientConfigId);
-
-        if (config) {
-          const credentials = await HubspotCredentials.findOne({
-            where: { clientConfigId: config.id },
-          });
-
-          if (!credentials) {
-            return [];
-          }
-
-          return await FieldMapping.findAll({
-            where: {
-              hubspotCredentialId: credentials.id,
-              objectType,
-            },
-            order: [['id', 'ASC']],
-          });
-        }
+      if (!hubspotCredentialId) {
+        return [];
       }
 
       return await FieldMapping.findAll({
-        where: { clientConfigId, objectType },
+        where: { hubspotCredentialId, objectType },
         order: [['id', 'ASC']],
       });
     } catch (error) {
@@ -35,16 +27,22 @@ const mappingService = {
     }
   },
 
-  async applyMapping(inputData, clientConfigId, objectType) {
+  async mapRecords(sapRecords, hubspotCredentialId, objectType) {
     try {
-      const mappings = await this.getMappings(clientConfigId, objectType);
-      const result = {};
+      const mappings = await this.getMappings(hubspotCredentialId, objectType);
 
-      mappings.forEach((m) => {
-        result[m.targetField] = inputData[m.sourceField] || null;
-      });
+      return sapRecords.map((record) => mapFields(record, mappings));
+    } catch (error) {
+      console.error('Failed to apply mappings:', error);
+      return [];
+    }
+  },
 
-      return result;
+  async applyMapping(inputData, hubspotCredentialId, objectType) {
+    try {
+      const mappings = await this.getMappings(hubspotCredentialId, objectType);
+
+      return mapFields(inputData, mappings);
     } catch (error) {
       console.error('Failed to apply mappings:', error);
       return {};

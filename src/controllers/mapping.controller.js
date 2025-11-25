@@ -3,13 +3,15 @@ import mappingService from '../services/mapping.service.js';
 
 export const createMapping = async (req, reply) => {
   try {
-    const { sourceField, targetField, objectType, clientConfigId } = req.body;
+    const { sourceField, targetField, objectType, clientConfigId, hubspotCredentialId } =
+      req.body;
 
     const data = await FieldMapping.create({
       sourceField,
       targetField,
       objectType,
       clientConfigId,
+      hubspotCredentialId,
     });
 
     return reply.send({ ok: true, data });
@@ -20,12 +22,14 @@ export const createMapping = async (req, reply) => {
 
 export const getMappings = async (req, reply) => {
   try {
-    const { clientConfigId, objectType } = req.query;
+    const { clientConfigId, hubspotCredentialId, objectType } = req.query;
     const options = {
       order: [['id', 'ASC']],
     };
 
-    if (clientConfigId && objectType) {
+    if (hubspotCredentialId && objectType) {
+      options.where = { hubspotCredentialId, objectType };
+    } else if (clientConfigId && objectType) {
       options.where = { clientConfigId, objectType };
     }
 
@@ -39,8 +43,12 @@ export const getMappings = async (req, reply) => {
 
 export const applyMappingTest = async (req, reply) => {
   try {
-    const { data, clientConfigId, objectType } = req.body;
-    const mapped = await mappingService.applyMapping(data, clientConfigId, objectType);
+    const { data, hubspotCredentialId, objectType } = req.body;
+    const mapped = await mappingService.applyMapping(
+      data,
+      hubspotCredentialId,
+      objectType
+    );
 
     return reply.send({ ok: true, mapped });
   } catch (error) {
