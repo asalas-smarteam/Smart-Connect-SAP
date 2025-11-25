@@ -1,33 +1,62 @@
 import Sequelize from 'sequelize';
 
-function createExternalConnection(config) {
-  const {
-    externalDbName,
-    externalDbUser,
-    externalDbPassword,
-    externalDbHost,
-    externalDbPort,
-    externalDbDialect,
-  } = config || {};
+const pools = {};
+// Aquí se almacenarán las conexiones por clientConfigId
 
-  return new Sequelize(externalDbName, externalDbUser, externalDbPassword, {
-    host: externalDbHost,
-    port: externalDbPort,
-    dialect: externalDbDialect,
-  });
+export function getConnection(config) {
+  const key = config?.id;
+  if (!key) {
+    throw new Error('config.id is required to establish a connection');
+  }
+
+  if (pools[key]) {
+    return pools[key];
+  }
+
+  const connection = new Sequelize(
+    config.externalDbName,
+    config.externalDbUser,
+    config.externalDbPassword,
+    {
+      host: config.externalDbHost,
+      port: config.externalDbPort,
+      dialect: config.externalDbDialect,
+      pool: {
+        max: 5,
+        min: 1,
+        acquire: 30000,
+        idle: 10000,
+      },
+      logging: false,
+    }
+  );
+
+  pools[key] = connection;
+  return connection;
 }
 
 export async function testExternalConnection(config) {
-  const externalSequelize = createExternalConnection(config);
-
+  const connection = getConnection(config);
   try {
-    await externalSequelize.authenticate();
-    await externalSequelize.close();
+    await connection.authenticate();
     return { ok: true };
   } catch (error) {
-    await externalSequelize.close();
+    await closeConnection(config.id);
     return { ok: false, error: error.message };
   }
 }
 
-export default createExternalConnection;
+export async function closeConnection(clientConfigId) {
+  if (pools[clientConfigId]) {
+    await pools[clientConfigId].close();
+    delete pools[clientConfigId];
+  }
+}
+
+export async function closeAllConnections() {
+  const keys = Object.keys(pools);
+  for (const key of keys) {
+    await pools[key].close();
+    delete pools[key];
+  }
+}
