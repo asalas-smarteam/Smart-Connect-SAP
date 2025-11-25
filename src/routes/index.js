@@ -6,6 +6,7 @@ import mappingRoutes from './mapping.routes.js';
 import dbTestRoutes from './dbTest.routes.js';
 import oauthRoutes from './oauth.routes.js';
 import testHSRoutes from './testHS.routes.js';
+import hubspotTestRoutes from './hubspotTest.routes.js';
 
 export default async function routes(app) {
   app.register(echoRoutes, { prefix: '/echo_test' });
@@ -15,4 +16,5 @@ export default async function routes(app) {
   app.register(dbTestRoutes);
   app.register(oauthRoutes);
   app.register(testHSRoutes);
+  app.register(hubspotTestRoutes);
 }
