@@ -1,4 +1,6 @@
 import Sequelize from 'sequelize';
+import { ClientConfig } from '../config/database.js';
+import logger from '../core/logger.js';
 
 const pools = {};
 // Aquí se almacenarán las conexiones por clientConfigId
@@ -58,5 +60,21 @@ export async function closeAllConnections() {
   for (const key of keys) {
     await pools[key].close();
     delete pools[key];
+  }
+}
+
+export async function initializeExternalConnections() {
+  const activeConfigs = await ClientConfig.findAll({ where: { active: true } });
+
+  for (const config of activeConfigs) {
+    try {
+      await getConnection(config);
+      logger.info(`External database connection initialized for client config ${config.id}`);
+    } catch (error) {
+      logger.error('Error initializing external database connection', {
+        clientConfigId: config.id,
+        error,
+      });
+    }
   }
 }

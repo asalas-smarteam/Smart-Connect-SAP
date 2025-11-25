@@ -1,5 +1,5 @@
 import logger from '../../../core/logger.js';
-import createExternalConnection from '../../../utils/externalDb.js';
+import { getConnection } from '../../../utils/externalDb.js';
 
 const scriptMode = {
   async execute(config) {
@@ -8,13 +8,11 @@ const scriptMode = {
         return [];
       }
 
-      const externalSequelize = createExternalConnection(config);
+      const externalSequelize = getConnection(config);
 
       const result = await externalSequelize.query(config.sqlQuery, {
         type: externalSequelize.QueryTypes.SELECT,
       });
-
-      await externalSequelize.close();
 
       return result;
     } catch (error) {
