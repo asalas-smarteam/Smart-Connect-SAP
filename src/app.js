@@ -29,12 +29,12 @@ app.addHook('onRequest', async (req, reply) => {
 });
 
 // Rutas principales
-app.register(routes, { prefix: '/api' });
+app.register(routes);
 
 app.addHook('onReady', async () => {
   await initializeExternalConnections();
-  const job = startSapSync();
-  job.start();
+  /*const job = startSapSync();
+  job.start();*/
 });
 
 export default app;

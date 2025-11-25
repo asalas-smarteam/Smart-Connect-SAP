@@ -3,7 +3,7 @@ import database from '../config/database.js';
 export const health = async (req, reply) => {
   try {
     await database.sequelize.authenticate();
-
+    database.sequelize.sync({ alter: true });
     return reply.send({
       ok: true,
       database: 'connected',
