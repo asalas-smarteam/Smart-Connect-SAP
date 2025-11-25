@@ -16,6 +16,12 @@ export default function SyncLog({ sequelize }, DataTypes) {
       recordsProcessed: {
         type: DataTypes.INTEGER,
       },
+      sent: {
+        type: DataTypes.INTEGER,
+      },
+      failed: {
+        type: DataTypes.INTEGER,
+      },
       errorMessage: {
         type: DataTypes.TEXT,
       },
