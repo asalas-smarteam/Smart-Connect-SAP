@@ -1,7 +1,7 @@
 import sapService from '../integrations/sap/sapService.js';
 import mappingService from './mapping.service.js';
 import hubspotService from '../services/hubspotService.js';
-import { ClientConfig, SyncLog } from '../config/database.js';
+import { ClientConfig, SyncLog, HubspotCredentials } from '../config/database.js';
 
 const syncService = {
   async run(clientConfigId) {
@@ -16,6 +16,14 @@ const syncService = {
       }
 
       const rawData = await sapService.fetchData(clientConfigId);
+
+      const credentials = await HubspotCredentials.findOne({
+        where: { clientConfigId: config.id },
+      });
+
+      if (!credentials) {
+        throw new Error('HubSpot credentials not found for client');
+      }
 
       if (!rawData || rawData.length === 0) {
         await SyncLog.create({
@@ -33,8 +41,13 @@ const syncService = {
         return;
       }
 
-      const mappedRecords = await Promise.all(
-        rawData.map((item) => mappingService.applyMapping(item, clientConfigId, 'contact'))
+      const objectType = 'contact';
+      const sapRecords = rawData;
+
+      const mappedRecords = await mappingService.mapRecords(
+        sapRecords,
+        credentials.id,
+        objectType
       );
 
       let hubspotResult = { sent: 0, failed: 0 };
