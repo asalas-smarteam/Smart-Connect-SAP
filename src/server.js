@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import app from './app.js';
 import db from './config/database.js';
 import logger from './core/logger.js';
+import { closeAllConnections } from './utils/externalDb.js';
 
 dotenv.config();
 
@@ -23,6 +24,7 @@ const closeDatabaseConnection = async () => {
       isConnectionClosed = true;
       logger.info('🧹 Supabase database connection closed.');
     }
+    await closeAllConnections();
   } catch (error) {
     logger.error({
       msg: 'Error closing Supabase database connection',
