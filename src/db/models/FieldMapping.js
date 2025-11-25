@@ -19,6 +19,10 @@ export default function FieldMapping({ sequelize }, DataTypes) {
       clientConfigId: {
         type: DataTypes.INTEGER,
       },
+      hubspotCredentialId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
     },
     {
       timestamps: false,
