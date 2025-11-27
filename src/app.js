@@ -33,7 +33,7 @@ app.register(routes);
 
 app.addHook('onReady', async () => {
   await initializeExternalConnections();
-  /*const job = startSapSync();
+  /*const job = await startSapSync();
   job.start();*/
 });
 
