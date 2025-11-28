@@ -1,28 +1,33 @@
 import sapService from '../integrations/sap/sapService.js';
 import mappingService from './mapping.service.js';
 import hubspotService from '../services/hubspotService.js';
-import { ClientConfig, SyncLog, HubspotCredentials } from '../config/database.js';
+import { SyncLog, HubspotCredentials } from '../config/database.js';
 
 const syncService = {
-  async run(clientConfigId) {
+  async run(config) {
     const startedAt = new Date();
-    let config;
+    const clientConfigId = config?.id;
 
     try {
-      config = await ClientConfig.findByPk(clientConfigId);
-
       if (!config) {
         throw new Error('Client configuration not found');
       }
 
       const rawData = await sapService.fetchData(clientConfigId);
 
-      const credentials = await HubspotCredentials.findOne({
-        where: { clientConfigId: config.id },
-      });
+      const credentials = await HubspotCredentials.findByPk(
+        config.hubspotCredentialId
+      );
 
       if (!credentials) {
-        throw new Error('HubSpot credentials not found for client');
+        await SyncLog.create({
+          clientConfigId,
+          status: 'error',
+          errorMessage: 'No HubSpot credentials assigned to this clientConfig',
+          startedAt,
+          finishedAt: new Date(),
+        });
+        return;
       }
 
       if (!rawData || rawData.length === 0) {
@@ -46,7 +51,7 @@ const syncService = {
 
       const mappedRecords = await mappingService.mapRecords(
         sapRecords,
-        credentials.id,
+        config.hubspotCredentialId,
         objectType
       );
 
@@ -88,11 +93,6 @@ const syncService = {
       if (config) {
         config.lastError = error.message;
         await config.save();
-      } else {
-        await ClientConfig.update(
-          { lastError: error.message },
-          { where: { id: clientConfigId } }
-        );
       }
     }
   },
