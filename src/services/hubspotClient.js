@@ -32,10 +32,10 @@ export async function findContactByEmail(token, email) {
   ]);
 }
 
-export async function createContact(token, data) {
+export async function createContact(token, properties) {
   const response = await axios.post(
     `${HUBSPOT_BASE_URL}/crm/v3/objects/contacts`,
-    data,
+    {properties},
     {
       headers: {
         Authorization: `Bearer ${token}`,

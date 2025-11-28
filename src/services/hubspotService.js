@@ -4,7 +4,7 @@ import * as hubspotClient from './hubspotClient.js';
 
 const hubspotService = {
   async sendToHubSpot(mappedItems, clientConfig, objectType) {
-    const token = await hubspotAuthService.getAccessToken(clientConfig.id);
+    const token = await hubspotAuthService.getAccessToken(clientConfig.hubspotCredentialId);
     const handler = objectTypeRouter.getObjectTypeHandler(objectType);
 
     if (!handler) {
