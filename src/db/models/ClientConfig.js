@@ -46,6 +46,10 @@ export default function ClientConfig({ sequelize }, DataTypes) {
       externalDbDialect: {
         type: DataTypes.STRING,
       },
+      hubspotCredentialId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
       active: {
         type: DataTypes.BOOLEAN,
         defaultValue: true,

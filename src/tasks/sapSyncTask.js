@@ -9,7 +9,7 @@ export default function startSapSync() {
       const activeConfigs = await ClientConfig.findAll({ where: { active: true } });
 
       for (const config of activeConfigs) {
-        await syncService.run(config.id);
+        await syncService.run(config);
       }
     },
     { scheduled: false }

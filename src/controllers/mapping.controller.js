@@ -22,15 +22,13 @@ export const createMapping = async (req, reply) => {
 
 export const getMappings = async (req, reply) => {
   try {
-    const { clientConfigId, hubspotCredentialId, objectType } = req.query;
+    const { hubspotCredentialId, objectType } = req.query;
     const options = {
       order: [['id', 'ASC']],
     };
 
     if (hubspotCredentialId && objectType) {
       options.where = { hubspotCredentialId, objectType };
-    } else if (clientConfigId && objectType) {
-      options.where = { clientConfigId, objectType };
     }
 
     const data = await FieldMapping.findAll(options);
