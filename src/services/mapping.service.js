@@ -7,7 +7,7 @@ const mapFields = (inputData, mappings) => {
     result[m.targetField] = inputData[m.sourceField] || null;
   });
 
-  return result;
+  return {properties: result};
 };
 
 const mappingService = {
