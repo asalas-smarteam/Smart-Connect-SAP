@@ -46,7 +46,7 @@ const syncService = {
         return;
       }
 
-      const objectType = 'contact';
+      const objectType = config.objectType;
       const sapRecords = rawData;
 
       const mappedRecords = await mappingService.mapRecords(

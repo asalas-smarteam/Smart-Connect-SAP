@@ -50,6 +50,10 @@ export default function ClientConfig({ sequelize }, DataTypes) {
         type: DataTypes.INTEGER,
         allowNull: true,
       },
+      objectType: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
       active: {
         type: DataTypes.BOOLEAN,
         defaultValue: true,
