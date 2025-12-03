@@ -9,6 +9,7 @@ const {
   DB_PASSWORD,
   DB_NAME,
   DB_PORT,
+  SAP_SYNC_CRON_ENABLED,
 } = process.env;
 
 export default {
@@ -18,4 +19,5 @@ export default {
   DB_PASSWORD,
   DB_NAME,
   DB_PORT,
+  SAP_SYNC_CRON_ENABLED,
 };

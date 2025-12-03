@@ -3,6 +3,7 @@ import routes from './routes/index.js';
 import winstonLogger from './core/logger.js';
 import startSapSync from './tasks/sapSyncTask.js';
 import { initializeExternalConnections } from './utils/externalDb.js';
+import env from './config/env.js';
 
 const app = Fastify({
   logger: true
@@ -33,8 +34,12 @@ app.register(routes);
 
 app.addHook('onReady', async () => {
   await initializeExternalConnections();
-  /*const job = await startSapSync();
-  job.start();*/
+  const isSapSyncEnabled = env.SAP_SYNC_CRON_ENABLED !== 'false';
+
+  if (isSapSyncEnabled) {
+    const job = await startSapSync();
+    job.start();
+  }
 });
 
 export default app;
