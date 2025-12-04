@@ -2,20 +2,16 @@ export default function DealPipelineMapping({ sequelize }, DataTypes) {
   return sequelize.define(
     'DealPipelineMapping',
     {
-      id: {
-        type: DataTypes.INTEGER,
-        primaryKey: true,
-        autoIncrement: true,
+      hubspotPipelineId: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        primaryKey: true
       },
       hubspotCredentialId: {
         type: DataTypes.INTEGER,
         allowNull: false,
       },
       sapPipelineKey: {
-        type: DataTypes.STRING,
-        allowNull: false,
-      },
-      hubspotPipelineId: {
         type: DataTypes.STRING,
         allowNull: false,
       },
@@ -32,6 +28,7 @@ export default function DealPipelineMapping({ sequelize }, DataTypes) {
       timestamps: true,
       indexes: [
         {
+          name: 'idx_unique_pipeline_mapping',
           unique: true,
           fields: ['hubspotCredentialId', 'sapPipelineKey'],
         },

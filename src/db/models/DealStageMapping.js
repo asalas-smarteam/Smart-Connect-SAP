@@ -36,6 +36,7 @@ export default function DealStageMapping({ sequelize }, DataTypes) {
       timestamps: true,
       indexes: [
         {
+          name: 'idx_unique_stage_mapping',
           unique: true,
           fields: ['hubspotCredentialId', 'sapStageKey', 'hubspotPipelineId'],
         },
