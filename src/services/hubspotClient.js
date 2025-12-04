@@ -71,7 +71,8 @@ export async function findCompanyByDomain(token, domain) {
 }
 
 export async function createCompany(token, data) {
-  const response = await axios.post(
+  try {
+    const response = await axios.post(
     `${HUBSPOT_BASE_URL}/crm/v3/objects/companies`,
     data,
     {
@@ -79,9 +80,12 @@ export async function createCompany(token, data) {
         Authorization: `Bearer ${token}`,
       },
     },
-  );
+    );
 
-  return response.data;
+    return response.data;
+  } catch (error) {
+    console.error('Error creating company in HubSpot:', error);
+  }
 }
 
 export async function updateCompany(token, id, data) {

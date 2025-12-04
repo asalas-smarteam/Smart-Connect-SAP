@@ -61,7 +61,7 @@ const syncService = {
         hubspotResult = await hubspotService.sendToHubSpot(
           mappedRecords,
           config,
-          'contact'
+          objectType
         );
       } catch (error) {
         hubspotResult = { sent: 0, failed: mappedRecords.length };
