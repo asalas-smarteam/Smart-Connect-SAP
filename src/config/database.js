@@ -6,6 +6,8 @@ import defineFieldMapping from '../db/models/FieldMapping.js';
 import defineLogEntry from '../db/models/LogEntry.js';
 import defineSyncLog from '../db/models/SyncLog.js';
 import defineHubspotCredentials from '../db/models/HubspotCredentials.js';
+import defineDealPipelineMapping from '../db/models/DealPipelineMapping.js';
+import defineDealStageMapping from '../db/models/DealStageMapping.js';
 
 const {
   DB_HOST,
@@ -27,9 +29,19 @@ const FieldMapping = defineFieldMapping({ sequelize }, DataTypes);
 const LogEntry = defineLogEntry({ sequelize }, DataTypes);
 const SyncLog = defineSyncLog({ sequelize }, DataTypes);
 const HubspotCredentials = defineHubspotCredentials({ sequelize }, DataTypes);
+const DealPipelineMapping = defineDealPipelineMapping({ sequelize }, DataTypes);
+const DealStageMapping = defineDealStageMapping({ sequelize }, DataTypes);
 
 ClientConfig.belongsTo(IntegrationMode, { foreignKey: 'integrationModeId' });
 FieldMapping.belongsTo(ClientConfig, { foreignKey: 'clientConfigId' });
+DealPipelineMapping.hasMany(DealStageMapping, {
+  foreignKey: 'hubspotPipelineId',
+  sourceKey: 'hubspotPipelineId',
+});
+DealStageMapping.belongsTo(DealPipelineMapping, {
+  foreignKey: 'hubspotPipelineId',
+  targetKey: 'hubspotPipelineId',
+});
 
 async function connect() {
   try {
@@ -41,6 +53,27 @@ async function connect() {
   }
 }
 
-export { sequelize, IntegrationMode, ClientConfig, FieldMapping, LogEntry, SyncLog, HubspotCredentials };
+export {
+  sequelize,
+  IntegrationMode,
+  ClientConfig,
+  FieldMapping,
+  LogEntry,
+  SyncLog,
+  HubspotCredentials,
+  DealPipelineMapping,
+  DealStageMapping,
+};
 
-export default { sequelize, connect, IntegrationMode, ClientConfig, FieldMapping, LogEntry, SyncLog, HubspotCredentials };
+export default {
+  sequelize,
+  connect,
+  IntegrationMode,
+  ClientConfig,
+  FieldMapping,
+  LogEntry,
+  SyncLog,
+  HubspotCredentials,
+  DealPipelineMapping,
+  DealStageMapping,
+};
