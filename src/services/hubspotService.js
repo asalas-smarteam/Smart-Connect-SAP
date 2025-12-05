@@ -1,6 +1,7 @@
 import hubspotAuthService from './hubspotAuthService.js';
 import objectTypeRouter from './objectTypeRouter.js';
 import * as hubspotClient from './hubspotClient.js';
+import { sapUpdateService } from './sapUpdateService.js';
 
 const hubspotService = {
   async sendToHubSpot(mappedItems, clientConfig, objectType) {
@@ -15,7 +16,7 @@ const hubspotService = {
     let failed = 0;
 
     for (const item of mappedItems) {
-      const result = await this.processSingleItem(token, objectType, item);
+      const result = await this.processSingleItem(token, objectType, item, clientConfig);
       if (result.ok) {
         sent += 1;
       } else {
@@ -26,7 +27,7 @@ const hubspotService = {
     return { ok: true, sent, failed };
   },
 
-  async processSingleItem(token, objectType, item) {
+  async processSingleItem(token, objectType, item, clientConfig) {
     try {
       if (objectType === 'contact') {
         const existing = await this.findContactByEmail(token, item?.properties?.email);
@@ -34,7 +35,15 @@ const hubspotService = {
         if (existing) {
           await this.updateContact(token, existing.id, item);
         } else {
-          await this.createContact(token, item);
+          const created = await this.createContact(token, item);
+          const hubspotId = created?.id;
+
+          await sapUpdateService.updateHubspotIdInSap(
+            clientConfig,
+            objectType,
+            item?.properties ?? {},
+            hubspotId,
+          );
         }
 
         return { ok: true };
@@ -46,7 +55,15 @@ const hubspotService = {
         if (existing) {
           await this.updateCompany(token, existing.id, item);
         } else {
-          await this.createCompany(token, item);
+          const created = await this.createCompany(token, item);
+          const hubspotId = created?.id;
+
+          await sapUpdateService.updateHubspotIdInSap(
+            clientConfig,
+            objectType,
+            item?.properties ?? {},
+            hubspotId,
+          );
         }
 
         return { ok: true };
@@ -58,7 +75,15 @@ const hubspotService = {
         if (existing) {
           await this.updateDeal(token, existing.id, item);
         } else {
-          await this.createDeal(token, item);
+          const created = await this.createDeal(token, item);
+          const hubspotId = created?.id;
+
+          await sapUpdateService.updateHubspotIdInSap(
+            clientConfig,
+            objectType,
+            item?.properties ?? {},
+            hubspotId,
+          );
         }
 
         return { ok: true };
@@ -79,7 +104,8 @@ const hubspotService = {
   },
 
   async createContact(token, data) {
-    return hubspotClient.createContact(token, data);
+    const response = await hubspotClient.createContact(token, data);
+    return response;
   },
 
   async updateContact(token, id, data) {
@@ -95,7 +121,8 @@ const hubspotService = {
   },
 
   async createCompany(token, data) {
-    return hubspotClient.createCompany(token, data);
+    const response = await hubspotClient.createCompany(token, data);
+    return response;
   },
 
   async updateCompany(token, id, data) {
@@ -111,7 +138,8 @@ const hubspotService = {
   },
 
   async createDeal(token, data) {
-    return hubspotClient.createDeal(token, data);
+    const response = await hubspotClient.createDeal(token, data);
+    return response;
   },
 
   async updateDeal(token, id, data) {

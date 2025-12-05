@@ -64,6 +64,19 @@ export default function ClientConfig({ sequelize }, DataTypes) {
       lastError: {
         type: DataTypes.TEXT,
       },
+      requireUpdateHubspotID: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+      },
+      updateMethod: {
+        type: DataTypes.STRING,
+      },
+      updateSpName: {
+        type: DataTypes.STRING,
+      },
+      updateTableName: {
+        type: DataTypes.STRING,
+      },
     },
     {
       timestamps: false,
