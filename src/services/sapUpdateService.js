@@ -13,16 +13,18 @@ export const sapUpdateService = {
         return;
       }
 
-      const mapping = await FieldMappingModel.findOne({
+      const mapping = await FieldMappingModel.findAll({
         where: {
           objectType,
           hubspotCredentialId: clientConfig?.hubspotCredentialId,
-          targetField: 'id_sap',
         },
+        raw: true
       });
 
-      const sapIdField = mapping?.sourceField;
-      const idSap = sapIdField ? sapRecord?.[sapIdField] : undefined;
+      const hsObjectIdSource = mapping.find(m => m.targetField === "hs_object_id")?.sourceField;
+      const sapIdSource = mapping.find(m => m.targetField === "sap_id")?.sourceField;
+
+      const idSap = sapRecord?.sap_id;
 
       if (!idSap) {
         return;
@@ -39,7 +41,7 @@ export const sapUpdateService = {
       }
 
       if (clientConfig.updateMethod === 'script' && clientConfig.updateTableName) {
-        const query = `UPDATE ${clientConfig.updateTableName} SET id_hubspot = :hubspotId WHERE id_sap = :idSap`;
+        const query = `UPDATE ${clientConfig.updateTableName} SET ${hsObjectIdSource} = :hubspotId WHERE ${sapIdSource} = :idSap`;
         await connection.query(query, { replacements: { hubspotId, idSap } });
       }
     } catch (error) {
