@@ -2,6 +2,7 @@ import hubspotAuthService from './hubspotAuthService.js';
 import objectTypeRouter from './objectTypeRouter.js';
 import * as hubspotClient from './hubspotClient.js';
 import { sapUpdateService } from './sapUpdateService.js';
+import dealMappingResolver from './dealMappingResolver.js';
 
 const hubspotService = {
   async sendToHubSpot(mappedItems, clientConfig, objectType) {
@@ -70,6 +71,31 @@ const hubspotService = {
       }
 
       if (objectType === 'deal') {
+        const sapPipelineKey = item?.properties?.sapPipelineKey;
+        const sapStageKey = item?.properties?.sapStageKey;
+
+        const pipeline = await dealMappingResolver.resolvePipeline(
+          clientConfig.hubspotCredentialId,
+          sapPipelineKey,
+        );
+
+        if (!pipeline) {
+          throw new Error('Pipeline mapping not found for deal.');
+        }
+
+        const stage = await dealMappingResolver.resolveStage(
+          clientConfig.hubspotCredentialId,
+          sapPipelineKey,
+          sapStageKey,
+        );
+
+        if (!stage) {
+          throw new Error('Stage mapping not found for deal.');
+        }
+
+        item.properties.pipeline = pipeline.hubspotPipelineId;
+        item.properties.dealstage = stage.hubspotStageId;
+
         const existing = await this.findDealByName(token, item?.properties?.dealname);
 
         if (existing) {
