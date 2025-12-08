@@ -43,7 +43,7 @@ const dealMappingService = {
     });
   },
 
-  async createOrUpdatePipelineMapping(hubspotCredentialId, sapPipelineKey, data) {
+  async createOrUpdatePipelineMapping({ hubspotCredentialId, sapPipelineKey, ...data }) {
     const existing = await this.getPipelineMapping(hubspotCredentialId, sapPipelineKey);
 
     if (existing) {
@@ -58,7 +58,7 @@ const dealMappingService = {
     });
   },
 
-  async createOrUpdateStageMapping(hubspotCredentialId, sapStageKey, hubspotPipelineId, data) {
+  async createOrUpdateStageMapping({hubspotCredentialId, sapStageKey, hubspotPipelineId, ...data}) {
     const existing = await this.getStageMapping(hubspotCredentialId, sapStageKey, hubspotPipelineId);
 
     if (existing) {
