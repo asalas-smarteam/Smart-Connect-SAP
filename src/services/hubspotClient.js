@@ -119,6 +119,25 @@ export async function updateDeal(token, id, data) {
   return hubspotRequest('patch', `/crm/v3/objects/deals/${id}`, token, data);
 }
 
+export async function findProductBySKU(token, sku) {
+  return searchObject(token, 'products', [
+    {
+      propertyName: 'hs_sku',
+      operator: 'EQ',
+      value: sku,
+    },
+  ]);
+}
+
+export async function createProduct(token, data) {
+  return hubspotRequest('post', '/crm/v3/objects/products', token, data);
+}
+
+export async function updateProduct(token, id, data) {
+  delete data.properties?.hs_object_id; // Prevent updating hs_object_id to avoid conflicts
+  return hubspotRequest('patch', `/crm/v3/objects/products/${id}`, token, data);
+}
+
 export async function batchCreate(token, dataArray) {
   return hubspotRequest(
     'post',
