@@ -46,6 +46,36 @@ export default function ClientConfig({ sequelize }, DataTypes) {
       externalDbDialect: {
         type: DataTypes.STRING,
       },
+      associationFetchEnabled: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+        allowNull: false,
+      },
+      associationFetchConfig: {
+        type: DataTypes.JSON,
+        allowNull: true,
+        comment: `
+    Arreglo de configuraciones de extracción por objeto:
+
+    [
+      {
+        "objectType": "company",
+        "associationFetchType": "api",      // 'api' | 'sp'
+        "associationFetchConfig": {
+            "url": "https://api.test.com",
+            "method": "GET"
+        }
+      },
+      {
+        "objectType": "product",
+        "associationFetchType": "sp",       // 'api' | 'sp'
+        "associationFetchConfig": {
+            "storedProcedure": "sp_get_associations"
+        }
+      }
+    ]
+  `,
+      },
       hubspotCredentialId: {
         type: DataTypes.INTEGER,
         allowNull: true,
