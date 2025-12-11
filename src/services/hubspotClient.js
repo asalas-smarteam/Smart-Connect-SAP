@@ -155,3 +155,16 @@ export async function batchUpdate(token, dataArray) {
     dataArray,
   );
 }
+
+export async function associateObjects(token, fromObjectType, fromObjectId, toObjectType, toObjectId) {
+  return hubspotRequest(
+    'put',
+    `/crm/v4/objects/${fromObjectType}/${fromObjectId}/associations/${toObjectType}/${toObjectId}`,
+    token,
+    [],
+  );
+}
+
+export async function createLineItem(token, data) {
+  return hubspotRequest('post', '/crm/v3/objects/line_items', token, data);
+}

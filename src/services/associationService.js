@@ -1,75 +1,105 @@
-/**
- * Association Service (Architecture stub)
- * --------------------------------------
- * Este módulo define las superficies públicas para manejar asociaciones entre
- * objetos de HubSpot de manera multi-tenant. Todavía no implementa la lógica,
- * pero documenta el orden de ejecución, dependencias y expectativas para
- * mantener separado el flujo de creación/actualización del flujo de
- * asociaciones.
- *
- * Notas clave de diseño:
- * - Las asociaciones solo deben ejecutarse después de que el objeto destino
- *   exista en HubSpot y cuente con hubspotId.
- * - La sincronización debe respetar el orden actual: contacto → empresa →
- *   producto → deal → asociaciones.
- * - Cada función recibe contexto multi-tenant mediante hubspotCredentialId
- *   para aislar credenciales y mappings.
- * - Debe soportar tanto SAP → HubSpot como preparar el camino para HubSpot →
- *   SAP, manteniendo este módulo como frontera única de asociaciones.
- * - Pensado para escalar a tickets, leads y suscripciones sin afectar el
- *   código existente de contactos, empresas y productos.
- */
+import hubspotAuthService from './hubspotAuthService.js';
+import * as hubspotClient from './hubspotClient.js';
 
-// TODO: inyectar clientes/mappings reales una vez que el flujo de asociaciones
-// esté habilitado. Las funciones se mantienen como stubs documentales para no
-// interferir con la lógica existente.
+async function getToken(hubspotCredentialId) {
+  if (!hubspotCredentialId) {
+    return null;
+  }
 
-export async function associateContactToCompany(/* {
-  hubspotCredentialId,
-  contactHubspotId,
-  companyHubspotId,
-  origin,
-} */) {
-  // Pendiente de implementación: ejecutar asociación empresa ↔ contacto.
-  // Debe validar que ambos hubspotId existan, registrar el origen (SAP/HubSpot)
-  // y usar AssociationConfig para resolver foreign keys adicionales.
+  try {
+    return await hubspotAuthService.getAccessToken(hubspotCredentialId);
+  } catch (error) {
+    console.error('Failed to retrieve HubSpot token', error);
+    return null;
+  }
 }
 
-export async function associateDealToContact(/* {
-  hubspotCredentialId,
-  dealHubspotId,
-  contactHubspotId,
-  origin,
-} */) {
-  // Pendiente de implementación: ejecutar asociación deal ↔ contacto.
-  // Considerar múltiples contactos por deal y registrar fallos sin impactar
-  // la sincronización de deals.
+async function associateDealWithContacts(hubspotCredentialId, dealId, contactIds = []) {
+  const token = await getToken(hubspotCredentialId);
+
+  if (!token || !dealId || !Array.isArray(contactIds)) {
+    return { ok: true };
+  }
+
+  for (const contactId of contactIds) {
+    if (!contactId) continue;
+
+    try {
+      await hubspotClient.associateObjects(token, 'deal', dealId, 'contact', contactId);
+    } catch (error) {
+      console.error('Failed to associate deal with contact', {
+        dealId,
+        contactId,
+        error,
+      });
+    }
+  }
+
+  return { ok: true };
 }
 
-export async function associateDealToCompany(/* {
-  hubspotCredentialId,
-  dealHubspotId,
-  companyHubspotId,
-  origin,
-} */) {
-  // Pendiente de implementación: ejecutar asociación deal ↔ empresa.
-  // Debe reutilizar mappings existentes y preparar soporte bidireccional.
+async function associateDealWithCompanies(hubspotCredentialId, dealId, companyIds = []) {
+  const token = await getToken(hubspotCredentialId);
+
+  if (!token || !dealId || !Array.isArray(companyIds)) {
+    return { ok: true };
+  }
+
+  for (const companyId of companyIds) {
+    if (!companyId) continue;
+
+    try {
+      await hubspotClient.associateObjects(token, 'deal', dealId, 'company', companyId);
+    } catch (error) {
+      console.error('Failed to associate deal with company', {
+        dealId,
+        companyId,
+        error,
+      });
+    }
+  }
+
+  return { ok: true };
 }
 
-export async function associateDealToLineItem(/* {
-  hubspotCredentialId,
-  dealHubspotId,
-  lineItemHubspotIds,
-  origin,
-} */) {
-  // Pendiente de implementación: ejecutar asociación deal ↔ productos
-  // (line_items). La función debe iterar de forma idempotente y respetar el
-  // orden de sincronización definido.
+async function associateDealWithProducts(hubspotCredentialId, dealId, lineItems = []) {
+  const token = await getToken(hubspotCredentialId);
+
+  if (!token || !dealId || !Array.isArray(lineItems)) {
+    return { ok: true };
+  }
+
+  for (const { productIdHubspot, quantity } of lineItems) {
+    if (!productIdHubspot) continue;
+
+    try {
+      const lineItem = await hubspotClient.createLineItem(token, {
+        properties: {
+          hs_product_id: productIdHubspot,
+          quantity,
+        },
+      });
+
+      const lineItemId = lineItem?.id;
+      if (!lineItemId) continue;
+
+      await hubspotClient.associateObjects(token, 'deal', dealId, 'line_item', lineItemId);
+    } catch (error) {
+      console.error('Failed to associate deal with product', {
+        dealId,
+        productIdHubspot,
+        error,
+      });
+    }
+  }
+
+  return { ok: true };
 }
 
-export default {
-  associateContactToCompany,
-  associateDealToContact,
-  associateDealToCompany,
-  associateDealToLineItem,
+export const associationService = {
+  associateDealWithContacts,
+  associateDealWithCompanies,
+  associateDealWithProducts,
 };
+
+export default associationService;
