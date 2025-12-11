@@ -156,15 +156,27 @@ export async function batchUpdate(token, dataArray) {
   );
 }
 
-export async function associateObjects(token, fromObjectType, fromObjectId, toObjectType, toObjectId) {
-  return hubspotRequest(
-    'put',
-    `/crm/v4/objects/${fromObjectType}/${fromObjectId}/associations/${toObjectType}/${toObjectId}`,
-    token,
-    [],
-  );
+export async function associateObjects(token, fromType, fromId, toType, toId) {
+  const url = `https://api.hubapi.com/crm/v4/objects/${fromType}/${fromId}/associations/${toType}/${toId}`;
+  const response = await axios.put(url, [], {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return response.data;
 }
 
-export async function createLineItem(token, data) {
-  return hubspotRequest('post', '/crm/v3/objects/line_items', token, data);
+export async function createLineItem(token, properties) {
+  const response = await axios.post(
+    'https://api.hubapi.com/crm/v3/objects/line_items',
+    properties,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  return response.data;
 }
