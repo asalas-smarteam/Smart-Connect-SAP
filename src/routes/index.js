@@ -10,6 +10,7 @@ import hubspotTestRoutes from './hubspotTest.routes.js';
 import sapSyncRoutes from './sapSync.routes.js';
 import dealMappingRoutes from './dealMapping.routes.js';
 import dealOwnerMappingRoutes from './dealOwnerMapping.routes.js';
+import associationTestRoutes from './associationTest.routes.js';
 
 export default async function routes(app) {
   app.register(echoRoutes, { prefix: '/echo_test' });
@@ -23,4 +24,5 @@ export default async function routes(app) {
   app.register(sapSyncRoutes);
   app.register(dealMappingRoutes);
   app.register(dealOwnerMappingRoutes);
+  app.register(associationTestRoutes);
 }
