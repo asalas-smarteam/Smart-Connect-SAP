@@ -3,6 +3,7 @@ import objectTypeRouter from './objectTypeRouter.js';
 import * as hubspotClient from './hubspotClient.js';
 import { sapUpdateService } from './sapUpdateService.js';
 import dealMappingResolver from './dealMappingResolver.js';
+import { getMappedOwnerId } from './dealOwnerMapping.service.js';
 
 const hubspotService = {
   async sendToHubSpot(mappedItems, clientConfig, objectType) {
@@ -95,6 +96,12 @@ const hubspotService = {
 
         item.properties.pipeline = pipeline.hubspotPipelineId;
         item.properties.dealstage = stage.hubspotStageId;
+
+        const sapOwnerId = item?.properties?.owner_id;
+        const mappedOwner = await getMappedOwnerId(clientConfig.hubspotCredentialId, sapOwnerId);
+        if (mappedOwner) {
+          item.properties.hubspot_owner_id = mappedOwner;
+        }
 
         const existing = await this.findDealByName(token, item?.properties?.dealname);
 

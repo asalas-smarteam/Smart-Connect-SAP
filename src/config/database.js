@@ -8,6 +8,7 @@ import defineSyncLog from '../db/models/SyncLog.js';
 import defineHubspotCredentials from '../db/models/HubspotCredentials.js';
 import defineDealPipelineMapping from '../db/models/DealPipelineMapping.js';
 import defineDealStageMapping from '../db/models/DealStageMapping.js';
+import defineDealOwnerMapping from '../db/models/DealOwnerMapping.js';
 
 const {
   DB_HOST,
@@ -31,6 +32,7 @@ const SyncLog = defineSyncLog({ sequelize }, DataTypes);
 const HubspotCredentials = defineHubspotCredentials({ sequelize }, DataTypes);
 const DealPipelineMapping = defineDealPipelineMapping({ sequelize }, DataTypes);
 const DealStageMapping = defineDealStageMapping({ sequelize }, DataTypes);
+const DealOwnerMapping = defineDealOwnerMapping({ sequelize }, DataTypes);
 
 ClientConfig.belongsTo(IntegrationMode, { foreignKey: 'integrationModeId' });
 FieldMapping.belongsTo(ClientConfig, { foreignKey: 'clientConfigId' });
@@ -63,6 +65,7 @@ export {
   HubspotCredentials,
   DealPipelineMapping,
   DealStageMapping,
+  DealOwnerMapping,
 };
 
 export default {
@@ -76,4 +79,5 @@ export default {
   HubspotCredentials,
   DealPipelineMapping,
   DealStageMapping,
+  DealOwnerMapping,
 };
