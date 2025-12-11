@@ -4,7 +4,7 @@ import * as hubspotClient from "./hubspotClient.js";
 import { sapUpdateService } from "./sapUpdateService.js";
 import dealMappingResolver from "./dealMappingResolver.js";
 import { getMappedOwnerId } from "./dealOwnerMapping.service.js";
-// import associationService from "./associationService.js"; // se activará cuando el módulo de asociaciones esté listo
+import associationService from "./associationService.js";
 
 const hubspotService = {
   async sendToHubSpot(mappedItems, clientConfig, objectType) {
@@ -107,17 +107,44 @@ const hubspotService = {
 
       // --- buscar existente
       const existing = await handler.find();
+      let created;
 
       if (existing) {
         await handler.update(existing.id);
       } else {
-        const created = await handler.create();
+        created = await handler.create();
         await sapUpdateService.updateHubspotIdInSap(
           clientConfig,
           objectType,
           item?.properties ?? {},
           created?.id
         );
+      }
+
+      if (objectType === "deal") {
+        const hubspotId = existing?.id ?? created?.id;
+
+        if (hubspotId) {
+          const associatedContacts = item?.associations?.contacts || [];
+          const associatedCompanies = item?.associations?.companies || [];
+          const associatedProducts = item?.associations?.products || [];
+
+          await associationService.associateDealWithContacts(
+            token,
+            hubspotId,
+            associatedContacts
+          );
+          await associationService.associateDealWithCompanies(
+            token,
+            hubspotId,
+            associatedCompanies
+          );
+          await associationService.associateDealWithProducts(
+            token,
+            hubspotId,
+            associatedProducts
+          );
+        }
       }
 
       // Sincronización de asociaciones (diseño):
