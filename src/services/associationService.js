@@ -1,4 +1,5 @@
 import hubspotAuthService from './hubspotAuthService.js';
+import associationRegistryService from './associationRegistryService.js';
 import * as hubspotClient from './hubspotClient.js';
 
 async function getToken(hubspotCredentialId) {
@@ -14,18 +15,45 @@ async function getToken(hubspotCredentialId) {
   }
 }
 
-async function associateDealWithContacts(hubspotCredentialId, dealId, contactIds = []) {
-  const token = await getToken(hubspotCredentialId);
+async function resolveToken(token, hubspotCredentialId) {
+  if (token) return token;
+  return getToken(hubspotCredentialId);
+}
 
-  if (!token || !dealId || !Array.isArray(contactIds)) {
+async function associateDealWithContacts(
+  token,
+  hubspotCredentialId,
+  dealId,
+  sapContactIds = []
+) {
+  const resolvedToken = await resolveToken(token, hubspotCredentialId);
+
+  if (!resolvedToken || !dealId || !Array.isArray(sapContactIds)) {
     return { ok: true };
   }
 
-  for (const contactId of contactIds) {
-    if (!contactId) continue;
+  const contactHubspotIds = [];
+  for (const sapContactId of sapContactIds) {
+    const hubspotIdResolved = await associationRegistryService.findHubspotIdForSapId(
+      hubspotCredentialId,
+      'contact',
+      String(sapContactId)
+    );
 
+    if (hubspotIdResolved) {
+      contactHubspotIds.push(hubspotIdResolved);
+    }
+  }
+
+  for (const contactId of contactHubspotIds) {
     try {
-      await hubspotClient.associateObjects(token, 'deal', dealId, 'contact', contactId);
+      await hubspotClient.associateObjects(
+        resolvedToken,
+        'deal',
+        dealId,
+        'contact',
+        contactId
+      );
     } catch (error) {
       console.error('Failed to associate deal with contact', {
         dealId,
@@ -38,18 +66,40 @@ async function associateDealWithContacts(hubspotCredentialId, dealId, contactIds
   return { ok: true };
 }
 
-async function associateDealWithCompanies(hubspotCredentialId, dealId, companyIds = []) {
-  const token = await getToken(hubspotCredentialId);
+async function associateDealWithCompanies(
+  token,
+  hubspotCredentialId,
+  dealId,
+  sapCompanyIds = []
+) {
+  const resolvedToken = await resolveToken(token, hubspotCredentialId);
 
-  if (!token || !dealId || !Array.isArray(companyIds)) {
+  if (!resolvedToken || !dealId || !Array.isArray(sapCompanyIds)) {
     return { ok: true };
   }
 
-  for (const companyId of companyIds) {
-    if (!companyId) continue;
+  const companyHubspotIds = [];
+  for (const sapCompanyId of sapCompanyIds) {
+    const hubspotIdResolved = await associationRegistryService.findHubspotIdForSapId(
+      hubspotCredentialId,
+      'company',
+      String(sapCompanyId)
+    );
 
+    if (hubspotIdResolved) {
+      companyHubspotIds.push(hubspotIdResolved);
+    }
+  }
+
+  for (const companyId of companyHubspotIds) {
     try {
-      await hubspotClient.associateObjects(token, 'deal', dealId, 'company', companyId);
+      await hubspotClient.associateObjects(
+        resolvedToken,
+        'deal',
+        dealId,
+        'company',
+        companyId
+      );
     } catch (error) {
       console.error('Failed to associate deal with company', {
         dealId,
@@ -62,28 +112,60 @@ async function associateDealWithCompanies(hubspotCredentialId, dealId, companyId
   return { ok: true };
 }
 
-async function associateDealWithProducts(hubspotCredentialId, dealId, lineItems = []) {
-  const token = await getToken(hubspotCredentialId);
+async function associateDealWithProducts(
+  token,
+  hubspotCredentialId,
+  dealId,
+  sapProducts = []
+) {
+  const resolvedToken = await resolveToken(token, hubspotCredentialId);
 
-  if (!token || !dealId || !Array.isArray(lineItems)) {
+  if (!resolvedToken || !dealId || !Array.isArray(sapProducts)) {
     return { ok: true };
   }
 
-  for (const { productIdHubspot, quantity } of lineItems) {
+  const productLineItems = [];
+  for (const sapProduct of sapProducts) {
+    const sapProductId = sapProduct?.sapId ?? sapProduct;
+
+    const hubspotIdResolved = await associationRegistryService.findHubspotIdForSapId(
+      hubspotCredentialId,
+      'product',
+      String(sapProductId)
+    );
+
+    if (hubspotIdResolved) {
+      productLineItems.push({
+        productIdHubspot: hubspotIdResolved,
+        quantity: sapProduct?.qty ?? sapProduct?.quantity ?? null,
+      });
+    }
+  }
+
+  for (const { productIdHubspot, quantity } of productLineItems) {
     if (!productIdHubspot) continue;
 
     try {
-      const lineItem = await hubspotClient.createLineItem(token, {
-        properties: {
-          hs_product_id: productIdHubspot,
-          quantity,
-        },
+      const properties = { hs_product_id: productIdHubspot };
+
+      if (quantity !== undefined && quantity !== null) {
+        properties.quantity = quantity;
+      }
+
+      const lineItem = await hubspotClient.createLineItem(resolvedToken, {
+        properties,
       });
 
       const lineItemId = lineItem?.id;
       if (!lineItemId) continue;
 
-      await hubspotClient.associateObjects(token, 'deal', dealId, 'line_item', lineItemId);
+      await hubspotClient.associateObjects(
+        resolvedToken,
+        'deal',
+        dealId,
+        'line_item',
+        lineItemId
+      );
     } catch (error) {
       console.error('Failed to associate deal with product', {
         dealId,

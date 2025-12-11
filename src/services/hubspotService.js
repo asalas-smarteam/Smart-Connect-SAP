@@ -4,6 +4,7 @@ import * as hubspotClient from "./hubspotClient.js";
 import { sapUpdateService } from "./sapUpdateService.js";
 import dealMappingResolver from "./dealMappingResolver.js";
 import { getMappedOwnerId } from "./dealOwnerMapping.service.js";
+import associationRegistryService from "./associationRegistryService.js";
 import associationService from "./associationService.js";
 
 const hubspotService = {
@@ -119,6 +120,18 @@ const hubspotService = {
           item?.properties ?? {},
           created?.id
         );
+
+        const hubspotId = created?.id;
+        const sapId = item?.properties?.id_sap;
+
+        if (hubspotId && sapId) {
+          await associationRegistryService.registerBaseObjectMapping(
+            clientConfig.hubspotCredentialId,
+            objectType,
+            sapId,
+            hubspotId
+          );
+        }
       }
 
       if (objectType === "deal") {
@@ -131,16 +144,19 @@ const hubspotService = {
 
           await associationService.associateDealWithContacts(
             token,
+            clientConfig.hubspotCredentialId,
             hubspotId,
             associatedContacts
           );
           await associationService.associateDealWithCompanies(
             token,
+            clientConfig.hubspotCredentialId,
             hubspotId,
             associatedCompanies
           );
           await associationService.associateDealWithProducts(
             token,
+            clientConfig.hubspotCredentialId,
             hubspotId,
             associatedProducts
           );

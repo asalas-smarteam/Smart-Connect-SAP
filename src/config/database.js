@@ -9,7 +9,7 @@ import defineHubspotCredentials from '../db/models/HubspotCredentials.js';
 import defineDealPipelineMapping from '../db/models/DealPipelineMapping.js';
 import defineDealStageMapping from '../db/models/DealStageMapping.js';
 import defineDealOwnerMapping from '../db/models/DealOwnerMapping.js';
-import defineAssociationConfig from '../db/models/AssociationConfig.js';
+import defineAssociationRegistry from '../db/models/AssociationRegistry.js';
 
 const {
   DB_HOST,
@@ -34,7 +34,7 @@ const HubspotCredentials = defineHubspotCredentials({ sequelize }, DataTypes);
 const DealPipelineMapping = defineDealPipelineMapping({ sequelize }, DataTypes);
 const DealStageMapping = defineDealStageMapping({ sequelize }, DataTypes);
 const DealOwnerMapping = defineDealOwnerMapping({ sequelize }, DataTypes);
-const AssociationConfig = defineAssociationConfig({ sequelize }, DataTypes);
+const AssociationRegistry = defineAssociationRegistry({ sequelize }, DataTypes);
 
 ClientConfig.belongsTo(IntegrationMode, { foreignKey: 'integrationModeId' });
 FieldMapping.belongsTo(ClientConfig, { foreignKey: 'clientConfigId' });
@@ -68,7 +68,7 @@ export {
   DealPipelineMapping,
   DealStageMapping,
   DealOwnerMapping,
-  AssociationConfig
+  AssociationRegistry
 };
 
 export default {
@@ -83,5 +83,5 @@ export default {
   DealPipelineMapping,
   DealStageMapping,
   DealOwnerMapping,
-  AssociationConfig
+  AssociationRegistry
 };

@@ -18,9 +18,24 @@ export default async function routes(app) {
         return reply.status(400).send({ ok: false, message: 'Failed to retrieve access token' });
       }
 
-      await associationService.associateDealWithContacts(hubspotCredentialId, dealId, contacts);
-      await associationService.associateDealWithCompanies(hubspotCredentialId, dealId, companies);
-      await associationService.associateDealWithProducts(hubspotCredentialId, dealId, products);
+      await associationService.associateDealWithContacts(
+        token,
+        hubspotCredentialId,
+        dealId,
+        contacts
+      );
+      await associationService.associateDealWithCompanies(
+        token,
+        hubspotCredentialId,
+        dealId,
+        companies
+      );
+      await associationService.associateDealWithProducts(
+        token,
+        hubspotCredentialId,
+        dealId,
+        products
+      );
 
       return reply.send({ ok: true });
     } catch (error) {
