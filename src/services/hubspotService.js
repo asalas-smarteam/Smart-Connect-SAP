@@ -85,6 +85,12 @@ const hubspotService = {
           update: (id) => this.updateDeal(token, id, item),
           create: () => this.createDeal(token, item),
         },
+
+        product: {
+          find: () => this.findProductBySKU(token, item?.properties?.hs_sku),
+          update: (id) => this.updateProduct(token, id, item),
+          create: () => this.createProduct(token, item),
+        },
       };
 
       // --- validar objeto soportado
@@ -169,6 +175,23 @@ const hubspotService = {
 
   async updateDeal(token, id, data) {
     return hubspotClient.updateDeal(token, id, data);
+  },
+
+  async findProductBySKU(token, sku) {
+    if (!sku) {
+      return null;
+    }
+
+    return hubspotClient.findProductBySKU(token, sku);
+  },
+
+  async createProduct(token, data) {
+    const response = await hubspotClient.createProduct(token, data);
+    return response;
+  },
+
+  async updateProduct(token, id, data) {
+    return hubspotClient.updateProduct(token, id, data);
   },
 };
 

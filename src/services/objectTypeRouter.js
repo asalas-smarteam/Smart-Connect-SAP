@@ -11,6 +11,10 @@ export function getObjectTypeHandler(objectType) {
     return 'deals';
   }
 
+  if (objectType === 'product') {
+    return 'products';
+  }
+
   return null;
 }
 
