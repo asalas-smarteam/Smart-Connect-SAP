@@ -1,13 +1,15 @@
-import hubspotAuthService from './hubspotAuthService.js';
-import objectTypeRouter from './objectTypeRouter.js';
-import * as hubspotClient from './hubspotClient.js';
-import { sapUpdateService } from './sapUpdateService.js';
-import dealMappingResolver from './dealMappingResolver.js';
-import { getMappedOwnerId } from './dealOwnerMapping.service.js';
+import hubspotAuthService from "./hubspotAuthService.js";
+import objectTypeRouter from "./objectTypeRouter.js";
+import * as hubspotClient from "./hubspotClient.js";
+import { sapUpdateService } from "./sapUpdateService.js";
+import dealMappingResolver from "./dealMappingResolver.js";
+import { getMappedOwnerId } from "./dealOwnerMapping.service.js";
 
 const hubspotService = {
   async sendToHubSpot(mappedItems, clientConfig, objectType) {
-    const token = await hubspotAuthService.getAccessToken(clientConfig.hubspotCredentialId);
+    const token = await hubspotAuthService.getAccessToken(
+      clientConfig.hubspotCredentialId
+    );
     const handler = objectTypeRouter.getObjectTypeHandler(objectType);
 
     if (!handler) {
@@ -18,7 +20,12 @@ const hubspotService = {
     let failed = 0;
 
     for (const item of mappedItems) {
-      const result = await this.processSingleItem(token, objectType, item, clientConfig);
+      const result = await this.processSingleItem(
+        token,
+        objectType,
+        item,
+        clientConfig
+      );
       if (result.ok) {
         sent += 1;
       } else {
@@ -31,99 +38,84 @@ const hubspotService = {
 
   async processSingleItem(token, objectType, item, clientConfig) {
     try {
-      if (objectType === 'contact') {
-        const existing = await this.findContactByEmail(token, item?.properties?.email);
+      const handlers = {
+        contact: {
+          find: () => this.findContactByEmail(token, item?.properties?.email),
+          update: (id) => this.updateContact(token, id, item),
+          create: () => this.createContact(token, item),
+        },
 
-        if (existing) {
-          await this.updateContact(token, existing.id, item);
-        } else {
-          const created = await this.createContact(token, item);
-          const hubspotId = created?.id;
+        company: {
+          find: () => this.findCompanyByDomain(token, item?.properties?.domain),
+          update: (id) => this.updateCompany(token, id, item),
+          create: () => this.createCompany(token, item),
+        },
 
-          await sapUpdateService.updateHubspotIdInSap(
-            clientConfig,
-            objectType,
-            item?.properties ?? {},
-            hubspotId,
-          );
-        }
+        deal: {
+          preprocess: async () => {
+            // Pipeline mapping
+            const { pipeline, dealstage, hubspot_owner_id } =
+              item.properties ?? {};
 
-        return { ok: true };
+            const mappedPipeline = await dealMappingResolver.resolvePipeline(
+              clientConfig.hubspotCredentialId,
+              pipeline
+            );
+            if (!mappedPipeline) throw new Error("Pipeline mapping not found.");
+
+            const mappedStage = await dealMappingResolver.resolveStage(
+              clientConfig.hubspotCredentialId,
+              pipeline,
+              dealstage
+            );
+            if (!mappedStage) throw new Error("Stage mapping not found.");
+
+            item.properties.pipeline = mappedPipeline.hubspotPipelineId;
+            item.properties.dealstage = mappedStage.hubspotStageId;
+
+            // Owner mapping
+            const mappedOwner = await getMappedOwnerId(
+              clientConfig.hubspotCredentialId,
+              hubspot_owner_id
+            );
+            if (mappedOwner) item.properties.hubspot_owner_id = mappedOwner;
+          },
+
+          find: () => this.findDealByName(token, item?.properties?.dealname),
+          update: (id) => this.updateDeal(token, id, item),
+          create: () => this.createDeal(token, item),
+        },
+      };
+
+      // --- validar objeto soportado
+      const handler = handlers[objectType];
+      if (!handler) {
+        throw new Error(`Unsupported object type: ${objectType}`);
       }
 
-      if (objectType === 'company') {
-        const existing = await this.findCompanyByDomain(token, item?.properties?.domain);
-
-        if (existing) {
-          await this.updateCompany(token, existing.id, item);
-        } else {
-          const created = await this.createCompany(token, item);
-          const hubspotId = created?.id;
-
-          await sapUpdateService.updateHubspotIdInSap(
-            clientConfig,
-            objectType,
-            item?.properties ?? {},
-            hubspotId,
-          );
-        }
-
-        return { ok: true };
+      // --- ejecutar preprocesamiento si existe
+      if (handler.preprocess) {
+        await handler.preprocess();
       }
 
-      if (objectType === 'deal') {
-        const sapPipelineKey = item?.properties?.pipeline;
-        const sapStageKey = item?.properties?.dealstage;
+      // --- buscar existente
+      const existing = await handler.find();
 
-        const pipeline = await dealMappingResolver.resolvePipeline(
-          clientConfig.hubspotCredentialId,
-          sapPipelineKey,
+      if (existing) {
+        await handler.update(existing.id);
+      } else {
+        const created = await handler.create();
+        await sapUpdateService.updateHubspotIdInSap(
+          clientConfig,
+          objectType,
+          item?.properties ?? {},
+          created?.id
         );
-
-        if (!pipeline) {
-          throw new Error('Pipeline mapping not found for deal.');
-        }
-
-        const stage = await dealMappingResolver.resolveStage(
-          clientConfig.hubspotCredentialId,
-          sapPipelineKey,
-          sapStageKey,
-        );
-
-        if (!stage) {
-          throw new Error('Stage mapping not found for deal.');
-        }
-
-        item.properties.pipeline = pipeline.hubspotPipelineId;
-        item.properties.dealstage = stage.hubspotStageId;
-
-        const sapOwnerId = item?.properties?.owner_id;
-        const mappedOwner = await getMappedOwnerId(clientConfig.hubspotCredentialId, sapOwnerId);
-        if (mappedOwner) {
-          item.properties.hubspot_owner_id = mappedOwner;
-        }
-
-        const existing = await this.findDealByName(token, item?.properties?.dealname);
-
-        if (existing) {
-          await this.updateDeal(token, existing.id, item);
-        } else {
-          const created = await this.createDeal(token, item);
-          const hubspotId = created?.id;
-
-          await sapUpdateService.updateHubspotIdInSap(
-            clientConfig,
-            objectType,
-            item?.properties ?? {},
-            hubspotId,
-          );
-        }
-
-        return { ok: true };
       }
 
-      throw new Error(`Unsupported object type: ${objectType}`);
+      return { ok: true };
     } catch (error) {
+      console.error("processSingleItem error:", error);
       return { ok: false };
     }
   },
