@@ -32,18 +32,11 @@ async function associateDealWithContacts(
     return { ok: true };
   }
 
-  const contactHubspotIds = [];
-  for (const sapContactId of sapContactIds) {
-    const hubspotIdResolved = await associationRegistryService.findHubspotIdForSapId(
-      hubspotCredentialId,
-      'contact',
-      String(sapContactId)
-    );
-
-    if (hubspotIdResolved) {
-      contactHubspotIds.push(hubspotIdResolved);
-    }
-  }
+  const contactHubspotIds = await resolveHubspotIdsFromEntries(
+    sapContactIds,
+    hubspotCredentialId,
+    'contact'
+  );
 
   for (const contactId of contactHubspotIds) {
     try {
@@ -78,18 +71,11 @@ async function associateDealWithCompanies(
     return { ok: true };
   }
 
-  const companyHubspotIds = [];
-  for (const sapCompanyId of sapCompanyIds) {
-    const hubspotIdResolved = await associationRegistryService.findHubspotIdForSapId(
-      hubspotCredentialId,
-      'company',
-      String(sapCompanyId)
-    );
-
-    if (hubspotIdResolved) {
-      companyHubspotIds.push(hubspotIdResolved);
-    }
-  }
+  const companyHubspotIds = await resolveHubspotIdsFromEntries(
+    sapCompanyIds,
+    hubspotCredentialId,
+    'company'
+  );
 
   for (const companyId of companyHubspotIds) {
     try {
@@ -124,23 +110,10 @@ async function associateDealWithProducts(
     return { ok: true };
   }
 
-  const productLineItems = [];
-  for (const sapProduct of sapProducts) {
-    const sapProductId = sapProduct?.sapId ?? sapProduct;
-
-    const hubspotIdResolved = await associationRegistryService.findHubspotIdForSapId(
-      hubspotCredentialId,
-      'product',
-      String(sapProductId)
-    );
-
-    if (hubspotIdResolved) {
-      productLineItems.push({
-        productIdHubspot: hubspotIdResolved,
-        quantity: sapProduct?.qty ?? sapProduct?.quantity ?? null,
-      });
-    }
-  }
+  const productLineItems = await resolveProductEntries(
+    sapProducts,
+    hubspotCredentialId
+  );
 
   for (const { productIdHubspot, quantity } of productLineItems) {
     if (!productIdHubspot) continue;
@@ -176,6 +149,65 @@ async function associateDealWithProducts(
   }
 
   return { ok: true };
+}
+
+async function resolveHubspotIdsFromEntries(entries, hubspotCredentialId, objectType) {
+  const resolvedHubspotIds = [];
+
+  for (const entry of entries) {
+    const hubspotIdDirect = entry?.hubspotId;
+    if (hubspotIdDirect) {
+      resolvedHubspotIds.push(hubspotIdDirect);
+      continue;
+    }
+
+    const sapId = entry?.sapId ?? entry;
+    if (!sapId) {
+      continue;
+    }
+
+    const hubspotId = await associationRegistryService.findHubspotIdForSapId(
+      hubspotCredentialId,
+      objectType,
+      String(sapId)
+    );
+
+    if (hubspotId) {
+      resolvedHubspotIds.push(hubspotId);
+    }
+  }
+
+  return resolvedHubspotIds;
+}
+
+async function resolveProductEntries(products, hubspotCredentialId) {
+  const productLineItems = [];
+
+  for (const product of products) {
+    const hubspotIdDirect = product?.hubspotId;
+    const sapId = product?.sapId ?? product;
+
+    if (!hubspotIdDirect && !sapId) {
+      continue;
+    }
+
+    const hubspotId =
+      hubspotIdDirect ||
+      (await associationRegistryService.findHubspotIdForSapId(
+        hubspotCredentialId,
+        'product',
+        sapId ? String(sapId) : null
+      ));
+
+    if (hubspotId) {
+      productLineItems.push({
+        productIdHubspot: hubspotId,
+        quantity: product?.qty ?? product?.quantity ?? null,
+      });
+    }
+  }
+
+  return productLineItems;
 }
 
 export const associationService = {

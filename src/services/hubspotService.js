@@ -6,6 +6,8 @@ import dealMappingResolver from "./dealMappingResolver.js";
 import { getMappedOwnerId } from "./dealOwnerMapping.service.js";
 import associationRegistryService from "./associationRegistryService.js";
 import associationService from "./associationService.js";
+import axios from "axios";
+import { getConnection } from "../utils/externalDb.js";
 
 const hubspotService = {
   async sendToHubSpot(mappedItems, clientConfig, objectType) {
@@ -138,27 +140,63 @@ const hubspotService = {
         const hubspotId = existing?.id ?? created?.id;
 
         if (hubspotId) {
-          const associatedContacts = item?.associations?.contacts || [];
-          const associatedCompanies = item?.associations?.companies || [];
-          const associatedProducts = item?.associations?.products || [];
+          const associationsRoot = item?.properties?.associations || {};
+
+          let associatedContacts = associationsRoot.contacts || [];
+          let associatedCompanies = associationsRoot.companies || [];
+          let associatedProducts = associationsRoot.products || [];
+
+          if (
+            associatedContacts.length === 0 &&
+            associatedCompanies.length === 0 &&
+            associatedProducts.length === 0 &&
+            clientConfig.associationFetchEnabled
+          ) {
+            const fallback = await this.fetchAssociationsIfNeeded(
+              clientConfig,
+              "deal"
+            );
+
+            if (fallback) {
+              associatedContacts = fallback.contacts || [];
+              associatedCompanies = fallback.companies || [];
+              associatedProducts = fallback.products || [];
+            }
+          }
+
+          const contactAssociations = await this.resolveAssociationIds(
+            clientConfig,
+            "contact",
+            associatedContacts
+          );
+          const companyAssociations = await this.resolveAssociationIds(
+            clientConfig,
+            "company",
+            associatedCompanies
+          );
+          const productAssociations = await this.resolveAssociationIds(
+            clientConfig,
+            "product",
+            associatedProducts
+          );
 
           await associationService.associateDealWithContacts(
             token,
             clientConfig.hubspotCredentialId,
             hubspotId,
-            associatedContacts
+            contactAssociations
           );
           await associationService.associateDealWithCompanies(
             token,
             clientConfig.hubspotCredentialId,
             hubspotId,
-            associatedCompanies
+            companyAssociations
           );
           await associationService.associateDealWithProducts(
             token,
             clientConfig.hubspotCredentialId,
             hubspotId,
-            associatedProducts
+            productAssociations
           );
         }
       }
@@ -257,6 +295,156 @@ const hubspotService = {
 
   async updateProduct(token, id, data) {
     return hubspotClient.updateProduct(token, id, data);
+  },
+
+  async fetchAssociationsIfNeeded(clientConfig, objectType) {
+    if (!clientConfig?.associationFetchEnabled) {
+      return null;
+    }
+
+    const configArray = clientConfig.associationFetchConfig;
+
+    if (!Array.isArray(configArray) || configArray.length === 0) {
+      return null;
+    }
+
+    const associationTypes =
+      objectType === "deal"
+        ? ["contact", "company", "product"]
+        : [objectType];
+
+    const aggregated = {
+      contacts: [],
+      companies: [],
+      products: [],
+    };
+
+    let hasConfig = false;
+
+    for (const associationType of associationTypes) {
+      const config = configArray.find(
+        (entry) => entry?.objectType === associationType
+      );
+
+      if (!config) {
+        continue;
+      }
+
+      hasConfig = true;
+      const rawResult = await this.executeAssociationFetch(
+        config,
+        clientConfig
+      );
+      const normalized = this.normalizeAssociationValues(
+        rawResult,
+        associationType
+      );
+
+      const key =
+        associationType === "contact"
+          ? "contacts"
+          : associationType === "company"
+          ? "companies"
+          : "products";
+
+      aggregated[key] = normalized;
+    }
+
+    if (!hasConfig) {
+      return null;
+    }
+
+    return aggregated;
+  },
+
+  async executeAssociationFetch(config, clientConfig) {
+    const fetchType = config?.associationFetchType;
+    const fetchConfig = config?.associationFetchConfig;
+
+    if (!fetchType || !fetchConfig) {
+      return {};
+    }
+
+    if (fetchType === "api") {
+      const response = await axios({
+        method: fetchConfig.method || "GET",
+        url: fetchConfig.url,
+      });
+
+      return response?.data ?? response;
+    }
+
+    if (fetchType === "sp") {
+      const storedProcedure =
+        fetchConfig.storedProcedure || fetchConfig.storeProcedureName;
+
+      if (!storedProcedure) {
+        return {};
+      }
+
+      const externalSequelize = getConnection(clientConfig);
+      const [results] = await externalSequelize.query(`EXEC ${storedProcedure}`);
+
+      return results ?? {};
+    }
+
+    return {};
+  },
+
+  normalizeAssociationValues(rawResult, associationType) {
+    const key =
+      associationType === "contact"
+        ? "contacts"
+        : associationType === "company"
+        ? "companies"
+        : "products";
+
+    if (Array.isArray(rawResult)) {
+      return rawResult;
+    }
+
+    if (!rawResult || typeof rawResult !== "object") {
+      return [];
+    }
+
+    if (Array.isArray(rawResult[key])) {
+      return rawResult[key];
+    }
+
+    if (Array.isArray(rawResult[associationType])) {
+      return rawResult[associationType];
+    }
+
+    return [];
+  },
+
+  async resolveAssociationIds(clientConfig, objectType, associationValues) {
+    if (!Array.isArray(associationValues)) {
+      return [];
+    }
+
+    const hubspotCredentialId = clientConfig?.hubspotCredentialId;
+    const isProduct = objectType === "product";
+    const resolved = [];
+
+    for (const value of associationValues) {
+      const sapId = value?.sapId ?? value;
+      const quantity = value?.qty ?? value?.quantity ?? null;
+
+      const hubspotId = await associationRegistryService.findHubspotIdForSapId(
+        hubspotCredentialId,
+        objectType,
+        sapId ? String(sapId) : null
+      );
+
+      if (isProduct) {
+        resolved.push({ hubspotId, sapId, qty: quantity });
+      } else {
+        resolved.push({ hubspotId, sapId });
+      }
+    }
+
+    return resolved;
   },
 };
 
