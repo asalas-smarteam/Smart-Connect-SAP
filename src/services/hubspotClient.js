@@ -77,6 +77,7 @@ export async function createContact(token, data) {
 }
 
 export async function updateContact(token, id, data) {
+  delete data.properties?.hs_object_id; // Prevent updating hs_object_id to avoid conflicts
   return hubspotRequest('patch', `/crm/v3/objects/contacts/${id}`, token, data);
 }
 
@@ -95,6 +96,7 @@ export async function createCompany(token, data) {
 }
 
 export async function updateCompany(token, id, data) {
+  delete data.properties?.hs_object_id; // Prevent updating hs_object_id to avoid conflicts
   return hubspotRequest('patch', `/crm/v3/objects/companies/${id}`, token, data);
 }
 
@@ -113,6 +115,7 @@ export async function createDeal(token, data) {
 }
 
 export async function updateDeal(token, id, data) {
+  delete data.properties?.hs_object_id; // Prevent updating hs_object_id to avoid conflicts
   return hubspotRequest('patch', `/crm/v3/objects/deals/${id}`, token, data);
 }
 
