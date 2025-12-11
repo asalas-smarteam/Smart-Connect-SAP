@@ -3,9 +3,11 @@ import { FieldMapping } from '../config/database.js';
 const mapFields = (inputData, mappings) => {
   const result = {};
 
-  mappings.forEach((m) => {
-    result[m.targetField] = inputData[m.sourceField] || null;
-  });
+  mappings
+    .filter((mapping) => mapping.isActive ?? true)
+    .forEach((m) => {
+      result[m.targetField] = inputData[m.sourceField] || null;
+    });
 
   return {properties: result};
 };

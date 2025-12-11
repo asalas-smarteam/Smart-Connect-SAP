@@ -23,6 +23,11 @@ export default function FieldMapping({ sequelize }, DataTypes) {
         type: DataTypes.INTEGER,
         allowNull: true,
       },
+      isActive: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: true,
+        allowNull: false,
+      },
     },
     {
       timestamps: false,
