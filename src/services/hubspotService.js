@@ -71,8 +71,8 @@ const hubspotService = {
       }
 
       if (objectType === 'deal') {
-        const sapPipelineKey = item?.properties?.sapPipelineKey;
-        const sapStageKey = item?.properties?.sapStageKey;
+        const sapPipelineKey = item?.properties?.pipeline;
+        const sapStageKey = item?.properties?.dealstage;
 
         const pipeline = await dealMappingResolver.resolvePipeline(
           clientConfig.hubspotCredentialId,
