@@ -4,6 +4,7 @@ import * as hubspotClient from "./hubspotClient.js";
 import { sapUpdateService } from "./sapUpdateService.js";
 import dealMappingResolver from "./dealMappingResolver.js";
 import { getMappedOwnerId } from "./dealOwnerMapping.service.js";
+// import associationService from "./associationService.js"; // se activará cuando el módulo de asociaciones esté listo
 
 const hubspotService = {
   async sendToHubSpot(mappedItems, clientConfig, objectType) {
@@ -118,6 +119,27 @@ const hubspotService = {
           created?.id
         );
       }
+
+      // Sincronización de asociaciones (diseño):
+      // - Este bloque debe ejecutarse únicamente después de crear/actualizar el deal
+      //   y contar con un hubspotId confirmado.
+      // - Debe identificar contactos, empresas y productos relacionados mediante
+      //   el mapping actual y la tabla AssociationConfig (multi-tenant por
+      //   hubspotCredentialId).
+      // - Luego, llamar a associationService para cada relación:
+      //   associateDealToContact, associateDealToCompany y
+      //   associateDealToLineItem.
+      // - Mantener separada la lógica de asociaciones para no impactar el flujo
+      //   existente de contactos, empresas y productos.
+
+      // Ejemplo (pendiente de implementación):
+      // if (objectType === "deal") {
+      //   const hubspotId = existing?.id ?? created?.id;
+      //   // resolver relaciones a partir de mappings y AssociationConfig
+      //   await associationService.associateDealToContact({ ... });
+      //   await associationService.associateDealToCompany({ ... });
+      //   await associationService.associateDealToLineItem({ ... });
+      // }
 
       return { ok: true };
     } catch (error) {
