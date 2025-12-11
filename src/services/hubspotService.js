@@ -122,7 +122,7 @@ const hubspotService = {
         );
 
         const hubspotId = created?.id;
-        const sapId = item?.properties?.id_sap;
+        const sapId = item?.properties?.sap_id;
 
         if (hubspotId && sapId) {
           await associationRegistryService.registerBaseObjectMapping(
