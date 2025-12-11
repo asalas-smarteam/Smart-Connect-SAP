@@ -1,6 +1,6 @@
 import { FieldMapping } from '../config/database.js';
 
-const mapFields = (inputData, mappings) => {
+const mapFields = (inputData, mappings, objectType) => {
   const result = {};
 
   mappings
@@ -9,7 +9,23 @@ const mapFields = (inputData, mappings) => {
       result[m.targetField] = inputData[m.sourceField] || null;
     });
 
-  return {properties: result};
+  const mappedFields = { properties: result };
+
+  if (objectType === 'deal') {
+    const specialDealFields = [
+      'associatedContacts',
+      'associatedCompanies',
+      'associatedProducts',
+    ];
+
+    specialDealFields.forEach((field) => {
+      if (Object.prototype.hasOwnProperty.call(inputData, field)) {
+        mappedFields[field] = inputData[field];
+      }
+    });
+  }
+
+  return mappedFields;
 };
 
 const mappingService = {
@@ -33,7 +49,7 @@ const mappingService = {
     try {
       const mappings = await this.getMappings(hubspotCredentialId, objectType);
 
-      return sapRecords.map((record) => mapFields(record, mappings));
+      return sapRecords.map((record) => mapFields(record, mappings, objectType));
     } catch (error) {
       console.error('Failed to apply mappings:', error);
       return [];
@@ -44,7 +60,7 @@ const mappingService = {
     try {
       const mappings = await this.getMappings(hubspotCredentialId, objectType);
 
-      return mapFields(inputData, mappings);
+      return mapFields(inputData, mappings, objectType);
     } catch (error) {
       console.error('Failed to apply mappings:', error);
       return {};
