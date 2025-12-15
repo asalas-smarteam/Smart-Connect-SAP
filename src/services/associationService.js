@@ -20,84 +20,6 @@ async function resolveToken(token, hubspotCredentialId) {
   return getToken(hubspotCredentialId);
 }
 
-async function associateDealWithContacts(
-  token,
-  hubspotCredentialId,
-  dealId,
-  sapContactIds = []
-) {
-  const resolvedToken = await resolveToken(token, hubspotCredentialId);
-
-  if (!resolvedToken || !dealId || !Array.isArray(sapContactIds)) {
-    return { ok: true };
-  }
-
-  const contactHubspotIds = await resolveHubspotIdsFromEntries(
-    sapContactIds,
-    hubspotCredentialId,
-    'contact'
-  );
-
-  for (const contactId of contactHubspotIds) {
-    try {
-      await hubspotClient.associateObjects(
-        resolvedToken,
-        'deal',
-        dealId,
-        'contact',
-        contactId
-      );
-    } catch (error) {
-      console.error('Failed to associate deal with contact', {
-        dealId,
-        contactId,
-        error,
-      });
-    }
-  }
-
-  return { ok: true };
-}
-
-async function associateDealWithCompanies(
-  token,
-  hubspotCredentialId,
-  dealId,
-  sapCompanyIds = []
-) {
-  const resolvedToken = await resolveToken(token, hubspotCredentialId);
-
-  if (!resolvedToken || !dealId || !Array.isArray(sapCompanyIds)) {
-    return { ok: true };
-  }
-
-  const companyHubspotIds = await resolveHubspotIdsFromEntries(
-    sapCompanyIds,
-    hubspotCredentialId,
-    'company'
-  );
-
-  for (const companyId of companyHubspotIds) {
-    try {
-      await hubspotClient.associateObjects(
-        resolvedToken,
-        'deal',
-        dealId,
-        'company',
-        companyId
-      );
-    } catch (error) {
-      console.error('Failed to associate deal with company', {
-        dealId,
-        companyId,
-        error,
-      });
-    }
-  }
-
-  return { ok: true };
-}
-
 async function associateDealWithProducts(
   token,
   hubspotCredentialId,
@@ -210,10 +132,126 @@ async function resolveProductEntries(products, hubspotCredentialId) {
   return productLineItems;
 }
 
+async function associateObjectsBySapId(
+  token,
+  hubspotCredentialId,
+  fromObjectType,
+  fromHubspotId,
+  toObjectType,
+  sapEntries = []
+) {
+  const resolvedToken = await resolveToken(token, hubspotCredentialId);
+
+  if (
+    !resolvedToken ||
+    !fromHubspotId ||
+    !fromObjectType ||
+    !toObjectType ||
+    !Array.isArray(sapEntries)
+  ) {
+    return { ok: true };
+  }
+
+  const toHubspotIds = await resolveHubspotIdsFromEntries(
+    sapEntries,
+    hubspotCredentialId,
+    toObjectType
+  );
+
+  for (const toHubspotId of toHubspotIds) {
+    try {
+      await hubspotClient.associateObjects(
+        resolvedToken,
+        fromObjectType,
+        fromHubspotId,
+        toObjectType,
+        toHubspotId
+      );
+    } catch (error) {
+      console.error('Failed to associate objects', {
+        fromObjectType,
+        fromHubspotId,
+        toObjectType,
+        toHubspotId,
+        error,
+      });
+    }
+  }
+
+  return { ok: true };
+}
+
+async function associateDealWithContacts(
+  token,
+  hubspotCredentialId,
+  dealId,
+  sapContactIds = []
+) {
+  return associateObjectsBySapId(
+    token,
+    hubspotCredentialId,
+    'deal',
+    dealId,
+    'contact',
+    sapContactIds
+  );
+}
+
+async function associateDealWithCompanies(
+  token,
+  hubspotCredentialId,
+  dealId,
+  sapCompanyIds = []
+) {
+  return associateObjectsBySapId(
+    token,
+    hubspotCredentialId,
+    'deal',
+    dealId,
+    'company',
+    sapCompanyIds
+  );
+}
+
+async function associateContactWithCompanies(
+  token,
+  hubspotCredentialId,
+  contactId,
+  sapCompanyIds = []
+) {
+  return associateObjectsBySapId(
+    token,
+    hubspotCredentialId,
+    'contact',
+    contactId,
+    'company',
+    sapCompanyIds
+  );
+}
+
+async function associateCompanyWithContacts(
+  token,
+  hubspotCredentialId,
+  companyId,
+  sapContactIds = []
+) {
+  return associateObjectsBySapId(
+    token,
+    hubspotCredentialId,
+    'company',
+    companyId,
+    'contact',
+    sapContactIds
+  );
+}
+
 export const associationService = {
   associateDealWithContacts,
   associateDealWithCompanies,
   associateDealWithProducts,
+  associateContactWithCompanies,
+  associateCompanyWithContacts,
+  associateObjectsBySapId,
 };
 
 export default associationService;
