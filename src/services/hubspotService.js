@@ -136,6 +136,78 @@ const hubspotService = {
         }
       }
 
+      if (objectType === "contact") {
+        const hubspotId = existing?.id ?? created?.id;
+
+        if (hubspotId) {
+          const associationsRoot = item?.properties?.associations || {};
+          let associatedCompanies = associationsRoot.companies || [];
+
+          if (
+            associatedCompanies.length === 0 &&
+            clientConfig.associationFetchEnabled
+          ) {
+            const fallback = await this.fetchAssociationsIfNeeded(
+              clientConfig,
+              "contact"
+            );
+
+            if (fallback) {
+              associatedCompanies = fallback.companies || [];
+            }
+          }
+
+          const companyAssociations = await this.resolveAssociationIds(
+            clientConfig,
+            "company",
+            associatedCompanies
+          );
+
+          await associationService.associateContactWithCompanies(
+            token,
+            clientConfig.hubspotCredentialId,
+            hubspotId,
+            companyAssociations
+          );
+        }
+      }
+
+      if (objectType === "company") {
+        const hubspotId = existing?.id ?? created?.id;
+
+        if (hubspotId) {
+          const associationsRoot = item?.properties?.associations || {};
+          let associatedContacts = associationsRoot.contacts || [];
+
+          if (
+            associatedContacts.length === 0 &&
+            clientConfig.associationFetchEnabled
+          ) {
+            const fallback = await this.fetchAssociationsIfNeeded(
+              clientConfig,
+              "company"
+            );
+
+            if (fallback) {
+              associatedContacts = fallback.contacts || [];
+            }
+          }
+
+          const contactAssociations = await this.resolveAssociationIds(
+            clientConfig,
+            "contact",
+            associatedContacts
+          );
+
+          await associationService.associateCompanyWithContacts(
+            token,
+            clientConfig.hubspotCredentialId,
+            hubspotId,
+            contactAssociations
+          );
+        }
+      }
+
       if (objectType === "deal") {
         const hubspotId = existing?.id ?? created?.id;
 
@@ -308,10 +380,11 @@ const hubspotService = {
       return null;
     }
 
-    const associationTypes =
-      objectType === "deal"
-        ? ["contact", "company", "product"]
-        : [objectType];
+    const associationTypes = this.getAssociationTypesForObject(objectType);
+
+    if (associationTypes.length === 0) {
+      return null;
+    }
 
     const aggregated = {
       contacts: [],
@@ -355,6 +428,22 @@ const hubspotService = {
     }
 
     return aggregated;
+  },
+
+  getAssociationTypesForObject(objectType) {
+    if (objectType === "deal") {
+      return ["contact", "company", "product"];
+    }
+
+    if (objectType === "contact") {
+      return ["company"];
+    }
+
+    if (objectType === "company") {
+      return ["contact"];
+    }
+
+    return [];
   },
 
   async executeAssociationFetch(config, clientConfig) {
