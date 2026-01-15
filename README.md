@@ -1,12 +1,12 @@
 # Smart-Connect-SAP
 
 ## 1. Descripción general
-Smart-Connect-SAP es un motor SaaS basado en Fastify que sincroniza datos desde fuentes SAP/BEST/SQL Server/MySQL hacia HubSpot CRM. La plataforma es multiinquilino: cada configuración de cliente define cómo ingerir datos SAP (llamada API, procedimiento almacenado o script SQL), cómo mapear campos SAP a propiedades de HubSpot y qué credenciales OAuth de HubSpot usar. Un motor de sincronización impulsado por cron se ejecuta en un intervalo fijo (cada minuto) para ingerir registros SAP, transformarlos mediante mapeos administrados en base de datos, enviarlos a HubSpot y, opcionalmente, escribir los IDs de HubSpot de vuelta en SAP.
+Smart-Connect-SAP es un motor SaaS basado en Fastify que sincroniza datos desde fuentes SAP/BEST hacia HubSpot CRM. La plataforma es multiinquilino: cada configuración de cliente define cómo ingerir datos SAP (llamada API, procedimiento almacenado o script SQL), cómo mapear campos SAP a propiedades de HubSpot y qué credenciales OAuth de HubSpot usar. Un motor de sincronización impulsado por cron se ejecuta en un intervalo fijo (cada minuto) para ingerir registros SAP, transformarlos mediante mapeos administrados en base de datos, enviarlos a HubSpot y, opcionalmente, escribir los IDs de HubSpot de vuelta en SAP. Las conexiones SQL externas (SQL Server/MySQL) son opcionales y quedan fuera de la migración principal a MongoDB.
 
 Capacidades clave:
 - **Motor de integración SaaS** con API HTTP en Fastify para configuración, OAuth, mapeos y disparo manual de sincronizaciones.
 - **Arquitectura multiinquilino** usando filas de `ClientConfig` por cliente y mapeos compartidos asociados a `hubspotCredentialId`.
-- **Opciones de ingesta SAP:** llamada API externa, ejecución de procedimiento almacenado o script SQL crudo contra una base externa (SQL Server/MySQL soportados mediante dialectos de Sequelize).
+- **Opciones de ingesta SAP:** llamada API externa, ejecución de procedimiento almacenado o script SQL crudo contra una base externa (SQL Server/MySQL opcional mediante dependencias externas).
 - **OAuth de HubSpot por cliente** con pares de `accessToken`/`refreshToken` almacenados.
 - **Capa de mapeo** (Field, Pipeline, Stage, Owner) para transformar los datos SAP en propiedades y IDs de HubSpot.
 - **Motor de sincronización** programado cada minuto; también admite disparo manual.
@@ -26,7 +26,7 @@ La plataforma se compone de las siguientes piezas en tiempo de ejecución:
 - **SyncService (`syncService.js`)**: ejecución por tarea: ingesta de datos SAP, mapeo de registros, upsert en HubSpot, registro de resultados y actualización de metadatos de corrida.
 - **Base de datos MongoDB (Mongoose)**: almacena configuraciones, mapeos, credenciales y bitácoras.
 - **Comportamiento multiinquilino**: los mapeos y filas de pipeline/etapa/owner se asocian a `hubspotCredentialId`, permitiendo que múltiples tareas `ClientConfig` compartan un mismo portal de HubSpot sin duplicar mapeos.
-- **Pooling de BD SAP (`utils/externalDb.js`)**: mantiene conexiones Sequelize por `clientConfigId` hacia BDs SAP/BEST para los modos SP/script y las actualizaciones de retorno.
+- **Pooling de BD SAP (`utils/externalDb.js`)**: mantiene conexiones SQL por `clientConfigId` para los modos SP/script y las actualizaciones de retorno (módulo opcional, fuera de la migración principal a MongoDB).
 
 ## 3. Estructura de carpetas
 ```
@@ -86,7 +86,7 @@ src/
 ```
 
 ## 4. Esquema de base de datos (detallado)
-Todos los esquemas principales usan **Mongoose/MongoDB**; los nombres de colección reflejan los modelos. Sequelize se usa únicamente para conexiones externas a bases SAP/BEST (SQL Server/MySQL) en los modos SP/script.
+Todos los esquemas principales usan **Mongoose/MongoDB**; los nombres de colección reflejan los modelos. Las conexiones externas SQL a SAP/BEST (SQL Server/MySQL) son opcionales y requieren dependencias adicionales, fuera de la migración principal.
 
 ### ClientConfig
 - **Propósito:** Define la configuración de ingesta SAP, vínculo de credenciales HubSpot, tipo de objeto y comportamiento de sincronización/backfill de un inquilino.
@@ -126,14 +126,15 @@ Todos los esquemas principales usan **Mongoose/MongoDB**; los nombres de colecci
 - **Uso en sincronización:** Unido en `sapService.fetchData()` para seleccionar la estrategia de ejecución.
 
 ## 5. Flujo de integración SAP
-- **Pooling en externalDb.js:** Mantiene una conexión Sequelize por `ClientConfig.id` hacia BDs SAP; se reutiliza para reducir sobrecarga.
-- **createExternalConnection vs getConnection:** `getConnection(config)` crea o reutiliza una instancia Sequelize identificada por `config.id`; `initializeExternalConnections()` precalienta pools para configuraciones activas al inicio de la app.
-- **Almacenamiento de credenciales:** Host/puerto/usuario/contraseña/nombre/dialecto de la BD externa se almacenan en `ClientConfig` y se pasan a Sequelize.
+- **Pooling en externalDb.js:** Mantiene una conexión SQL por `ClientConfig.id` hacia BDs SAP; se reutiliza para reducir sobrecarga (fuera de la migración principal a MongoDB).
+- **createExternalConnection vs getConnection:** `getConnection(config)` crea o reutiliza una conexión SQL identificada por `config.id`; `initializeExternalConnections()` precalienta pools para configuraciones activas al inicio de la app.
+- **Almacenamiento de credenciales:** Host/puerto/usuario/contraseña/nombre/dialecto de la BD externa se almacenan en `ClientConfig` y se usan para las conexiones SQL opcionales.
 - **Modos:**
   - **Modo API:** `apiMode.execute()` realiza GET a `apiUrl` con `Authorization: Bearer {apiToken}` opcional y devuelve JSON.
   - **Modo Procedimiento almacenado:** `spMode.execute()` ejecuta `EXEC {storeProcedureName}` mediante la conexión externa.
   - **Modo Script:** `scriptMode.execute()` ejecuta `sqlQuery` con semántica `SELECT`.
 - **Punto de entrada del mapeo:** `sapService.fetchData()` carga el `ClientConfig` con `IntegrationMode` y llama el modo adecuado; los resultados se envían a `mapping.service.mapRecords()`.
+- **Nota sobre SQL externo:** Para habilitar conexiones SQL externas instala dependencias opcionales (`sequelize` y el driver SQL correspondiente) y configura los campos `externalDb*`; este módulo queda fuera de la migración principal a MongoDB.
 
 ## 6. Motor de mapeo (SAP → HubSpot)
 - **mapRecords():** Carga filas activas de `FieldMapping` por `hubspotCredentialId` y `objectType`, luego proyecta cada registro SAP a `{ properties: { targetField: value } }` preservando el orden del mapeo.
@@ -203,7 +204,7 @@ Todos los esquemas principales usan **Mongoose/MongoDB**; los nombres de colecci
 - `HUBSPOT_SCOPES` – Scopes opcionales separados por coma/espacio agregados a la URL de autorización.
 - `MONGODB_URI` – Cadena de conexión MongoDB para metadatos de la aplicación.
 - `SAP_SYNC_CRON_ENABLED` – Si es `false`, desactiva el cron; el disparo manual sigue disponible.
-- Las credenciales de BD externa SAP se guardan por `ClientConfig` (`externalDbHost`, `externalDbPort`, `externalDbUser`, `externalDbPassword`, `externalDbName`, `externalDbDialect`).
+- Las credenciales de BD externa SAP se guardan por `ClientConfig` (`externalDbHost`, `externalDbPort`, `externalDbUser`, `externalDbPassword`, `externalDbName`, `externalDbDialect`) y solo aplican si se habilitan conexiones SQL externas.
 - `PORT` – Puerto del servidor HTTP (por defecto 3000).
 
 ### Tabla `.env`
@@ -240,7 +241,7 @@ La aplicación **no ejecuta migraciones Sequelize** (se eliminaron los stubs de 
 - Publicación en el marketplace de HubSpot.
 
 ## 16. Guía de despliegue
-- **Requisitos:** Node.js (soporte ESM), instancia MongoDB accesible desde la app, acceso de red a BDs SAP/BEST y a APIs de HubSpot.
+- **Requisitos:** Node.js (soporte ESM), instancia MongoDB accesible desde la app, acceso de red a APIs de HubSpot. Acceso a BDs SAP/BEST y dependencias SQL externas solo si se habilitan conexiones SQL opcionales.
 - **Configurar `.env`:** Define `MONGODB_URI`, valores OAuth de HubSpot y opcionalmente `SAP_SYNC_CRON_ENABLED`. Las credenciales de BD externa SAP viven en filas de BD, no en `.env`.
 - **Instalar e iniciar:**
   ```bash
@@ -248,7 +249,7 @@ La aplicación **no ejecuta migraciones Sequelize** (se eliminaron los stubs de 
   node src/server.js
   ```
 - **Ejecución del cron:** El proceso Fastify inicia el trabajo node-cron automáticamente salvo que esté deshabilitado; no se requiere worker separado.
-- **Firewall:** Garantiza acceso saliente a HubSpot y conectividad entrante/saliente a hosts/puertos SQL de SAP definidos en `ClientConfig`.
+- **Firewall:** Garantiza acceso saliente a HubSpot y conectividad entrante/saliente a hosts/puertos SQL de SAP definidos en `ClientConfig` si usas conexiones SQL externas.
 - **SSL/HTTPS:** Termina TLS con un proxy inverso o ubica Fastify detrás de un terminador HTTPS según necesidad.
 
 ## 17. Ejemplos de uso

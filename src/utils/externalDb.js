@@ -1,9 +1,23 @@
-import Sequelize from 'sequelize';
+import { createRequire } from 'module';
 import { ClientConfig } from '../config/database.js';
 import logger from '../core/logger.js';
 
 const pools = {};
 // Aquí se almacenarán las conexiones por clientConfigId
+// Nota: este módulo solo aplica a bases externas SQL y queda fuera de la migración principal a MongoDB.
+
+const require = createRequire(import.meta.url);
+
+function loadSequelize() {
+  try {
+    const sequelizeModule = require('sequelize');
+    return sequelizeModule?.default ?? sequelizeModule?.Sequelize ?? sequelizeModule;
+  } catch (error) {
+    throw new Error(
+      'External SQL connections are not part of the MongoDB migration. Install sequelize/mysql2 to enable this module.'
+    );
+  }
+}
 
 export function getConnection(config) {
   const key = config?.id;
@@ -15,6 +29,7 @@ export function getConnection(config) {
     return pools[key];
   }
 
+  const Sequelize = loadSequelize();
   const connection = new Sequelize(
     config.externalDbName,
     config.externalDbUser,
