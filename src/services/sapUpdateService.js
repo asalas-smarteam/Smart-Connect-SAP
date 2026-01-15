@@ -1,10 +1,5 @@
-import { DataTypes } from 'sequelize';
 import { getConnection } from '../utils/externalDb.js';
-import FieldMapping from '../db/models/FieldMapping.js';
-import { sequelize } from '../config/database.js';
-
-const FieldMappingModel =
-  sequelize.models.FieldMapping || FieldMapping({ sequelize }, DataTypes);
+import { FieldMapping } from '../config/database.js';
 
 export const sapUpdateService = {
   async updateHubspotIdInSap(clientConfig, objectType, sapRecord, hubspotId) {
@@ -13,7 +8,7 @@ export const sapUpdateService = {
         return;
       }
 
-      const mapping = await FieldMappingModel.findAll({
+      const mapping = await FieldMapping.findAll({
         where: {
           objectType,
           hubspotCredentialId: clientConfig?.hubspotCredentialId,
@@ -49,4 +44,3 @@ export const sapUpdateService = {
     }
   },
 };
-

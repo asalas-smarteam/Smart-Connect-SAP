@@ -201,7 +201,7 @@ Todos los esquemas usan Sequelize con dialecto MySQL; los nombres de tabla refle
 - `HUBSPOT_CLIENT_SECRET` – Secreto de cliente de la app HubSpot para OAuth.
 - `HUBSPOT_REDIRECT_URI` – URI de redirección usada en la URL de autorización e intercambio de token.
 - `HUBSPOT_SCOPES` – Scopes opcionales separados por coma/espacio agregados a la URL de autorización.
-- `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` – Conexión MySQL para metadatos de la aplicación.
+- `MONGODB_URI` – Cadena de conexión MongoDB para metadatos de la aplicación.
 - `SAP_SYNC_CRON_ENABLED` – Si es `false`, desactiva el cron; el disparo manual sigue disponible.
 - Las credenciales de BD externa SAP se guardan por `ClientConfig` (`externalDbHost`, `externalDbPort`, `externalDbUser`, `externalDbPassword`, `externalDbName`, `externalDbDialect`).
 - `PORT` – Puerto del servidor HTTP (por defecto 3000).
@@ -213,11 +213,7 @@ Todos los esquemas usan Sequelize con dialecto MySQL; los nombres de tabla refle
 | `HUBSPOT_CLIENT_SECRET` | Secreto de cliente de la aplicación de HubSpot para el flujo OAuth. |
 | `HUBSPOT_REDIRECT_URI` | URI de redirección registrada en HubSpot usada en init/callback. |
 | `HUBSPOT_SCOPES` | Lista opcional de scopes separados por coma o espacio para la URL de autorización. |
-| `DB_HOST` | Host de MySQL que almacena configuraciones, mapeos, credenciales y logs. |
-| `DB_PORT` | Puerto de MySQL. |
-| `DB_USER` | Usuario de MySQL con permisos de lectura/escritura. |
-| `DB_PASSWORD` | Contraseña del usuario de MySQL. |
-| `DB_NAME` | Nombre de la base de datos MySQL que contiene los modelos Sequelize. |
+| `MONGODB_URI` | URI de MongoDB que almacena configuraciones, mapeos, credenciales y logs. |
 | `SAP_SYNC_CRON_ENABLED` | Si está en `false`, evita que el cron arranque; permite solo disparo manual. |
 | `PORT` | Puerto en el que se levanta Fastify (3000 por defecto). |
 
@@ -233,8 +229,8 @@ Todos los esquemas usan Sequelize con dialecto MySQL; los nombres de tabla refle
 - Publicación en el marketplace de HubSpot.
 
 ## 15. Guía de despliegue
-- **Requisitos:** Node.js (soporte ESM), instancia MySQL accesible desde la app, acceso de red a BDs SAP/BEST y a APIs de HubSpot.
-- **Configurar `.env`:** Define credenciales MySQL, valores OAuth de HubSpot y opcionalmente `SAP_SYNC_CRON_ENABLED`. Las credenciales de BD externa SAP viven en filas de BD, no en `.env`.
+- **Requisitos:** Node.js (soporte ESM), instancia MongoDB accesible desde la app, acceso de red a BDs SAP/BEST y a APIs de HubSpot.
+- **Configurar `.env`:** Define `MONGODB_URI`, valores OAuth de HubSpot y opcionalmente `SAP_SYNC_CRON_ENABLED`. Las credenciales de BD externa SAP viven en filas de BD, no en `.env`.
 - **Instalar e iniciar:**
   ```bash
   npm install

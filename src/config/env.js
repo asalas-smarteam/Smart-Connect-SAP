@@ -4,20 +4,12 @@ dotenv.config();
 
 const {
   PORT,
-  DB_HOST,
-  DB_USER,
-  DB_PASSWORD,
-  DB_NAME,
-  DB_PORT,
+  MONGODB_URI,
   SAP_SYNC_CRON_ENABLED,
 } = process.env;
 
 export default {
   PORT,
-  DB_HOST,
-  DB_USER,
-  DB_PASSWORD,
-  DB_NAME,
-  DB_PORT,
+  MONGODB_URI,
   SAP_SYNC_CRON_ENABLED,
 };
