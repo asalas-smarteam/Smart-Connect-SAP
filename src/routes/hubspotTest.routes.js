@@ -5,7 +5,7 @@ export default async function routes(app) {
   app.post('/hubspot/test/send/:clientConfigId', async (req, reply) => {
     try {
       const { clientConfigId } = req.params;
-      const config = await ClientConfig.findByPk(clientConfigId);
+      const config = await ClientConfig.findById(clientConfigId);
 
       if (!config) {
         return reply.send({ ok: false, message: 'ClientConfig not found' });

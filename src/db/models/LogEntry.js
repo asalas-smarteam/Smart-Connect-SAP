@@ -1,29 +1,27 @@
-export default function LogEntry({ sequelize }, DataTypes) {
-  return sequelize.define(
-    'LogEntry',
-    {
-      id: {
-        type: DataTypes.INTEGER,
-        autoIncrement: true,
-        primaryKey: true,
-      },
-      type: {
-        type: DataTypes.STRING,
-      },
-      payload: {
-        type: DataTypes.JSON,
-      },
-      level: {
-        type: DataTypes.STRING,
-      },
-      createdAt: {
-        type: DataTypes.DATE,
-        defaultValue: DataTypes.NOW,
-      },
-    },
-    {
-      timestamps: false,
-    }
-  );
-}
+import mongoose from 'mongoose';
 
+const { Schema } = mongoose;
+
+const logEntrySchema = new Schema(
+  {
+    type: {
+      type: String,
+    },
+    payload: {
+      type: Schema.Types.Mixed,
+    },
+    level: {
+      type: String,
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  {
+    timestamps: false,
+    collection: 'LogEntries',
+  }
+);
+
+export default mongoose.model('LogEntry', logEntrySchema);

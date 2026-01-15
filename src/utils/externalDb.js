@@ -64,7 +64,7 @@ export async function closeAllConnections() {
 }
 
 export async function initializeExternalConnections() {
-  const activeConfigs = await ClientConfig.findAll({ where: { active: true } });
+  const activeConfigs = await ClientConfig.find({ active: true });
 
   for (const config of activeConfigs) {
     try {

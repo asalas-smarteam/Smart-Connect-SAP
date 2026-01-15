@@ -1,36 +1,36 @@
-export default function FieldMapping({ sequelize }, DataTypes) {
-  return sequelize.define(
-    'FieldMapping',
-    {
-      id: {
-        type: DataTypes.INTEGER,
-        primaryKey: true,
-        autoIncrement: true,
-      },
-      sourceField: {
-        type: DataTypes.STRING,
-      },
-      targetField: {
-        type: DataTypes.STRING,
-      },
-      objectType: {
-        type: DataTypes.STRING,
-      },
-      clientConfigId: {
-        type: DataTypes.INTEGER,
-      },
-      hubspotCredentialId: {
-        type: DataTypes.INTEGER,
-        allowNull: true,
-      },
-      isActive: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: true,
-        allowNull: false,
-      },
+import mongoose from 'mongoose';
+
+const { Schema } = mongoose;
+
+const fieldMappingSchema = new Schema(
+  {
+    sourceField: {
+      type: String,
     },
-    {
-      timestamps: false,
-    }
-  );
-}
+    targetField: {
+      type: String,
+    },
+    objectType: {
+      type: String,
+    },
+    clientConfigId: {
+      type: Schema.Types.ObjectId,
+      ref: 'ClientConfig',
+    },
+    hubspotCredentialId: {
+      type: Schema.Types.ObjectId,
+      ref: 'HubspotCredentials',
+      default: null,
+    },
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+  },
+  {
+    timestamps: false,
+    collection: 'FieldMappings',
+  }
+);
+
+export default mongoose.model('FieldMapping', fieldMappingSchema);

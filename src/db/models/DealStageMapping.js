@@ -1,46 +1,49 @@
-export default function DealStageMapping({ sequelize }, DataTypes) {
-  return sequelize.define(
-    'DealStageMapping',
-    {
-      id: {
-        type: DataTypes.INTEGER,
-        primaryKey: true,
-        autoIncrement: true,
-      },
-      hubspotCredentialId: {
-        type: DataTypes.INTEGER,
-        allowNull: false,
-      },
-      sapStageKey: {
-        type: DataTypes.STRING,
-        allowNull: false,
-      },
-      hubspotStageId: {
-        type: DataTypes.STRING,
-        allowNull: false,
-      },
-      hubspotStageLabel: {
-        type: DataTypes.STRING,
-        allowNull: true,
-      },
-      hubspotPipelineId: {
-        type: DataTypes.STRING,
-        allowNull: false,
-      },
-      description: {
-        type: DataTypes.TEXT,
-        allowNull: true,
-      },
+import mongoose from 'mongoose';
+
+const { Schema } = mongoose;
+
+const dealStageMappingSchema = new Schema(
+  {
+    hubspotCredentialId: {
+      type: Schema.Types.ObjectId,
+      ref: 'HubspotCredentials',
+      required: true,
     },
-    {
-      timestamps: true,
-      indexes: [
-        {
-          name: 'idx_unique_stage_mapping',
-          unique: true,
-          fields: ['hubspotCredentialId', 'sapStageKey', 'hubspotPipelineId'],
-        },
-      ],
-    }
-  );
-}
+    sapStageKey: {
+      type: String,
+      required: true,
+    },
+    hubspotStageId: {
+      type: String,
+      required: true,
+    },
+    hubspotStageLabel: {
+      type: String,
+      default: null,
+    },
+    hubspotPipelineId: {
+      type: String,
+      required: true,
+    },
+    dealPipelineMappingId: {
+      type: Schema.Types.ObjectId,
+      ref: 'DealPipelineMapping',
+      default: null,
+    },
+    description: {
+      type: String,
+      default: null,
+    },
+  },
+  {
+    timestamps: true,
+    collection: 'DealStageMappings',
+  }
+);
+
+dealStageMappingSchema.index(
+  { hubspotCredentialId: 1, sapStageKey: 1, hubspotPipelineId: 1 },
+  { unique: true, name: 'idx_unique_stage_mapping' }
+);
+
+export default mongoose.model('DealStageMapping', dealStageMappingSchema);

@@ -1,38 +1,40 @@
-export default function DealPipelineMapping({ sequelize }, DataTypes) {
-  return sequelize.define(
-    'DealPipelineMapping',
-    {
-      hubspotPipelineId: {
-        type: DataTypes.STRING,
-        allowNull: false,
-        primaryKey: true
-      },
-      hubspotCredentialId: {
-        type: DataTypes.INTEGER,
-        allowNull: false,
-      },
-      sapPipelineKey: {
-        type: DataTypes.STRING,
-        allowNull: false,
-      },
-      hubspotPipelineLabel: {
-        type: DataTypes.STRING,
-        allowNull: true,
-      },
-      description: {
-        type: DataTypes.TEXT,
-        allowNull: true,
-      },
+import mongoose from 'mongoose';
+
+const { Schema } = mongoose;
+
+const dealPipelineMappingSchema = new Schema(
+  {
+    hubspotPipelineId: {
+      type: String,
+      required: true,
     },
-    {
-      timestamps: true,
-      indexes: [
-        {
-          name: 'idx_unique_pipeline_mapping',
-          unique: true,
-          fields: ['hubspotCredentialId', 'sapPipelineKey'],
-        },
-      ],
-    }
-  );
-}
+    hubspotCredentialId: {
+      type: Schema.Types.ObjectId,
+      ref: 'HubspotCredentials',
+      required: true,
+    },
+    sapPipelineKey: {
+      type: String,
+      required: true,
+    },
+    hubspotPipelineLabel: {
+      type: String,
+      default: null,
+    },
+    description: {
+      type: String,
+      default: null,
+    },
+  },
+  {
+    timestamps: true,
+    collection: 'DealPipelineMappings',
+  }
+);
+
+dealPipelineMappingSchema.index(
+  { hubspotCredentialId: 1, sapPipelineKey: 1 },
+  { unique: true, name: 'idx_unique_pipeline_mapping' }
+);
+
+export default mongoose.model('DealPipelineMapping', dealPipelineMappingSchema);

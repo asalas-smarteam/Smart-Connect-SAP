@@ -1,33 +1,33 @@
-export default function HubspotCredentials({ sequelize }, DataTypes) {
-  return sequelize.define(
-    'HubspotCredentials',
-    {
-      id: {
-        type: DataTypes.INTEGER,
-        primaryKey: true,
-        autoIncrement: true,
-      },
-      clientConfigId: {
-        type: DataTypes.INTEGER,
-      },
-      portalId: {
-        type: DataTypes.STRING,
-      },
-      accessToken: {
-        type: DataTypes.TEXT,
-      },
-      refreshToken: {
-        type: DataTypes.TEXT,
-      },
-      expiresAt: {
-        type: DataTypes.DATE,
-      },
-      scope: {
-        type: DataTypes.TEXT,
-      },
+import mongoose from 'mongoose';
+
+const { Schema } = mongoose;
+
+const hubspotCredentialsSchema = new Schema(
+  {
+    clientConfigId: {
+      type: Schema.Types.ObjectId,
+      ref: 'ClientConfig',
     },
-    {
-      timestamps: false,
-    }
-  );
-};
+    portalId: {
+      type: String,
+    },
+    accessToken: {
+      type: String,
+    },
+    refreshToken: {
+      type: String,
+    },
+    expiresAt: {
+      type: Date,
+    },
+    scope: {
+      type: String,
+    },
+  },
+  {
+    timestamps: false,
+    collection: 'HubspotCredentials',
+  }
+);
+
+export default mongoose.model('HubspotCredentials', hubspotCredentialsSchema);

@@ -1,116 +1,94 @@
-export default function ClientConfig({ sequelize }, DataTypes) {
-  return sequelize.define(
-    'ClientConfig',
-    {
-      id: {
-        type: DataTypes.INTEGER,
-        primaryKey: true,
-        autoIncrement: true,
-      },
-      clientName: {
-        type: DataTypes.STRING,
-      },
-      integrationModeId: {
-        type: DataTypes.INTEGER,
-      },
-      apiUrl: {
-        type: DataTypes.STRING,
-      },
-      apiToken: {
-        type: DataTypes.STRING,
-      },
-      storeProcedureName: {
-        type: DataTypes.STRING,
-      },
-      sqlQuery: {
-        type: DataTypes.TEXT,
-      },
-      intervalMinutes: {
-        type: DataTypes.INTEGER,
-      },
-      externalDbHost: {
-        type: DataTypes.STRING,
-      },
-      externalDbPort: {
-        type: DataTypes.INTEGER,
-      },
-      externalDbUser: {
-        type: DataTypes.STRING,
-      },
-      externalDbPassword: {
-        type: DataTypes.STRING,
-      },
-      externalDbName: {
-        type: DataTypes.STRING,
-      },
-      externalDbDialect: {
-        type: DataTypes.STRING,
-      },
-      associationFetchEnabled: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-        allowNull: false,
-      },
-      associationFetchConfig: {
-        type: DataTypes.JSON,
-        allowNull: true,
-        comment: `
-    Arreglo de configuraciones de extracción por objeto:
+import mongoose from 'mongoose';
 
-    [
-      {
-        "objectType": "company",
-        "associationFetchType": "api",      // 'api' | 'sp'
-        "associationFetchConfig": {
-            "url": "https://api.test.com",
-            "method": "GET"
-        }
-      },
-      {
-        "objectType": "product",
-        "associationFetchType": "sp",       // 'api' | 'sp'
-        "associationFetchConfig": {
-            "storedProcedure": "sp_get_associations"
-        }
-      }
-    ]
-  `,
-      },
-      hubspotCredentialId: {
-        type: DataTypes.INTEGER,
-        allowNull: true,
-      },
-      objectType: {
-        type: DataTypes.STRING,
-        allowNull: true,
-      },
-      active: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: true,
-      },
-      lastRun: {
-        type: DataTypes.DATE,
-      },
-      lastError: {
-        type: DataTypes.TEXT,
-      },
-      requireUpdateHubspotID: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-      },
-      updateMethod: {
-        type: DataTypes.STRING,
-      },
-      updateSpName: {
-        type: DataTypes.STRING,
-      },
-      updateTableName: {
-        type: DataTypes.STRING,
-      },
+const { Schema } = mongoose;
+
+const clientConfigSchema = new Schema(
+  {
+    clientName: {
+      type: String,
     },
-    {
-      timestamps: false,
-    }
-  );
+    integrationModeId: {
+      type: Schema.Types.ObjectId,
+      ref: 'IntegrationMode',
+    },
+    apiUrl: {
+      type: String,
+    },
+    apiToken: {
+      type: String,
+    },
+    storeProcedureName: {
+      type: String,
+    },
+    sqlQuery: {
+      type: String,
+    },
+    intervalMinutes: {
+      type: Number,
+    },
+    externalDbHost: {
+      type: String,
+    },
+    externalDbPort: {
+      type: Number,
+    },
+    externalDbUser: {
+      type: String,
+    },
+    externalDbPassword: {
+      type: String,
+    },
+    externalDbName: {
+      type: String,
+    },
+    externalDbDialect: {
+      type: String,
+    },
+    associationFetchEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    associationFetchConfig: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
+    hubspotCredentialId: {
+      type: Schema.Types.ObjectId,
+      ref: 'HubspotCredentials',
+      default: null,
+    },
+    objectType: {
+      type: String,
+      default: null,
+    },
+    active: {
+      type: Boolean,
+      default: true,
+    },
+    lastRun: {
+      type: Date,
+    },
+    lastError: {
+      type: String,
+    },
+    requireUpdateHubspotID: {
+      type: Boolean,
+      default: false,
+    },
+    updateMethod: {
+      type: String,
+    },
+    updateSpName: {
+      type: String,
+    },
+    updateTableName: {
+      type: String,
+    },
+  },
+  {
+    timestamps: false,
+    collection: 'ClientConfigs',
+  }
+);
 
-}
+export default mongoose.model('ClientConfig', clientConfigSchema);

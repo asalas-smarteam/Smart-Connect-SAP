@@ -5,9 +5,7 @@ export async function getMappedOwnerId(hubspotCredentialId, sapOwnerId) {
     return null;
   }
 
-  const mapping = await DealOwnerMapping.findOne({
-    where: { hubspotCredentialId, sapOwnerId },
-  });
+  const mapping = await DealOwnerMapping.findOne({ hubspotCredentialId, sapOwnerId });
 
   if (!mapping) {
     return null;
@@ -22,9 +20,7 @@ export async function upsertOwnerMapping(
   hubspotOwnerId,
   displayName,
 ) {
-  const existing = await DealOwnerMapping.findOne({
-    where: { hubspotCredentialId, sapOwnerId },
-  });
+  const existing = await DealOwnerMapping.findOne({ hubspotCredentialId, sapOwnerId });
 
   if (existing) {
     existing.hubspotOwnerId = hubspotOwnerId;
@@ -45,8 +41,5 @@ export async function listOwnerMappings(hubspotCredentialId) {
     return [];
   }
 
-  return DealOwnerMapping.findAll({
-    where: { hubspotCredentialId },
-    order: [['sapOwnerId', 'ASC']],
-  });
+  return DealOwnerMapping.find({ hubspotCredentialId }).sort({ sapOwnerId: 1 });
 }

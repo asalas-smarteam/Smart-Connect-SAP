@@ -2,9 +2,7 @@ import { DealPipelineMapping, DealStageMapping } from '../config/database.js';
 
 const dealMappingResolver = {
   async resolvePipeline(hubspotCredentialId, sapPipelineKey) {
-    const result = await DealPipelineMapping.findOne({
-      where: { hubspotCredentialId, sapPipelineKey },
-    });
+    const result = await DealPipelineMapping.findOne({ hubspotCredentialId, sapPipelineKey });
 
     if (!result) {
       return null;
@@ -21,11 +19,9 @@ const dealMappingResolver = {
     }
 
     const result = await DealStageMapping.findOne({
-      where: {
-        hubspotCredentialId,
-        sapStageKey,
-        hubspotPipelineId: pipeline.hubspotPipelineId,
-      },
+      hubspotCredentialId,
+      sapStageKey,
+      hubspotPipelineId: pipeline.hubspotPipelineId,
     });
 
     if (!result) {
