@@ -1,9 +1,5 @@
-import DataTypes from 'sequelize';
-import sequelize from '../config/database.js';
 import logger from '../core/logger.js';
-import defineLogEntry from '../db/models/logEntry.js';
-
-const LogEntry = defineLogEntry(sequelize, DataTypes);
+import { LogEntry } from '../config/database.js';
 
 export const echoTest = async (req, reply) => {
   const { body } = req;

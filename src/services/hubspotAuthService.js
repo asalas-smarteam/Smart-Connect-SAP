@@ -1,9 +1,5 @@
 import axios from 'axios';
-import DataTypes from 'sequelize';
-import database from '../config/database.js';
-import defineHubspotCredentials from '../db/models/HubspotCredentials.js';
-
-const HubspotCredentials = defineHubspotCredentials(database, DataTypes);
+import { HubspotCredentials } from '../config/database.js';
 
 const HUBSPOT_TOKEN_URL = 'https://api.hubapi.com/oauth/v1/token';
 

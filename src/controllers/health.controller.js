@@ -2,8 +2,8 @@ import database from '../config/database.js';
 
 export const health = async (req, reply) => {
   try {
-    await database.sequelize.authenticate();
-    database.sequelize.sync({ alter: true });
+    await database.connect();
+    await database.database.command({ ping: 1 });
     return reply.send({
       ok: true,
       database: 'connected',

@@ -6,7 +6,7 @@ import { closeAllConnections } from './utils/externalDb.js';
 
 dotenv.config();
 
-const { sequelize } = db;
+const { connect, disconnect } = db;
 
 let isClosingConnection = false;
 let isConnectionClosed = false;
@@ -19,15 +19,13 @@ const closeDatabaseConnection = async () => {
   isClosingConnection = true;
 
   try {
-    if (sequelize) {
-      await sequelize.close();
-      isConnectionClosed = true;
-      logger.info('🧹 Supabase database connection closed.');
-    }
+    await disconnect();
+    isConnectionClosed = true;
+    logger.info('🧹 MongoDB connection closed.');
     await closeAllConnections();
   } catch (error) {
     logger.error({
-      msg: 'Error closing Supabase database connection',
+      msg: 'Error closing MongoDB connection',
       error,
     });
   } finally {
@@ -63,6 +61,7 @@ process.once('beforeExit', () => {
 const start = async () => {
   try {
     const PORT = process.env.PORT || 3000;
+    await connect();
     await app.listen({ port: PORT, host: '0.0.0.0' });
     logger.info(`🚀 Server running on http://localhost:${PORT}`);
 

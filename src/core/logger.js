@@ -1,9 +1,5 @@
 import winston from 'winston';
-import DataTypes from 'sequelize';
-import sequelize from '../config/database.js';
-import defineLogEntry from '../db/models/logEntry.js';
-
-const LogEntry = defineLogEntry(sequelize, DataTypes);
+import { LogEntry } from '../config/database.js';
 
 const customLevels = {
   error: 0,

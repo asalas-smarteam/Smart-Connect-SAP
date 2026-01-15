@@ -1,8 +1,4 @@
-import DataTypes from 'sequelize';
-import database from '../config/database.js';
-import defineLogEntry from '../db/models/LogEntry.js';
-
-const LogEntry = defineLogEntry(database, DataTypes);
+import { LogEntry } from '../config/database.js';
 
 const loggingService = {
   async logEvent(type, payload, level = 'info') {
