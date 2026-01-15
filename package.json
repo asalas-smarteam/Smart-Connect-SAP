@@ -6,7 +6,11 @@
   "type": "module",
   "scripts": {
     "dev": "npx nodemon src/server.js",
-    "start": "NODE_ENV=production node src/app.js"
+    "start": "NODE_ENV=production node src/app.js",
+    "migrate:create": "npx migrate-mongo -f migrate-mongo-config.cjs create",
+    "migrate:status": "npx migrate-mongo -f migrate-mongo-config.cjs status",
+    "migrate:up": "npx migrate-mongo -f migrate-mongo-config.cjs up",
+    "migrate:down": "npx migrate-mongo -f migrate-mongo-config.cjs down"
   },
   "keywords": [],
   "author": "Ing. Alejandro Salas",

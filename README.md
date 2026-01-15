@@ -24,7 +24,7 @@ La plataforma se compone de las siguientes piezas en tiempo de ejecución:
 - **OAuth de HubSpot (`hubspotAuthService.js`)**: administra URL de autorización, intercambio de código, refresco y obtención de token de acceso usando valores almacenados de `accessToken`/`refreshToken`.
 - **Cliente de HubSpot (`hubspotClient.js`)**: envuelve las APIs de objetos CRM v3 con utilidades de búsqueda/creación/actualización.
 - **SyncService (`syncService.js`)**: ejecución por tarea: ingesta de datos SAP, mapeo de registros, upsert en HubSpot, registro de resultados y actualización de metadatos de corrida.
-- **Base de datos MySQL (Sequelize)**: almacena configuraciones, mapeos, credenciales y bitácoras.
+- **Base de datos MongoDB (Mongoose)**: almacena configuraciones, mapeos, credenciales y bitácoras.
 - **Comportamiento multiinquilino**: los mapeos y filas de pipeline/etapa/owner se asocian a `hubspotCredentialId`, permitiendo que múltiples tareas `ClientConfig` compartan un mismo portal de HubSpot sin duplicar mapeos.
 - **Pooling de BD SAP (`utils/externalDb.js`)**: mantiene conexiones Sequelize por `clientConfigId` hacia BDs SAP/BEST para los modos SP/script y las actualizaciones de retorno.
 
@@ -86,7 +86,7 @@ src/
 ```
 
 ## 4. Esquema de base de datos (detallado)
-Todos los esquemas usan Sequelize con dialecto MySQL; los nombres de tabla reflejan los modelos.
+Todos los esquemas principales usan **Mongoose/MongoDB**; los nombres de colección reflejan los modelos. Sequelize se usa únicamente para conexiones externas a bases SAP/BEST (SQL Server/MySQL) en los modos SP/script.
 
 ### ClientConfig
 - **Propósito:** Define la configuración de ingesta SAP, vínculo de credenciales HubSpot, tipo de objeto y comportamiento de sincronización/backfill de un inquilino.
@@ -217,7 +217,18 @@ Todos los esquemas usan Sequelize con dialecto MySQL; los nombres de tabla refle
 | `SAP_SYNC_CRON_ENABLED` | Si está en `false`, evita que el cron arranque; permite solo disparo manual. |
 | `PORT` | Puerto en el que se levanta Fastify (3000 por defecto). |
 
-## 14. Futuras funcionalidades (roadmap)
+## 14. Migraciones de base de datos (MongoDB)
+La aplicación **no ejecuta migraciones Sequelize** (se eliminaron los stubs de `src/db/migrations`). Todas las migraciones de esquema/semilla para MongoDB se administran con **migrate-mongo** en `scripts/migrations`.
+
+### Comandos disponibles
+- Crear migración: `npm run migrate:create -- <nombre>`
+- Ver estado: `npm run migrate:status`
+- Aplicar migraciones: `npm run migrate:up`
+- Revertir la última migración: `npm run migrate:down`
+
+> Asegúrate de exportar `MONGODB_URI` antes de ejecutar los comandos. Las migraciones son módulos ESM (`export async function up/down`).
+
+## 15. Futuras funcionalidades (roadmap)
 - Frontend Next.js con autenticación y botón de conexión a HubSpot.
 - UI para configurar objetos, campos y pipelines por inquilino.
 - UI para gestión de mapeo de owners de deals.
@@ -228,7 +239,7 @@ Todos los esquemas usan Sequelize con dialecto MySQL; los nombres de tabla refle
 - Colas de error mejoradas y manejo de dead-letter.
 - Publicación en el marketplace de HubSpot.
 
-## 15. Guía de despliegue
+## 16. Guía de despliegue
 - **Requisitos:** Node.js (soporte ESM), instancia MongoDB accesible desde la app, acceso de red a BDs SAP/BEST y a APIs de HubSpot.
 - **Configurar `.env`:** Define `MONGODB_URI`, valores OAuth de HubSpot y opcionalmente `SAP_SYNC_CRON_ENABLED`. Las credenciales de BD externa SAP viven en filas de BD, no en `.env`.
 - **Instalar e iniciar:**
@@ -240,7 +251,7 @@ Todos los esquemas usan Sequelize con dialecto MySQL; los nombres de tabla refle
 - **Firewall:** Garantiza acceso saliente a HubSpot y conectividad entrante/saliente a hosts/puertos SQL de SAP definidos en `ClientConfig`.
 - **SSL/HTTPS:** Termina TLS con un proxy inverso o ubica Fastify detrás de un terminador HTTPS según necesidad.
 
-## 16. Ejemplos de uso
+## 17. Ejemplos de uso
 Se asume el servidor en `localhost:3000` y la BD poblada con `ClientConfig` y mapeos.
 
 - **Ejecutar sincronización manual:**
@@ -270,9 +281,9 @@ Se asume el servidor en `localhost:3000` y la BD poblada con `ClientConfig` y ma
        -d '{"sapPipelineKey":"SAP_PIPE","hubspotPipelineId":"default","hubspotPipelineLabel":"Sales"}'
   ```
 
-## 17. Guía de contribución
+## 18. Guía de contribución
 - **Estilo de código:** ES Modules; preferir async/await y logging estructurado con Winston.
-- **Convenciones de carpetas:** Servicios en `src/services`, integraciones bajo `src/integrations`, modelos Sequelize en `src/db/models`, y rutas/controladores en `src/routes`/`src/controllers`.
+- **Convenciones de carpetas:** Servicios en `src/services`, integraciones bajo `src/integrations`, modelos Mongoose en `src/db/models`, y rutas/controladores en `src/routes`/`src/controllers`.
 - **Agregar nuevos tipos de objeto:** Extiende `objectTypeRouter.js`, agrega manejadores de búsqueda/creación/actualización en `hubspotService.js` y asegúrate de tener entradas `FieldMapping` para el nuevo tipo.
 - **Agregar nuevos modos SAP:** Crea un modo en `src/integrations/sap/modes`, regístralo en `sapService.fetchData()` mediante una nueva entrada `IntegrationMode`.
 - **Flujo de PR:** Incluye pruebas o pasos reproducibles, sigue las prácticas de logging existentes y documenta nuevas variables de entorno al introducirlas.
