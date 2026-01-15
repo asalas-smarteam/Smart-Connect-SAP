@@ -1,39 +1,39 @@
-export default function SyncLog({ sequelize }, DataTypes) {
-  return sequelize.define(
-    'SyncLog',
-    {
-      id: {
-        type: DataTypes.INTEGER,
-        autoIncrement: true,
-        primaryKey: true,
-      },
-      clientConfigId: {
-        type: DataTypes.INTEGER,
-      },
-      status: {
-        type: DataTypes.STRING,
-      },
-      recordsProcessed: {
-        type: DataTypes.INTEGER,
-      },
-      sent: {
-        type: DataTypes.INTEGER,
-      },
-      failed: {
-        type: DataTypes.INTEGER,
-      },
-      errorMessage: {
-        type: DataTypes.TEXT,
-      },
-      startedAt: {
-        type: DataTypes.DATE,
-      },
-      finishedAt: {
-        type: DataTypes.DATE,
-      },
+import mongoose from 'mongoose';
+
+const { Schema } = mongoose;
+
+const syncLogSchema = new Schema(
+  {
+    clientConfigId: {
+      type: Schema.Types.ObjectId,
+      ref: 'ClientConfig',
     },
-    {
-      timestamps: false,
-    }
-  );
-}
+    status: {
+      type: String,
+    },
+    recordsProcessed: {
+      type: Number,
+    },
+    sent: {
+      type: Number,
+    },
+    failed: {
+      type: Number,
+    },
+    errorMessage: {
+      type: String,
+    },
+    startedAt: {
+      type: Date,
+    },
+    finishedAt: {
+      type: Date,
+    },
+  },
+  {
+    timestamps: false,
+    collection: 'SyncLogs',
+  }
+);
+
+export default mongoose.model('SyncLog', syncLogSchema);

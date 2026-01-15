@@ -35,10 +35,7 @@ const mappingService = {
         return [];
       }
 
-      return await FieldMapping.findAll({
-        where: { hubspotCredentialId, objectType },
-        order: [['id', 'ASC']],
-      });
+      return await FieldMapping.find({ hubspotCredentialId, objectType }).sort({ _id: 1 });
     } catch (error) {
       console.error('Failed to fetch mappings:', error);
       return [];

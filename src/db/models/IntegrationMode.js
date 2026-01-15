@@ -1,22 +1,21 @@
-export default function defineIntegrationMode({ sequelize }, DataTypes) {
-  return sequelize.define(
-    'IntegrationMode',
-    {
-      id: {
-        type: DataTypes.INTEGER,
-        primaryKey: true,
-        autoIncrement: true,
-      },
-      name: {
-        type: DataTypes.STRING,
-        unique: true,
-      },
-      description: {
-        type: DataTypes.STRING,
-      },
+import mongoose from 'mongoose';
+
+const { Schema } = mongoose;
+
+const integrationModeSchema = new Schema(
+  {
+    name: {
+      type: String,
+      unique: true,
     },
-    {
-      timestamps: false,
-    }
-  );
-}
+    description: {
+      type: String,
+    },
+  },
+  {
+    timestamps: false,
+    collection: 'IntegrationModes',
+  }
+);
+
+export default mongoose.model('IntegrationMode', integrationModeSchema);

@@ -48,15 +48,14 @@ const hubspotAuthService = {
     const { access_token, refresh_token, expires_in, hub_id } = response.data;
     const expiresAt = new Date(Date.now() + expires_in * 1000);
 
-    const existingCredentials = await HubspotCredentials.findOne({ where: { clientConfigId } });
+    const existingCredentials = await HubspotCredentials.findOne({ clientConfigId });
 
     if (existingCredentials) {
-      await existingCredentials.update({
-        accessToken: access_token,
-        refreshToken: refresh_token,
-        expiresAt,
-        portalId: hub_id,
-      });
+      existingCredentials.accessToken = access_token;
+      existingCredentials.refreshToken = refresh_token;
+      existingCredentials.expiresAt = expiresAt;
+      existingCredentials.portalId = hub_id;
+      await existingCredentials.save();
       return existingCredentials;
     }
 
@@ -72,7 +71,7 @@ const hubspotAuthService = {
   async refreshAccessToken(clientConfigId) {
     const { HUBSPOT_CLIENT_ID, HUBSPOT_CLIENT_SECRET, HUBSPOT_REDIRECT_URI } = process.env;
 
-    const credentials = await HubspotCredentials.findOne({ where: { clientConfigId } });
+    const credentials = await HubspotCredentials.findOne({ clientConfigId });
     if (!credentials || !credentials.refreshToken) {
       throw new Error('Refresh token not found for client configuration');
     }
@@ -92,17 +91,19 @@ const hubspotAuthService = {
     const { access_token, expires_in, refresh_token } = response.data;
     const expiresAt = new Date(Date.now() + expires_in * 1000);
 
-    await credentials.update({
-      accessToken: access_token,
-      expiresAt,
-      ...(refresh_token ? { refreshToken: refresh_token } : {}),
-    });
+    credentials.accessToken = access_token;
+    credentials.expiresAt = expiresAt;
+    if (refresh_token) {
+      credentials.refreshToken = refresh_token;
+    }
+
+    await credentials.save();
 
     return access_token;
   },
 
   async getAccessToken(clientConfigId) {
-    const credentials = await HubspotCredentials.findOne({ where: { clientConfigId } });
+    const credentials = await HubspotCredentials.findOne({ clientConfigId });
 
     if (!credentials) {
       throw new Error('Credentials not found for client configuration');

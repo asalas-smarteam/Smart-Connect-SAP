@@ -40,13 +40,10 @@ async function findHubspotIdForSapId(hubspotCredentialId, objectType, sapId) {
 
   try {
     const record = await AssociationRegistry.findOne({
-      where: {
-        hubspotCredentialId,
-        baseObjectType: objectType,
-        baseSapId: sapId,
-      },
-      order: [['createdAt', 'DESC']],
-    });
+      hubspotCredentialId,
+      baseObjectType: objectType,
+      baseSapId: sapId,
+    }).sort({ createdAt: -1 });
 
     return record?.baseHubspotId ?? null;
   } catch (error) {

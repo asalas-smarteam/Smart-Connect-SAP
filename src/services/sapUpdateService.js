@@ -8,13 +8,10 @@ export const sapUpdateService = {
         return;
       }
 
-      const mapping = await FieldMapping.findAll({
-        where: {
-          objectType,
-          hubspotCredentialId: clientConfig?.hubspotCredentialId,
-        },
-        raw: true
-      });
+      const mapping = await FieldMapping.find({
+        objectType,
+        hubspotCredentialId: clientConfig?.hubspotCredentialId,
+      }).lean();
 
       const hsObjectIdSource = mapping.find(m => m.targetField === "hs_object_id")?.sourceField;
       const sapIdSource = mapping.find(m => m.targetField === "sap_id")?.sourceField;

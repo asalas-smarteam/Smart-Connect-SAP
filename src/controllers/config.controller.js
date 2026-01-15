@@ -18,9 +18,7 @@ export const createClientConfig = async (req, reply) => {
 
 export const getClientConfig = async (req, reply) => {
   try {
-    const data = await ClientConfig.findAll({
-      include: [{ model: IntegrationMode }],
-    });
+    const data = await ClientConfig.find().populate('integrationModeId');
 
     return reply.send({
       ok: true,
@@ -62,7 +60,7 @@ export const createIntegrationMode = async (req, reply) => {
 
 export const getIntegrationModes = async (req, reply) => {
   try {
-    const data = await IntegrationMode.findAll();
+    const data = await IntegrationMode.find();
 
     return reply.send({
       ok: true,

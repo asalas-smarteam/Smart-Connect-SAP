@@ -6,9 +6,7 @@ const dealMappingService = {
       return null;
     }
 
-    return DealPipelineMapping.findOne({
-      where: { hubspotCredentialId, sapPipelineKey },
-    });
+    return DealPipelineMapping.findOne({ hubspotCredentialId, sapPipelineKey });
   },
 
   async getStageMapping(hubspotCredentialId, sapStageKey, hubspotPipelineId) {
@@ -17,7 +15,9 @@ const dealMappingService = {
     }
 
     return DealStageMapping.findOne({
-      where: { hubspotCredentialId, sapStageKey, hubspotPipelineId },
+      hubspotCredentialId,
+      sapStageKey,
+      hubspotPipelineId,
     });
   },
 
@@ -26,10 +26,7 @@ const dealMappingService = {
       return [];
     }
 
-    return DealPipelineMapping.findAll({
-      where: { hubspotCredentialId },
-      order: [['createdAt', 'ASC']],
-    });
+    return DealPipelineMapping.find({ hubspotCredentialId }).sort({ createdAt: 1 });
   },
 
   async listStageMappings(hubspotCredentialId, hubspotPipelineId) {
@@ -37,9 +34,8 @@ const dealMappingService = {
       return [];
     }
 
-    return DealStageMapping.findAll({
-      where: { hubspotCredentialId, hubspotPipelineId },
-      order: [['createdAt', 'ASC']],
+    return DealStageMapping.find({ hubspotCredentialId, hubspotPipelineId }).sort({
+      createdAt: 1,
     });
   },
 
@@ -58,7 +54,7 @@ const dealMappingService = {
     });
   },
 
-  async createOrUpdateStageMapping({hubspotCredentialId, sapStageKey, hubspotPipelineId, ...data}) {
+  async createOrUpdateStageMapping({ hubspotCredentialId, sapStageKey, hubspotPipelineId, ...data }) {
     const existing = await this.getStageMapping(hubspotCredentialId, sapStageKey, hubspotPipelineId);
 
     if (existing) {
