@@ -1,5 +1,5 @@
 import { getConnection } from '../utils/externalDb.js';
-import { FieldMapping } from '../config/database.js';
+import FieldMapping from '../db/models/FieldMapping.js';
 
 export const sapUpdateService = {
   async updateHubspotIdInSap(clientConfig, objectType, sapRecord, hubspotId) {

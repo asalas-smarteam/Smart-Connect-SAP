@@ -1,5 +1,5 @@
 import winston from 'winston';
-import { LogEntry } from '../config/database.js';
+import LogEntry from '../db/models/LogEntry.js';
 
 const customLevels = {
   error: 0,

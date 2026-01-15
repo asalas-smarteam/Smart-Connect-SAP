@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { HubspotCredentials } from '../config/database.js';
+import HubspotCredentials from '../db/models/HubspotCredentials.js';
 
 const HUBSPOT_TOKEN_URL = 'https://api.hubapi.com/oauth/v1/token';
 

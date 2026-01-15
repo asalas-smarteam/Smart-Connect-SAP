@@ -1,4 +1,4 @@
-import { LogEntry } from '../config/database.js';
+import LogEntry from '../db/models/LogEntry.js';
 
 const loggingService = {
   async logEvent(type, payload, level = 'info') {
