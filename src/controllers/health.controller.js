@@ -1,12 +1,19 @@
-import database from '../config/database.js';
+import mongoose from 'mongoose';
+import { connect } from '../config/database.js';
 
 export const health = async (req, reply) => {
   try {
-    await database.connect();
-    await database.database.db.command({ ping: 1 });
+    await connect();
+    const readyState = mongoose.connection.readyState;
+    const stateLabels = {
+      0: 'disconnected',
+      1: 'connected',
+      2: 'connecting',
+      3: 'disconnecting',
+    };
     return reply.send({
-      ok: true,
-      database: 'connected',
+      ok: readyState === 1,
+      database: stateLabels[readyState] || 'unknown',
       timestamp: new Date().toISOString(),
     });
   } catch (error) {

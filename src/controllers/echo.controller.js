@@ -1,5 +1,5 @@
 import logger from '../core/logger.js';
-import { LogEntry } from '../config/database.js';
+import LogEntry from '../db/models/LogEntry.js';
 
 export const echoTest = async (req, reply) => {
   const { body } = req;
