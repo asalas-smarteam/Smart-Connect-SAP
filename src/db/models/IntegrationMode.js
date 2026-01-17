@@ -1,21 +1,3 @@
-import mongoose from 'mongoose';
+import tenantModels from './tenant/default.js';
 
-const { Schema } = mongoose;
-
-const integrationModeSchema = new Schema(
-  {
-    name: {
-      type: String,
-      unique: true,
-    },
-    description: {
-      type: String,
-    },
-  },
-  {
-    timestamps: false,
-    collection: 'IntegrationModes',
-  }
-);
-
-export default mongoose.model('IntegrationMode', integrationModeSchema);
+export default tenantModels.IntegrationMode;
