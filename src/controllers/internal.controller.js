@@ -1,20 +1,22 @@
 import { provisionTenant } from '../services/tenantProvisioning.js';
+import { validateProvisioningPayload } from '../utils/provisioningValidation.js';
 
 export const provisionInternalTenant = async (req, reply) => {
   try {
-    const {
-      nombreEmpresa,
-      planId,
-      billingEmail = null,
-      hubspot = null,
-    } = req.body || {};
+    const validation = validateProvisioningPayload(req.body);
+
+    if (!validation.valid) {
+      return reply.code(400).send({ error: validation.error });
+    }
+
+    const { planId, billingEmail = null, hubspot = null } = req.body || {};
 
     if (!planId) {
       return reply.code(400).send({ error: 'planId is required' });
     }
 
     const { client, subscription, tenantKey } = await provisionTenant({
-      companyName: nombreEmpresa,
+      companyName: validation.normalizedCompanyName,
       planId,
       billingEmail,
       hubspot,
