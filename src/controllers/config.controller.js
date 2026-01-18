@@ -1,8 +1,8 @@
-import ClientConfig from '../db/models/ClientConfig.js';
-import IntegrationMode from '../db/models/IntegrationMode.js';
+import { requireTenantModels } from '../utils/tenantModels.js';
 
 export const createClientConfig = async (req, reply) => {
   try {
+    const { ClientConfig } = requireTenantModels(req);
     const data = await ClientConfig.create(req.body);
 
     return reply.send({
@@ -19,6 +19,7 @@ export const createClientConfig = async (req, reply) => {
 
 export const getClientConfig = async (req, reply) => {
   try {
+    const { ClientConfig } = requireTenantModels(req);
     const data = await ClientConfig.find().populate('integrationModeId');
 
     return reply.send({
@@ -45,6 +46,7 @@ export const createIntegrationMode = async (req, reply) => {
       });
     }
 
+    const { IntegrationMode } = requireTenantModels(req);
     const data = await IntegrationMode.create({ name, description });
 
     return reply.send({
@@ -61,6 +63,7 @@ export const createIntegrationMode = async (req, reply) => {
 
 export const getIntegrationModes = async (req, reply) => {
   try {
+    const { IntegrationMode } = requireTenantModels(req);
     const data = await IntegrationMode.find();
 
     return reply.send({

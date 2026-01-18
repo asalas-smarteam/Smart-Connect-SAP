@@ -1,8 +1,9 @@
 import logger from '../core/logger.js';
-import LogEntry from '../db/models/LogEntry.js';
+import { requireTenantModels } from '../utils/tenantModels.js';
 
 export const echoTest = async (req, reply) => {
   const { body } = req;
+  const { LogEntry } = requireTenantModels(req);
 
   logger.info('Echo test received', body);
 
@@ -13,4 +14,4 @@ export const echoTest = async (req, reply) => {
   });
 
   return reply.send({ ok: true, body });
-}
+};

@@ -1,8 +1,15 @@
-import DealPipelineMapping from '../db/models/DealPipelineMapping.js';
-import DealStageMapping from '../db/models/DealStageMapping.js';
+function getTenantDealModels(tenantModels) {
+  if (!tenantModels) {
+    throw new Error('Tenant models are required for deal mapping resolution');
+  }
+
+  const { DealPipelineMapping, DealStageMapping } = tenantModels;
+  return { DealPipelineMapping, DealStageMapping };
+}
 
 const dealMappingResolver = {
-  async resolvePipeline(hubspotCredentialId, sapPipelineKey) {
+  async resolvePipeline(hubspotCredentialId, sapPipelineKey, tenantModels) {
+    const { DealPipelineMapping } = getTenantDealModels(tenantModels);
     const result = await DealPipelineMapping.findOne({ hubspotCredentialId, sapPipelineKey });
 
     if (!result) {
@@ -12,8 +19,9 @@ const dealMappingResolver = {
     return { hubspotPipelineId: result.hubspotPipelineId };
   },
 
-  async resolveStage(hubspotCredentialId, sapPipelineKey, sapStageKey) {
-    const pipeline = await this.resolvePipeline(hubspotCredentialId, sapPipelineKey);
+  async resolveStage(hubspotCredentialId, sapPipelineKey, sapStageKey, tenantModels) {
+    const { DealStageMapping } = getTenantDealModels(tenantModels);
+    const pipeline = await this.resolvePipeline(hubspotCredentialId, sapPipelineKey, tenantModels);
 
     if (!pipeline) {
       return null;

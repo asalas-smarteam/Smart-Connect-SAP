@@ -1,11 +1,9 @@
 import sapService from '../integrations/sap/sapService.js';
 import mappingService from './mapping.service.js';
 import hubspotService from '../services/hubspotService.js';
-import HubspotCredentials from '../db/models/HubspotCredentials.js';
-import SyncLog from '../db/models/SyncLog.js';
 
 const syncService = {
-  async run(config) {
+  async run(config, tenantModels) {
     const startedAt = new Date();
     const clientConfigId = config?.id;
 
@@ -14,7 +12,8 @@ const syncService = {
         throw new Error('Client configuration not found');
       }
 
-      const rawData = await sapService.fetchData(clientConfigId);
+      const { HubspotCredentials, SyncLog } = tenantModels;
+      const rawData = await sapService.fetchData(clientConfigId, tenantModels);
 
       const credentials = await HubspotCredentials.findById(
         config.hubspotCredentialId
@@ -53,7 +52,8 @@ const syncService = {
       const mappedRecords = await mappingService.mapRecords(
         sapRecords,
         config.hubspotCredentialId,
-        objectType
+        objectType,
+        tenantModels
       );
 
       let hubspotResult = { sent: 0, failed: 0 };
@@ -62,7 +62,8 @@ const syncService = {
         hubspotResult = await hubspotService.sendToHubSpot(
           mappedRecords,
           config,
-          objectType
+          objectType,
+          tenantModels
         );
       } catch (error) {
         hubspotResult = { sent: 0, failed: mappedRecords.length };

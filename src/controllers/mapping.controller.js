@@ -1,8 +1,9 @@
-import FieldMapping from '../db/models/FieldMapping.js';
 import mappingService from '../services/mapping.service.js';
+import { requireTenantModels } from '../utils/tenantModels.js';
 
 export const createMapping = async (req, reply) => {
   try {
+    const { FieldMapping } = requireTenantModels(req);
     const { sourceField, targetField, objectType, clientConfigId, hubspotCredentialId } =
       req.body;
 
@@ -22,6 +23,7 @@ export const createMapping = async (req, reply) => {
 
 export const getMappings = async (req, reply) => {
   try {
+    const { FieldMapping } = requireTenantModels(req);
     const { hubspotCredentialId, objectType } = req.query;
     const filter = {};
 
@@ -41,10 +43,12 @@ export const getMappings = async (req, reply) => {
 export const applyMappingTest = async (req, reply) => {
   try {
     const { data, hubspotCredentialId, objectType } = req.body;
+    const tenantModels = requireTenantModels(req);
     const mapped = await mappingService.applyMapping(
       data,
       hubspotCredentialId,
-      objectType
+      objectType,
+      tenantModels
     );
 
     return reply.send({ ok: true, mapped });
