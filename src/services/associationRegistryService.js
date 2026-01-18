@@ -1,16 +1,23 @@
-import AssociationRegistry from '../db/models/AssociationRegistry.js';
+function getTenantAssociationRegistry(tenantModels) {
+  if (!tenantModels) {
+    throw new Error('Tenant models are required for association registry');
+  }
+  return tenantModels.AssociationRegistry;
+}
 
 async function registerBaseObjectMapping(
   hubspotCredentialId,
   objectType,
   sapId,
   hubspotId,
+  tenantModels
 ) {
   if (!hubspotCredentialId || !objectType || !sapId || !hubspotId) {
     return null;
   }
 
   try {
+    const AssociationRegistry = getTenantAssociationRegistry(tenantModels);
     return await AssociationRegistry.create({
       hubspotCredentialId,
       baseObjectType: objectType,
@@ -33,12 +40,13 @@ async function registerBaseObjectMapping(
   }
 }
 
-async function findHubspotIdForSapId(hubspotCredentialId, objectType, sapId) {
+async function findHubspotIdForSapId(hubspotCredentialId, objectType, sapId, tenantModels) {
   if (!hubspotCredentialId || !objectType || !sapId) {
     return null;
   }
 
   try {
+    const AssociationRegistry = getTenantAssociationRegistry(tenantModels);
     const record = await AssociationRegistry.findOne({
       hubspotCredentialId,
       baseObjectType: objectType,

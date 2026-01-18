@@ -1,4 +1,10 @@
-import FieldMapping from '../db/models/FieldMapping.js';
+function getTenantFieldMapping(tenantModels) {
+  if (!tenantModels) {
+    throw new Error('Tenant models are required for mapping operations');
+  }
+
+  return tenantModels.FieldMapping;
+}
 
 const mapFields = (inputData, mappings, objectType) => {
   const result = {};
@@ -29,12 +35,13 @@ const mapFields = (inputData, mappings, objectType) => {
 };
 
 const mappingService = {
-  async getMappings(hubspotCredentialId, objectType) {
+  async getMappings(hubspotCredentialId, objectType, tenantModels) {
     try {
       if (!hubspotCredentialId) {
         return [];
       }
 
+      const FieldMapping = getTenantFieldMapping(tenantModels);
       return await FieldMapping.find({ hubspotCredentialId, objectType }).sort({ _id: 1 });
     } catch (error) {
       console.error('Failed to fetch mappings:', error);
@@ -42,9 +49,9 @@ const mappingService = {
     }
   },
 
-  async mapRecords(sapRecords, hubspotCredentialId, objectType) {
+  async mapRecords(sapRecords, hubspotCredentialId, objectType, tenantModels) {
     try {
-      const mappings = await this.getMappings(hubspotCredentialId, objectType);
+      const mappings = await this.getMappings(hubspotCredentialId, objectType, tenantModels);
 
       return sapRecords.map((record) => mapFields(record, mappings, objectType));
     } catch (error) {
@@ -53,9 +60,9 @@ const mappingService = {
     }
   },
 
-  async applyMapping(inputData, hubspotCredentialId, objectType) {
+  async applyMapping(inputData, hubspotCredentialId, objectType, tenantModels) {
     try {
-      const mappings = await this.getMappings(hubspotCredentialId, objectType);
+      const mappings = await this.getMappings(hubspotCredentialId, objectType, tenantModels);
 
       return mapFields(inputData, mappings, objectType);
     } catch (error) {

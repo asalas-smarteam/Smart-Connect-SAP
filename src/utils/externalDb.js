@@ -1,6 +1,7 @@
 import { createRequire } from 'module';
-import ClientConfig from '../db/models/ClientConfig.js';
 import logger from '../core/logger.js';
+import { SaaSClient } from '../config/database.js';
+import { getTenantModels } from '../config/tenantDatabase.js';
 
 const pools = {};
 // Aquí se almacenarán las conexiones por clientConfigId
@@ -79,17 +80,23 @@ export async function closeAllConnections() {
 }
 
 export async function initializeExternalConnections() {
-  const activeConfigs = await ClientConfig.find({ active: true });
+  const activeClients = await SaaSClient.find({ status: 'active' });
 
-  for (const config of activeConfigs) {
-    try {
-      await getConnection(config);
-      logger.info(`External database connection initialized for client config ${config.id}`);
-    } catch (error) {
-      logger.error('Error initializing external database connection', {
-        clientConfigId: config.id,
-        error,
-      });
+  for (const client of activeClients) {
+    const tenantModels = await getTenantModels(client.tenantKey);
+    const { ClientConfig } = tenantModels;
+    const activeConfigs = await ClientConfig.find({ active: true });
+
+    for (const config of activeConfigs) {
+      try {
+        await getConnection(config);
+        logger.info(`External database connection initialized for client config ${config.id}`);
+      } catch (error) {
+        logger.error('Error initializing external database connection', {
+          clientConfigId: config.id,
+          error,
+        });
+      }
     }
   }
 }

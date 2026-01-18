@@ -1,12 +1,16 @@
-import ClientConfig from '../../db/models/ClientConfig.js';
 import logger from '../../core/logger.js';
 import spMode from './modes/spMode.js';
 import scriptMode from './modes/scriptMode.js';
 import apiMode from './modes/apiMode.js';
 
 const sapService = {
-  async fetchData(clientConfigId) {
+  async fetchData(clientConfigId, tenantModels) {
     try {
+      if (!tenantModels) {
+        throw new Error('Tenant models are required to fetch SAP data');
+      }
+
+      const { ClientConfig } = tenantModels;
       const config = await ClientConfig.findById(clientConfigId).populate({
         path: 'integrationModeId',
         select: 'name',

@@ -1,13 +1,20 @@
 import { getConnection } from '../utils/externalDb.js';
-import FieldMapping from '../db/models/FieldMapping.js';
+
+function getTenantFieldMapping(tenantModels) {
+  if (!tenantModels) {
+    throw new Error('Tenant models are required for SAP update operations');
+  }
+  return tenantModels.FieldMapping;
+}
 
 export const sapUpdateService = {
-  async updateHubspotIdInSap(clientConfig, objectType, sapRecord, hubspotId) {
+  async updateHubspotIdInSap(clientConfig, objectType, sapRecord, hubspotId, tenantModels) {
     try {
       if (!clientConfig?.requireUpdateHubspotID) {
         return;
       }
 
+      const FieldMapping = getTenantFieldMapping(tenantModels);
       const mapping = await FieldMapping.find({
         objectType,
         hubspotCredentialId: clientConfig?.hubspotCredentialId,

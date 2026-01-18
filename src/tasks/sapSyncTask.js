@@ -12,11 +12,12 @@ export async function runSapSyncOnce() {
       continue;
     }
 
-    const { ClientConfig } = await getTenantModels(client.tenantKey);
+    const tenantModels = await getTenantModels(client.tenantKey);
+    const { ClientConfig } = tenantModels;
     const activeConfigs = await ClientConfig.find({ active: true });
 
     for (const config of activeConfigs) {
-      await syncService.run(config);
+      await syncService.run(config, tenantModels);
     }
   }
 }

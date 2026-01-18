@@ -1,4 +1,3 @@
-import mongoose from 'mongoose';
 import { createAssociationRegistryModel } from './AssociationRegistry.js';
 import { createClientConfigModel } from './ClientConfig.js';
 import { createDealOwnerMappingModel } from './DealOwnerMapping.js';
@@ -27,8 +26,4 @@ export function registerTenantModels(connection) {
     LogEntry: createLogEntryModel(connection),
     SyncLog: createSyncLogModel(connection),
   };
-}
-
-export function getDefaultTenantModels() {
-  return registerTenantModels(mongoose.connection);
 }

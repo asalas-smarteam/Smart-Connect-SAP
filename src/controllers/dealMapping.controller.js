@@ -1,10 +1,12 @@
 import service from '../services/dealMapping.service.js';
+import { requireTenantModels } from '../utils/tenantModels.js';
 
 const dealMappingController = {
   async listPipelines(req, reply) {
     try {
       const { hubspotCredentialId } = req.params;
-      const pipelines = await service.listPipelineMappings(hubspotCredentialId);
+      const tenantModels = requireTenantModels(req);
+      const pipelines = await service.listPipelineMappings(hubspotCredentialId, tenantModels);
 
       return reply.send({ ok: true, pipelines });
     } catch (error) {
@@ -15,7 +17,8 @@ const dealMappingController = {
   async listStages(req, reply) {
     try {
       const { hubspotCredentialId, pipelineId } = req.params;
-      const stages = await service.listStageMappings(hubspotCredentialId, pipelineId);
+      const tenantModels = requireTenantModels(req);
+      const stages = await service.listStageMappings(hubspotCredentialId, pipelineId, tenantModels);
 
       return reply.send({ ok: true, stages });
     } catch (error) {
@@ -25,6 +28,7 @@ const dealMappingController = {
 
   async upsertPipeline(req, reply) {
     try {
+      const tenantModels = requireTenantModels(req);
       const { sapPipelineKey, hubspotPipelineId, hubspotPipelineLabel, description } =
         req.body;
       const { hubspotCredentialId } = req.params;
@@ -35,6 +39,7 @@ const dealMappingController = {
         hubspotPipelineLabel,
         description,
         hubspotCredentialId,
+        tenantModels,
       });
 
       return reply.send({ ok: true });
@@ -45,6 +50,7 @@ const dealMappingController = {
 
   async upsertStage(req, reply) {
     try {
+      const tenantModels = requireTenantModels(req);
       const { sapStageKey, hubspotStageId, hubspotStageLabel, hubspotPipelineId, description } =
         req.body;
       const { hubspotCredentialId } = req.params;
@@ -56,6 +62,7 @@ const dealMappingController = {
         hubspotPipelineId,
         description,
         hubspotCredentialId,
+        tenantModels,
       });
 
       return reply.send({ ok: true });

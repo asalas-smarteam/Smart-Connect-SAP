@@ -10,9 +10,10 @@ import axios from "axios";
 import { getConnection } from "../utils/externalDb.js";
 
 const hubspotService = {
-  async sendToHubSpot(mappedItems, clientConfig, objectType) {
+  async sendToHubSpot(mappedItems, clientConfig, objectType, tenantModels) {
     const token = await hubspotAuthService.getAccessToken(
-      clientConfig.hubspotCredentialId
+      clientConfig.hubspotCredentialId,
+      tenantModels
     );
     const handler = objectTypeRouter.getObjectTypeHandler(objectType);
 
@@ -28,7 +29,8 @@ const hubspotService = {
         token,
         objectType,
         item,
-        clientConfig
+        clientConfig,
+        tenantModels
       );
       if (result.ok) {
         sent += 1;
@@ -40,7 +42,7 @@ const hubspotService = {
     return { ok: true, sent, failed };
   },
 
-  async processSingleItem(token, objectType, item, clientConfig) {
+  async processSingleItem(token, objectType, item, clientConfig, tenantModels) {
     try {
       const handlers = {
         contact: {
@@ -63,14 +65,16 @@ const hubspotService = {
 
             const mappedPipeline = await dealMappingResolver.resolvePipeline(
               clientConfig.hubspotCredentialId,
-              pipeline
+              pipeline,
+              tenantModels
             );
             if (!mappedPipeline) throw new Error("Pipeline mapping not found.");
 
             const mappedStage = await dealMappingResolver.resolveStage(
               clientConfig.hubspotCredentialId,
               pipeline,
-              dealstage
+              dealstage,
+              tenantModels
             );
             if (!mappedStage) throw new Error("Stage mapping not found.");
 
@@ -80,7 +84,8 @@ const hubspotService = {
             // Owner mapping
             const mappedOwner = await getMappedOwnerId(
               clientConfig.hubspotCredentialId,
-              hubspot_owner_id
+              hubspot_owner_id,
+              tenantModels
             );
             if (mappedOwner) item.properties.hubspot_owner_id = mappedOwner;
           },
@@ -120,7 +125,8 @@ const hubspotService = {
           clientConfig,
           objectType,
           item?.properties ?? {},
-          created?.id
+          created?.id,
+          tenantModels
         );
 
         const hubspotId = created?.id;
@@ -131,7 +137,8 @@ const hubspotService = {
             clientConfig.hubspotCredentialId,
             objectType,
             sapId,
-            hubspotId
+            hubspotId,
+            tenantModels
           );
         }
       }
@@ -160,14 +167,16 @@ const hubspotService = {
           const companyAssociations = await this.resolveAssociationIds(
             clientConfig,
             "company",
-            associatedCompanies
+            associatedCompanies,
+            tenantModels
           );
 
           await associationService.associateContactWithCompanies(
             token,
             clientConfig.hubspotCredentialId,
             hubspotId,
-            companyAssociations
+            companyAssociations,
+            tenantModels
           );
         }
       }
@@ -196,14 +205,16 @@ const hubspotService = {
           const contactAssociations = await this.resolveAssociationIds(
             clientConfig,
             "contact",
-            associatedContacts
+            associatedContacts,
+            tenantModels
           );
 
           await associationService.associateCompanyWithContacts(
             token,
             clientConfig.hubspotCredentialId,
             hubspotId,
-            contactAssociations
+            contactAssociations,
+            tenantModels
           );
         }
       }
@@ -239,36 +250,42 @@ const hubspotService = {
           const contactAssociations = await this.resolveAssociationIds(
             clientConfig,
             "contact",
-            associatedContacts
+            associatedContacts,
+            tenantModels
           );
           const companyAssociations = await this.resolveAssociationIds(
             clientConfig,
             "company",
-            associatedCompanies
+            associatedCompanies,
+            tenantModels
           );
           const productAssociations = await this.resolveAssociationIds(
             clientConfig,
             "product",
-            associatedProducts
+            associatedProducts,
+            tenantModels
           );
 
           await associationService.associateDealWithContacts(
             token,
             clientConfig.hubspotCredentialId,
             hubspotId,
-            contactAssociations
+            contactAssociations,
+            tenantModels
           );
           await associationService.associateDealWithCompanies(
             token,
             clientConfig.hubspotCredentialId,
             hubspotId,
-            companyAssociations
+            companyAssociations,
+            tenantModels
           );
           await associationService.associateDealWithProducts(
             token,
             clientConfig.hubspotCredentialId,
             hubspotId,
-            productAssociations
+            productAssociations,
+            tenantModels
           );
         }
       }
@@ -507,7 +524,7 @@ const hubspotService = {
     return [];
   },
 
-  async resolveAssociationIds(clientConfig, objectType, associationValues) {
+  async resolveAssociationIds(clientConfig, objectType, associationValues, tenantModels) {
     if (!Array.isArray(associationValues)) {
       return [];
     }
@@ -523,7 +540,8 @@ const hubspotService = {
       const hubspotId = await associationRegistryService.findHubspotIdForSapId(
         hubspotCredentialId,
         objectType,
-        sapId ? String(sapId) : null
+        sapId ? String(sapId) : null,
+        tenantModels
       );
 
       if (isProduct) {

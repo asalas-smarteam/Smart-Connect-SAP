@@ -1,8 +1,10 @@
 import hubspotAuthService from '../services/hubspotAuthService.js';
 import associationService from '../services/associationService.js';
+import { tenantResolver } from '../middleware/tenantResolver.js';
+import { requireTenantModels } from '../utils/tenantModels.js';
 
 export default async function routes(app) {
-  app.post('/test/associate/deal', async (req, reply) => {
+  app.post('/test/associate/deal', { preHandler: tenantResolver }, async (req, reply) => {
     try {
       const {
         dealId,
@@ -11,8 +13,9 @@ export default async function routes(app) {
         products = [],
         hubspotCredentialId,
       } = req.body || {};
+      const tenantModels = requireTenantModels(req);
 
-      const token = await hubspotAuthService.getAccessToken(hubspotCredentialId);
+      const token = await hubspotAuthService.getAccessToken(hubspotCredentialId, tenantModels);
 
       if (!token) {
         return reply.status(400).send({ ok: false, message: 'Failed to retrieve access token' });
@@ -22,19 +25,22 @@ export default async function routes(app) {
         token,
         hubspotCredentialId,
         dealId,
-        contacts
+        contacts,
+        tenantModels
       );
       await associationService.associateDealWithCompanies(
         token,
         hubspotCredentialId,
         dealId,
-        companies
+        companies,
+        tenantModels
       );
       await associationService.associateDealWithProducts(
         token,
         hubspotCredentialId,
         dealId,
-        products
+        products,
+        tenantModels
       );
 
       return reply.send({ ok: true });

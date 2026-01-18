@@ -1,8 +1,9 @@
-import ClientConfig from '../db/models/ClientConfig.js';
 import { testExternalConnection } from '../utils/externalDb.js';
+import { requireTenantModels } from '../utils/tenantModels.js';
 
 export const testExternalDb = async (req, reply) => {
   const { id: clientConfigId } = req.params;
+  const { ClientConfig } = requireTenantModels(req);
   const config = await ClientConfig.findById(clientConfigId);
 
   if (!config) {

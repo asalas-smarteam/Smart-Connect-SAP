@@ -1,5 +1,10 @@
 import axios from 'axios';
-import HubspotCredentials from '../db/models/HubspotCredentials.js';
+function getTenantHubspotCredentials(tenantModels) {
+  if (!tenantModels) {
+    throw new Error('Tenant models are required for HubSpot credentials');
+  }
+  return tenantModels.HubspotCredentials;
+}
 
 const HUBSPOT_TOKEN_URL = 'https://api.hubapi.com/oauth/v1/token';
 
@@ -30,7 +35,8 @@ const hubspotAuthService = {
     return `https://app.hubspot.com/oauth/authorize?${queryParams.toString()}`;
   },
 
-  async exchangeCodeForTokens(code, clientConfigId) {
+  async exchangeCodeForTokens(code, clientConfigId, tenantModels) {
+    const HubspotCredentials = getTenantHubspotCredentials(tenantModels);
     const { HUBSPOT_CLIENT_ID, HUBSPOT_CLIENT_SECRET, HUBSPOT_REDIRECT_URI } = process.env;
 
     const payload = buildFormData({
@@ -68,7 +74,8 @@ const hubspotAuthService = {
     });
   },
 
-  async refreshAccessToken(clientConfigId) {
+  async refreshAccessToken(clientConfigId, tenantModels) {
+    const HubspotCredentials = getTenantHubspotCredentials(tenantModels);
     const { HUBSPOT_CLIENT_ID, HUBSPOT_CLIENT_SECRET, HUBSPOT_REDIRECT_URI } = process.env;
 
     const credentials = await HubspotCredentials.findOne({ clientConfigId });
@@ -102,7 +109,8 @@ const hubspotAuthService = {
     return access_token;
   },
 
-  async getAccessToken(clientConfigId) {
+  async getAccessToken(clientConfigId, tenantModels) {
+    const HubspotCredentials = getTenantHubspotCredentials(tenantModels);
     const credentials = await HubspotCredentials.findOne({ clientConfigId });
 
     if (!credentials) {
@@ -113,7 +121,7 @@ const hubspotAuthService = {
       return credentials.accessToken;
     }
 
-    return this.refreshAccessToken(clientConfigId);
+    return this.refreshAccessToken(clientConfigId, tenantModels);
   },
 };
 

@@ -2,31 +2,32 @@ import hubspotAuthService from './hubspotAuthService.js';
 import associationRegistryService from './associationRegistryService.js';
 import * as hubspotClient from './hubspotClient.js';
 
-async function getToken(hubspotCredentialId) {
+async function getToken(hubspotCredentialId, tenantModels) {
   if (!hubspotCredentialId) {
     return null;
   }
 
   try {
-    return await hubspotAuthService.getAccessToken(hubspotCredentialId);
+    return await hubspotAuthService.getAccessToken(hubspotCredentialId, tenantModels);
   } catch (error) {
     console.error('Failed to retrieve HubSpot token', error);
     return null;
   }
 }
 
-async function resolveToken(token, hubspotCredentialId) {
+async function resolveToken(token, hubspotCredentialId, tenantModels) {
   if (token) return token;
-  return getToken(hubspotCredentialId);
+  return getToken(hubspotCredentialId, tenantModels);
 }
 
 async function associateDealWithProducts(
   token,
   hubspotCredentialId,
   dealId,
-  sapProducts = []
+  sapProducts = [],
+  tenantModels
 ) {
-  const resolvedToken = await resolveToken(token, hubspotCredentialId);
+  const resolvedToken = await resolveToken(token, hubspotCredentialId, tenantModels);
 
   if (!resolvedToken || !dealId || !Array.isArray(sapProducts)) {
     return { ok: true };
@@ -34,7 +35,8 @@ async function associateDealWithProducts(
 
   const productLineItems = await resolveProductEntries(
     sapProducts,
-    hubspotCredentialId
+    hubspotCredentialId,
+    tenantModels
   );
 
   for (const { productIdHubspot, quantity } of productLineItems) {
@@ -73,7 +75,7 @@ async function associateDealWithProducts(
   return { ok: true };
 }
 
-async function resolveHubspotIdsFromEntries(entries, hubspotCredentialId, objectType) {
+async function resolveHubspotIdsFromEntries(entries, hubspotCredentialId, objectType, tenantModels) {
   const resolvedHubspotIds = [];
 
   for (const entry of entries) {
@@ -91,7 +93,8 @@ async function resolveHubspotIdsFromEntries(entries, hubspotCredentialId, object
     const hubspotId = await associationRegistryService.findHubspotIdForSapId(
       hubspotCredentialId,
       objectType,
-      String(sapId)
+      String(sapId),
+      tenantModels
     );
 
     if (hubspotId) {
@@ -102,7 +105,7 @@ async function resolveHubspotIdsFromEntries(entries, hubspotCredentialId, object
   return resolvedHubspotIds;
 }
 
-async function resolveProductEntries(products, hubspotCredentialId) {
+async function resolveProductEntries(products, hubspotCredentialId, tenantModels) {
   const productLineItems = [];
 
   for (const product of products) {
@@ -118,7 +121,8 @@ async function resolveProductEntries(products, hubspotCredentialId) {
       (await associationRegistryService.findHubspotIdForSapId(
         hubspotCredentialId,
         'product',
-        sapId ? String(sapId) : null
+        sapId ? String(sapId) : null,
+        tenantModels
       ));
 
     if (hubspotId) {
@@ -138,9 +142,10 @@ async function associateObjectsBySapId(
   fromObjectType,
   fromHubspotId,
   toObjectType,
-  sapEntries = []
+  sapEntries = [],
+  tenantModels
 ) {
-  const resolvedToken = await resolveToken(token, hubspotCredentialId);
+  const resolvedToken = await resolveToken(token, hubspotCredentialId, tenantModels);
 
   if (
     !resolvedToken ||
@@ -155,7 +160,8 @@ async function associateObjectsBySapId(
   const toHubspotIds = await resolveHubspotIdsFromEntries(
     sapEntries,
     hubspotCredentialId,
-    toObjectType
+    toObjectType,
+    tenantModels
   );
 
   for (const toHubspotId of toHubspotIds) {
@@ -185,7 +191,8 @@ async function associateDealWithContacts(
   token,
   hubspotCredentialId,
   dealId,
-  sapContactIds = []
+  sapContactIds = [],
+  tenantModels
 ) {
   return associateObjectsBySapId(
     token,
@@ -193,7 +200,8 @@ async function associateDealWithContacts(
     'deal',
     dealId,
     'contact',
-    sapContactIds
+    sapContactIds,
+    tenantModels
   );
 }
 
@@ -201,7 +209,8 @@ async function associateDealWithCompanies(
   token,
   hubspotCredentialId,
   dealId,
-  sapCompanyIds = []
+  sapCompanyIds = [],
+  tenantModels
 ) {
   return associateObjectsBySapId(
     token,
@@ -209,7 +218,8 @@ async function associateDealWithCompanies(
     'deal',
     dealId,
     'company',
-    sapCompanyIds
+    sapCompanyIds,
+    tenantModels
   );
 }
 
@@ -217,7 +227,8 @@ async function associateContactWithCompanies(
   token,
   hubspotCredentialId,
   contactId,
-  sapCompanyIds = []
+  sapCompanyIds = [],
+  tenantModels
 ) {
   return associateObjectsBySapId(
     token,
@@ -225,7 +236,8 @@ async function associateContactWithCompanies(
     'contact',
     contactId,
     'company',
-    sapCompanyIds
+    sapCompanyIds,
+    tenantModels
   );
 }
 
@@ -233,7 +245,8 @@ async function associateCompanyWithContacts(
   token,
   hubspotCredentialId,
   companyId,
-  sapContactIds = []
+  sapContactIds = [],
+  tenantModels
 ) {
   return associateObjectsBySapId(
     token,
@@ -241,7 +254,8 @@ async function associateCompanyWithContacts(
     'company',
     companyId,
     'contact',
-    sapContactIds
+    sapContactIds,
+    tenantModels
   );
 }
 

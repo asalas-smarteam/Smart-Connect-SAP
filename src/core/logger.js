@@ -1,5 +1,4 @@
 import winston from 'winston';
-import LogEntry from '../db/models/LogEntry.js';
 
 const customLevels = {
   error: 0,
@@ -7,37 +6,6 @@ const customLevels = {
   info: 2,
   debug: 3,
 };
-
-const fallbackLogger = winston.createLogger({
-  level: 'error',
-  transports: [new winston.transports.Console({ level: 'error' })],
-});
-
-class LogEntryTransport extends winston.Transport {
-  constructor(options = {}) {
-    super(options);
-    this.level = options.level || 'debug';
-  }
-
-  async log(info, callback) {
-    setImmediate(() => this.emit('logged', info));
-    const { level, message, ...meta } = info;
-
-    try {
-      await LogEntry.create({
-        type: 'WINSTON',
-        payload: { message, meta },
-        level,
-      });
-    } catch (error) {
-      fallbackLogger.error('Failed to persist log entry:', error);
-    }
-
-    if (callback) {
-      callback();
-    }
-  }
-}
 
 const logger = winston.createLogger({
   levels: customLevels,
@@ -49,7 +17,6 @@ const logger = winston.createLogger({
   transports: [
     new winston.transports.Console({ level: 'info' }),
     new winston.transports.File({ filename: 'logs/app.log' }),
-    new LogEntryTransport({ level: 'debug' }),
   ],
 });
 
