@@ -252,7 +252,11 @@ La aplicación **no ejecuta migraciones Sequelize** (se eliminaron los stubs de 
 - **Firewall:** Garantiza acceso saliente a HubSpot y conectividad entrante/saliente a hosts/puertos SQL de SAP definidos en `ClientConfig` si usas conexiones SQL externas.
 - **SSL/HTTPS:** Termina TLS con un proxy inverso o ubica Fastify detrás de un terminador HTTPS según necesidad.
 
-## 17. Ejemplos de uso
+## 17. Provisionamiento y pruebas
+- **Estrategia de provisioning:** al crear un tenant solo se crean las colecciones MongoDB; no se insertan documentos iniciales para evitar violar `required` en los schemas multi-tenant.
+- **Pruebas:** los escenarios de prueba deben crear explícitamente los documentos que usan (por ejemplo `ClientConfig`, `HubspotCredentials`, mapeos y registros de log), sin depender de semillas automáticas.
+
+## 18. Ejemplos de uso
 Se asume el servidor en `localhost:3000` y la BD poblada con `ClientConfig` y mapeos.
 
 - **Ejecutar sincronización manual:**
@@ -282,7 +286,7 @@ Se asume el servidor en `localhost:3000` y la BD poblada con `ClientConfig` y ma
        -d '{"sapPipelineKey":"SAP_PIPE","hubspotPipelineId":"default","hubspotPipelineLabel":"Sales"}'
   ```
 
-## 18. Guía de contribución
+## 19. Guía de contribución
 - **Estilo de código:** ES Modules; preferir async/await y logging estructurado con Winston.
 - **Convenciones de carpetas:** Servicios en `src/services`, integraciones bajo `src/integrations`, modelos Mongoose en `src/db/models`, y rutas/controladores en `src/routes`/`src/controllers`.
 - **Agregar nuevos tipos de objeto:** Extiende `objectTypeRouter.js`, agrega manejadores de búsqueda/creación/actualización en `hubspotService.js` y asegúrate de tener entradas `FieldMapping` para el nuevo tipo.
