@@ -54,6 +54,20 @@ function extractBearerToken(req) {
   return null;
 }
 
+function extractTenantId(req) {
+  const headerTenantId = req.headers?.['x-tenant-id'];
+  if (headerTenantId) {
+    return headerTenantId;
+  }
+  if (req.query?.tenantId) {
+    return req.query.tenantId;
+  }
+  if (req.body?.tenantId) {
+    return req.body.tenantId;
+  }
+  return null;
+}
+
 async function resolveTenantByToken(token) {
   if (!token) {
     return null;
@@ -87,7 +101,13 @@ function respond(reply, next, statusCode, payload) {
 export async function tenantResolver(req, reply, next) {
   try {
     const token = extractBearerToken(req);
-    const client = await resolveTenantByToken(token);
+    let client = await resolveTenantByToken(token);
+    if (!token) {
+      const tenantId = extractTenantId(req);
+      if (tenantId) {
+        client = await SaaSClient.findOne({ _id: tenantId });
+      }
+    }
 
     if (!client) {
       return respond(reply, next, 403, { error: 'Tenant not found' });
