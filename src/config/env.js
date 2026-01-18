@@ -8,6 +8,7 @@ const {
   SAP_SYNC_CRON_ENABLED,
   JWT_SECRET,
   TENANT_DB_PREFIX,
+  INTERNAL_KEY,
 } = process.env;
 
 export default {
@@ -16,4 +17,5 @@ export default {
   SAP_SYNC_CRON_ENABLED,
   JWT_SECRET,
   TENANT_DB_PREFIX,
+  INTERNAL_KEY,
 };
