@@ -30,8 +30,26 @@ async function ensureTenantCollections(connection, models) {
   );
 }
 
-async function seedTenantDocuments(models) {
+function getSeedEligibility(model) {
+  const requiredPaths = model.schema.requiredPaths();
+  const missingDefaults = requiredPaths.filter((pathName) => {
+    const schemaPath = model.schema.path(pathName);
+    if (!schemaPath) {
+      return true;
+    }
+    const { defaultValue } = schemaPath;
+    return defaultValue === undefined || defaultValue === null;
+  });
+
+  return {
+    canSeed: missingDefaults.length === 0,
+    missingDefaults,
+  };
+}
+
+async function seedTenantDocuments({ models, tenantKey }) {
   const seedTasks = [];
+  const skipReasons = [];
 
   if (!await models.IntegrationMode.exists({ name: 'default' })) {
     seedTasks.push(
@@ -46,7 +64,75 @@ async function seedTenantDocuments(models) {
     seedTasks.push(models.ClientConfig.create({ active: true }));
   }
 
+  const seedableModels = [
+    {
+      model: models.HubspotCredentials,
+      name: 'HubspotCredentials',
+      seedData: { scope: 'seed' },
+    },
+    {
+      model: models.FieldMapping,
+      name: 'FieldMapping',
+      seedData: { objectType: 'seed', isActive: true },
+    },
+    {
+      model: models.LogEntry,
+      name: 'LogEntry',
+      seedData: { type: 'seed', level: 'info', payload: { message: 'Initial seed entry' } },
+    },
+    {
+      model: models.SyncLog,
+      name: 'SyncLog',
+      seedData: { status: 'seeded', recordsProcessed: 0, sent: 0, failed: 0 },
+    },
+    {
+      model: models.DealPipelineMapping,
+      name: 'DealPipelineMapping',
+      seedData: {},
+    },
+    {
+      model: models.DealStageMapping,
+      name: 'DealStageMapping',
+      seedData: {},
+    },
+    {
+      model: models.DealOwnerMapping,
+      name: 'DealOwnerMapping',
+      seedData: {},
+    },
+    {
+      model: models.AssociationRegistry,
+      name: 'AssociationRegistry',
+      seedData: {},
+    },
+  ];
+
+  for (const { model, name, seedData } of seedableModels) {
+    if (!await model.exists({})) {
+      const { canSeed, missingDefaults } = getSeedEligibility(model);
+      if (canSeed) {
+        seedTasks.push(model.create(seedData));
+      } else {
+        skipReasons.push({
+          model: name,
+          reason: `Required fields without defaults: ${missingDefaults.join(', ')}`,
+        });
+      }
+    }
+  }
+
   await Promise.all(seedTasks);
+
+  if (skipReasons.length > 0) {
+    await GlobalAuditLog.create({
+      action: 'tenant.seed_skipped',
+      tenantKey,
+      payload: {
+        reason: 'Schema requirements prevented seeding initial documents.',
+        skippedModels: skipReasons,
+      },
+    });
+  }
 }
 
 async function ensureGlobalDocuments({ planId }) {
@@ -129,7 +215,7 @@ export async function provisionTenant({
     const tenantModels = registerTenantModels(tenantConnection);
 
     await ensureTenantCollections(tenantConnection, tenantModels);
-    await seedTenantDocuments(tenantModels);
+    await seedTenantDocuments({ models: tenantModels, tenantKey });
 
     await GlobalAuditLog.create({
       action: 'tenant.provisioned',
