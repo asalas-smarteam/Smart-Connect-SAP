@@ -1,4 +1,4 @@
-import { ClientConfig } from '../config/database.js';
+import ClientConfig from '../db/models/ClientConfig.js';
 import { testExternalConnection } from '../utils/externalDb.js';
 
 export const testExternalDb = async (req, reply) => {

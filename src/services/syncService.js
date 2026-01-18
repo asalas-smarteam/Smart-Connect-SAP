@@ -1,7 +1,8 @@
 import sapService from '../integrations/sap/sapService.js';
 import mappingService from './mapping.service.js';
 import hubspotService from '../services/hubspotService.js';
-import { SyncLog, HubspotCredentials } from '../config/database.js';
+import HubspotCredentials from '../db/models/HubspotCredentials.js';
+import SyncLog from '../db/models/SyncLog.js';
 
 const syncService = {
   async run(config) {

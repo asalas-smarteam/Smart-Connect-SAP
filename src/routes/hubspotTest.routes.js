@@ -1,4 +1,4 @@
-import { ClientConfig } from '../config/database.js';
+import ClientConfig from '../db/models/ClientConfig.js';
 import hubspotService from '../services/hubspotService.js';
 
 export default async function routes(app) {
