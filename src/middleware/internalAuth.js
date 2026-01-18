@@ -1,4 +1,5 @@
 import env from '../config/env.js';
+import { validateProvisioningPayload } from '../utils/provisioningValidation.js';
 
 const { INTERNAL_KEY } = env;
 
@@ -23,9 +24,9 @@ export function internalRequestValidator(req, reply, next) {
     return respond(reply, next, 403, { error: 'Invalid internal key' });
   }
 
-  const { nombreEmpresa } = req.body || {};
-  if (!nombreEmpresa || typeof nombreEmpresa !== 'string' || !nombreEmpresa.trim()) {
-    return respond(reply, next, 400, { error: 'nombreEmpresa is required' });
+  const validation = validateProvisioningPayload(req.body);
+  if (!validation.valid) {
+    return respond(reply, next, 400, { error: validation.error });
   }
 
   if (typeof next === 'function') {

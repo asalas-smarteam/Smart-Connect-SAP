@@ -7,13 +7,10 @@ import {
 } from '../config/database.js';
 import { buildTenantDatabaseName, getTenantConnection } from '../config/tenantDatabase.js';
 import { registerTenantModels } from '../db/models/tenant/index.js';
+import { sanitizeMongoCollectionName } from '../utils/provisioningValidation.js';
 
 function slugifyCompanyName(companyName) {
-  return companyName
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
+  return sanitizeMongoCollectionName(companyName);
 }
 
 async function ensureTenantCollections(connection, models) {
