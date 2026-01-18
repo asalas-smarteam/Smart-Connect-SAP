@@ -1,4 +1,4 @@
-import { FieldMapping } from '../config/database.js';
+import FieldMapping from '../db/models/FieldMapping.js';
 
 const mapFields = (inputData, mappings, objectType) => {
   const result = {};

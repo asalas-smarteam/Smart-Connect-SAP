@@ -1,4 +1,4 @@
-import { FieldMapping } from '../config/database.js';
+import FieldMapping from '../db/models/FieldMapping.js';
 import mappingService from '../services/mapping.service.js';
 
 export const createMapping = async (req, reply) => {

@@ -1,4 +1,5 @@
-import { ClientConfig, IntegrationMode } from '../config/database.js';
+import ClientConfig from '../db/models/ClientConfig.js';
+import IntegrationMode from '../db/models/IntegrationMode.js';
 
 export const createClientConfig = async (req, reply) => {
   try {

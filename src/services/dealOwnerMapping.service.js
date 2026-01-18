@@ -1,4 +1,4 @@
-import { DealOwnerMapping } from '../config/database.js';
+import DealOwnerMapping from '../db/models/DealOwnerMapping.js';
 
 export async function getMappedOwnerId(hubspotCredentialId, sapOwnerId) {
   if (!hubspotCredentialId || !sapOwnerId) {

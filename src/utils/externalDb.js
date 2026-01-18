@@ -1,5 +1,5 @@
 import { createRequire } from 'module';
-import { ClientConfig } from '../config/database.js';
+import ClientConfig from '../db/models/ClientConfig.js';
 import logger from '../core/logger.js';
 
 const pools = {};

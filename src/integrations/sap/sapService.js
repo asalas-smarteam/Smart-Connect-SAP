@@ -1,4 +1,4 @@
-import { ClientConfig } from '../../config/database.js';
+import ClientConfig from '../../db/models/ClientConfig.js';
 import logger from '../../core/logger.js';
 import spMode from './modes/spMode.js';
 import scriptMode from './modes/scriptMode.js';

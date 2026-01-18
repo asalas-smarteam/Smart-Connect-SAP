@@ -1,4 +1,5 @@
-import { DealPipelineMapping, DealStageMapping } from '../config/database.js';
+import DealPipelineMapping from '../db/models/DealPipelineMapping.js';
+import DealStageMapping from '../db/models/DealStageMapping.js';
 
 const dealMappingResolver = {
   async resolvePipeline(hubspotCredentialId, sapPipelineKey) {

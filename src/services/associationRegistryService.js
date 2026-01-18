@@ -1,4 +1,4 @@
-import { AssociationRegistry } from '../config/database.js';
+import AssociationRegistry from '../db/models/AssociationRegistry.js';
 
 async function registerBaseObjectMapping(
   hubspotCredentialId,
