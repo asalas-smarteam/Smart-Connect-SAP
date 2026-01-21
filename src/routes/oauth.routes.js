@@ -3,6 +3,6 @@ import { tenantResolver } from '../middleware/tenantResolver.js';
 
 export default async function routes(app) {
   app.get('/oauth/hubspot/init/:clientConfigId', { preHandler: tenantResolver }, initOAuth);
-  app.get('/oauth/hubspot/callback', { preHandler: tenantResolver }, oauthCallback);
+  app.get('/oauth/hubspot/callback', oauthCallback);
   app.post('/oauth/hubspot/init', initOAuthForTenant);
 }

@@ -1,0 +1,29 @@
+El preHandler tenantResolver es quien valida “qué tenant” está haciendo la request. 
+En tenantResolver.js se ve que acepta 2 caminos:
+
+1.Authorization Bearer token:
+Si es JWT (tiene 3 partes separadas por .), se valida con JWT_SECRET y se busca el tenant por 
+tenantKey o portalId dentro del payload.
+
+Si no es JWT, usa el token como hubspot.accessToken y busca el tenant por ese valor.
+
+2.Sin token:
+Lee tenantId desde x-tenant-id (header) o ?tenantId= (query) o body.tenantId.
+Además exige que el tenant esté status === 'active' y que exista una Subscription activa y pagada; si no, devuelve 402. (tenantResolver.js).
+
+Sobre “de dónde sale el token válido”:
+
+En este proyecto no hay un endpoint que emita JWT para clientes. 
+El JWT_SECRET solo se usa para verificar, no para generar. Si necesitas JWT, tendrías que generarlo 
+tú (externo) con el mismo JWT_SECRET y payload con tenantKey o portalId.
+
+También puedes usar el access token de HubSpot almacenado en SaaSClient.hubspot.accessToken, 
+pero ese valor solo se llena si tienes flujo OAuth hecho y guardado. 
+No hay un endpoint que lo entregue; es parte del flujo OAuth en oauth.controller.js.
+
+Forma más simple para probar GET /config/client local:
+
+Usa el tenantId directo, sin token. Ejemplo:
+curl -H "x-tenant-id: <TENANT_ID>" http://localhost:3000/config/client
+o
+curl "http://localhost:3000/config/client?tenantId=<TENANT_ID>"

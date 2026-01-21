@@ -3,17 +3,67 @@ import { getTenantModels } from '../config/tenantDatabase.js';
 import hubspotAuthService from '../services/hubspotAuthService.js';
 import { requireTenantModels } from '../utils/tenantModels.js';
 
+function base64UrlEncode(buffer) {
+  return buffer.toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+function base64UrlDecode(input) {
+  const normalized = input.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), '=');
+  return Buffer.from(padded, 'base64').toString('utf8');
+}
+
+function buildOAuthState(payload) {
+  const json = JSON.stringify(payload);
+  return base64UrlEncode(Buffer.from(json, 'utf8'));
+}
+
+function parseOAuthState(state) {
+  if (!state) {
+    return { clientConfigId: null, tenantKey: null };
+  }
+
+  try {
+    const json = base64UrlDecode(state);
+    const parsed = JSON.parse(json);
+    return {
+      clientConfigId: parsed?.clientConfigId || null,
+      tenantKey: parsed?.tenantKey || null,
+    };
+  } catch (error) {
+    return { clientConfigId: state, tenantKey: null };
+  }
+}
+
 export const initOAuth = (req, reply) => {
   const { clientConfigId } = req.params;
-  const url = hubspotAuthService.generateAuthUrl(clientConfigId);
+  const state = req.tenantKey
+    ? buildOAuthState({ clientConfigId, tenantKey: req.tenantKey })
+    : clientConfigId;
+  const url = hubspotAuthService.generateAuthUrl(clientConfigId, state);
 
   return reply.redirect(url);
 };
 
 export const oauthCallback = async (req, reply) => {
   const { code, state } = req.query;
-  const clientConfigId = state;
-  const tenantModels = requireTenantModels(req);
+  const { clientConfigId, tenantKey } = parseOAuthState(state);
+
+  if (!code || !clientConfigId) {
+    return reply.code(400).send({ ok: false, message: 'code and state are required' });
+  }
+
+  let tenantModels = req.tenantModels;
+  if (!tenantModels) {
+    if (!tenantKey) {
+      return reply.code(400).send({ ok: false, message: 'tenantKey is required in state' });
+    }
+    tenantModels = await getTenantModels(tenantKey);
+    req.tenantModels = tenantModels;
+    req.tenantKey = tenantKey;
+  } else {
+    tenantModels = requireTenantModels(req);
+  }
 
   await hubspotAuthService.exchangeCodeForTokens(code, clientConfigId, tenantModels);
 
@@ -64,7 +114,11 @@ export const initOAuthForTenant = async (req, reply) => {
     };
     await client.save();
 
-    const oauthUrl = hubspotAuthService.generateAuthUrl(clientConfig._id.toString());
+    const state = buildOAuthState({
+      clientConfigId: clientConfig._id.toString(),
+      tenantKey: client.tenantKey,
+    });
+    const oauthUrl = hubspotAuthService.generateAuthUrl(clientConfig._id.toString(), state);
 
     return reply.send({ ok: true, oauthUrl });
   } catch (error) {

@@ -7,7 +7,7 @@ const { MONGODB_URI, TENANT_DB_PREFIX } = env;
 const tenantConnections = new Map();
 
 function buildTenantDatabaseName(tenantKey) {
-  const prefix = TENANT_DB_PREFIX || 'zap_integration';
+  const prefix = TENANT_DB_PREFIX || 'sap_integration';
   if (tenantKey.startsWith(`${prefix}_`)) {
     return tenantKey;
   }

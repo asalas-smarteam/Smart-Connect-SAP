@@ -19,13 +19,13 @@ function buildFormData(params) {
 }
 
 const hubspotAuthService = {
-  generateAuthUrl(clientConfigId) {
+  generateAuthUrl(clientConfigId, stateOverride = null) {
     const { HUBSPOT_CLIENT_ID, HUBSPOT_REDIRECT_URI, HUBSPOT_SCOPES } = process.env;
 
     const queryParams = new URLSearchParams({
       client_id: HUBSPOT_CLIENT_ID,
       redirect_uri: HUBSPOT_REDIRECT_URI,
-      state: clientConfigId,
+      state: stateOverride || clientConfigId,
     });
 
     if (HUBSPOT_SCOPES) {

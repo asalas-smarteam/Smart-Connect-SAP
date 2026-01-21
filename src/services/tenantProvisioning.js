@@ -27,6 +27,40 @@ async function ensureTenantCollections(connection, models) {
   );
 }
 
+
+async function ensureGlobalDocuments({ planId }) {
+  const featureFlags = [
+    {
+      key: 'sap_sync',
+      description: 'Enable SAP synchronization features',
+      enabled: true,
+    },
+  ];
+
+  for (const flag of featureFlags) {
+    // Paso 1: crear documento si no existe
+    await FeatureFlags.updateOne(
+      { key: flag.key },
+      {
+        $setOnInsert: {
+          ...flag,
+          allowedPlanIds: [],
+        },
+      },
+      { upsert: true }
+    );
+
+    // Paso 2: agregar el plan (idempotente)
+    await FeatureFlags.updateOne(
+      { key: flag.key },
+      {
+        $addToSet: { allowedPlanIds: planId },
+      }
+    );
+  }
+}
+
+/*
 async function ensureGlobalDocuments({ planId }) {
   const paymentStatuses = [
     {
@@ -74,7 +108,7 @@ async function ensureGlobalDocuments({ planId }) {
       { upsert: true }
     )),
   ]);
-}
+}*/
 
 export async function provisionTenant({
   companyName,
