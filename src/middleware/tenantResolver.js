@@ -84,21 +84,15 @@ async function resolveTenantByToken(token) {
   return SaaSClient.findOne({ 'hubspot.accessToken': token });
 }
 
-function respond(reply, next, statusCode, payload) {
+function respond(reply, statusCode, payload) {
   if (reply?.code) {
     reply.code(statusCode).send(payload);
-    return true;
-  }
-  if (typeof next === 'function') {
-    const error = new Error(payload?.error || 'Unauthorized');
-    error.statusCode = statusCode;
-    next(error);
     return true;
   }
   return false;
 }
 
-export async function tenantResolver(req, reply, next) {
+export async function tenantResolver(req, reply) {
   try {
     const token = extractBearerToken(req);
     let client = await resolveTenantByToken(token);
@@ -110,17 +104,17 @@ export async function tenantResolver(req, reply, next) {
     }
 
     if (!client) {
-      return respond(reply, next, 403, { error: 'Tenant not found' });
+      return respond(reply, 403, { error: 'Tenant not found' });
     }
 
     if (client.status !== 'active') {
-      return respond(reply, next, 402, { error: 'Subscription inactive' });
+      return respond(reply, 402, { error: 'Subscription inactive' });
     }
 
     const subscription = await Subscription.findOne({ clientId: client._id }).sort({ startedAt: -1 });
 
     if (!subscription || subscription.status !== 'active' || subscription.paymentStatus !== 'paid') {
-      return respond(reply, next, 402, { error: 'Subscription inactive' });
+      return respond(reply, 402, { error: 'Subscription inactive' });
     }
 
     const tenantDb = await getTenantConnection(client.tenantKey);
@@ -134,14 +128,8 @@ export async function tenantResolver(req, reply, next) {
     req.tenantDb = tenantDb;
     req.tenantModels = tenantModels;
 
-    if (typeof next === 'function') {
-      return next();
-    }
     return undefined;
   } catch (error) {
-    if (typeof next === 'function') {
-      return next(error);
-    }
     throw error;
   }
 }
