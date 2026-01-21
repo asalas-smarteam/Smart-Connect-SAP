@@ -27,6 +27,31 @@ async function ensureTenantCollections(connection, models) {
   );
 }
 
+const defaultIntegrationModes = [
+  {
+    name: 'API',
+    description: 'Integración mediante API del cliente',
+  },
+  {
+    name: 'STORE_PROCEDURE',
+    description: 'Integración mediante stored procedure',
+  },
+  {
+    name: 'SQL_SCRIPT',
+    description: 'Integración mediante script SQL',
+  },
+];
+
+async function ensureIntegrationModes({ IntegrationMode }) {
+  await Promise.all(
+    defaultIntegrationModes.map((mode) => IntegrationMode.updateOne(
+      { name: mode.name },
+      { $setOnInsert: mode },
+      { upsert: true }
+    ))
+  );
+}
+
 
 async function ensureGlobalDocuments({ planId }) {
   const featureFlags = [
@@ -141,6 +166,7 @@ export async function provisionTenant({
     const tenantModels = registerTenantModels(tenantConnection);
 
     await ensureTenantCollections(tenantConnection, tenantModels);
+    await ensureIntegrationModes(tenantModels);
     // Strategy: only create collections during provisioning; tests/fixtures must insert data as needed.
 
     await GlobalAuditLog.create({

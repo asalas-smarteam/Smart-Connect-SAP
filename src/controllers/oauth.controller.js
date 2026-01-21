@@ -86,9 +86,12 @@ export const initOAuthForTenant = async (req, reply) => {
     const tenantModels = await getTenantModels(client.tenantKey);
     const { ClientConfig, HubspotCredentials } = tenantModels;
 
-    let clientConfig = await ClientConfig.findOne();
+    const clientConfig = await ClientConfig.findOne();
     if (!clientConfig) {
-      clientConfig = await ClientConfig.create({ clientName: client.companyName });
+      return reply.code(400).send({
+        ok: false,
+        message: 'ClientConfig is required before initiating OAuth',
+      });
     }
 
     let credentials = await HubspotCredentials.findOne({ clientConfigId: clientConfig._id });
