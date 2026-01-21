@@ -2,7 +2,24 @@ import { requireTenantModels } from '../utils/tenantModels.js';
 
 export const createClientConfig = async (req, reply) => {
   try {
-    const { ClientConfig } = requireTenantModels(req);
+    const { ClientConfig, IntegrationMode } = requireTenantModels(req);
+    const { integrationModeId } = req.body;
+
+    if (!integrationModeId) {
+      return reply.send({
+        ok: false,
+        message: 'integrationModeId is required',
+      });
+    }
+
+    const integrationMode = await IntegrationMode.findById(integrationModeId);
+    if (!integrationMode) {
+      return reply.send({
+        ok: false,
+        message: 'integrationModeId is invalid',
+      });
+    }
+
     const data = await ClientConfig.create(req.body);
 
     return reply.send({
@@ -64,11 +81,16 @@ export const createIntegrationMode = async (req, reply) => {
 export const getIntegrationModes = async (req, reply) => {
   try {
     const { IntegrationMode } = requireTenantModels(req);
-    const data = await IntegrationMode.find();
+    const data = await IntegrationMode.find().lean();
+    const payload = data.map((mode) => ({
+      id: mode._id,
+      name: mode.name,
+      description: mode.description,
+    }));
 
     return reply.send({
       ok: true,
-      data,
+      data: payload,
     });
   } catch (error) {
     return reply.send({
