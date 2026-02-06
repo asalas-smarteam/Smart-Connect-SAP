@@ -8,6 +8,8 @@ import { createHubspotCredentialsModel } from './HubspotCredentials.js';
 import { createIntegrationModeModel } from './IntegrationMode.js';
 import { createLogEntryModel } from './LogEntry.js';
 import { createSyncLogModel } from './SyncLog.js';
+import { createWebhookConfigModel } from './WebhookConfig.js';
+import { createWebhookEventModel } from './WebhookEvent.js';
 
 export function registerTenantModels(connection) {
   if (!connection) {
@@ -25,5 +27,7 @@ export function registerTenantModels(connection) {
     IntegrationMode: createIntegrationModeModel(connection),
     LogEntry: createLogEntryModel(connection),
     SyncLog: createSyncLogModel(connection),
+    WebhookConfig: createWebhookConfigModel(connection),
+    WebhookEvent: createWebhookEventModel(connection),
   };
 }

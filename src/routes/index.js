@@ -12,6 +12,7 @@ import dealMappingRoutes from './dealMapping.routes.js';
 import dealOwnerMappingRoutes from './dealOwnerMapping.routes.js';
 import associationTestRoutes from './associationTest.routes.js';
 import internalRoutes from './internal.routes.js';
+import webhookRoutes from './webhook.routes.js';
 
 export default async function routes(app) {
   app.register(echoRoutes, { prefix: '/echo_test' });
@@ -27,4 +28,5 @@ export default async function routes(app) {
   app.register(dealOwnerMappingRoutes);
   app.register(associationTestRoutes);
   app.register(internalRoutes);
+  app.register(webhookRoutes);
 }
