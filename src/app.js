@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import routes from './routes/index.js';
 import winstonLogger from './core/logger.js';
 import startSapSync from './tasks/sapSyncTask.js';
+import startWebhookProcessor from './tasks/webhookProcessorTask.js';
 import { initializeExternalConnections } from './utils/externalDb.js';
 import env from './config/env.js';
 
@@ -39,6 +40,12 @@ app.addHook('onReady', async () => {
   if (isSapSyncEnabled) {
     const job = await startSapSync();
     job.start();
+  }
+
+  const isWebhookProcessorEnabled = env.WEBHOOK_PROCESSOR_CRON_ENABLED !== 'false';
+  if (isWebhookProcessorEnabled) {
+    const webhookJob = await startWebhookProcessor();
+    webhookJob.start();
   }
 });
 

@@ -1,17 +1,12 @@
 import cron from 'node-cron';
 import syncService from '../services/syncService.js';
-import { SaaSClient, Subscription } from '../config/database.js';
 import { getTenantModels } from '../config/tenantDatabase.js';
+import { listActiveTenants } from '../utils/tenantSubscriptions.js';
 
 export async function runSapSyncOnce() {
-  const activeClients = await SaaSClient.find({ status: 'active' });
+  const activeTenants = await listActiveTenants();
 
-  for (const client of activeClients) {
-    const subscription = await Subscription.findOne({ clientId: client._id }).sort({ startedAt: -1 });
-    if (!subscription || subscription.status !== 'active' || subscription.paymentStatus !== 'paid') {
-      continue;
-    }
-
+  for (const { client } of activeTenants) {
     const tenantModels = await getTenantModels(client.tenantKey);
     const { ClientConfig } = tenantModels;
     const activeConfigs = await ClientConfig.find({ active: true });
