@@ -58,7 +58,7 @@ const webhookProcessor = {
 
         try {
           const mappedPayload = await mappingService.applyMapping(
-            eventRecord.payload,
+            eventRecord.payload.data,
             eventRecord.hubspotCredentialId,
             eventRecord.objectType,
             tenantModels

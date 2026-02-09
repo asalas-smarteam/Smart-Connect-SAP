@@ -14,6 +14,10 @@ export async function runWebhookProcessorOnce() {
 
 export default function startWebhookProcessor() {
   const webhookJob = cron.schedule('*/1 * * * *', runWebhookProcessorOnce, { scheduled: false });
-
   return webhookJob;
 }
+
+/*
+function test() {
+  console.log("Running webhook processor test...");
+}*/
