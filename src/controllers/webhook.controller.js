@@ -32,6 +32,7 @@ async function resolveTenantContext({ hubspotCredentialId, portalId, tenantKey, 
 
   for (const { client, subscription } of activeTenants) {
     const tenantModels = await getTenantModels(client.tenantKey);
+  
     const credential = await tenantModels.HubspotCredentials.findById(hubspotCredentialId);
     if (credential) {
       return { client, subscription };
@@ -66,7 +67,9 @@ export const receiveHubspotWebhook = async (req, reply) => {
     let resolvedCredentialId = hubspotCredentialId;
 
     if (!resolvedCredentialId && portalId) {
-      const credential = await HubspotCredentials.findOne({ portalId });
+      const credentialQuery = { portalId };
+      
+      const credential = await HubspotCredentials.findOne(credentialQuery);
       resolvedCredentialId = credential?._id;
     }
 
@@ -74,22 +77,26 @@ export const receiveHubspotWebhook = async (req, reply) => {
       return reply.code(200).send({ ok: true, message: 'Missing HubSpot credential' });
     }
 
-    const config = await WebhookConfig.findOne({
+    const webhookConfigQuery = {
       hubspotCredentialId: resolvedCredentialId,
       enabled: true,
       enabledObjectTypes: { $in: [objectType] },
-    });
+    };
+
+    const config = await WebhookConfig.findOne(webhookConfigQuery);
 
     if (!config) {
       return reply.code(200).send({ ok: true, message: 'Webhook disabled' });
     }
 
-    await WebhookEvent.create({
+    const webhookEventPayload = {
       hubspotCredentialId: resolvedCredentialId,
       objectType,
       payload: req.body,
       status: 'pending',
-    });
+    };
+
+    await WebhookEvent.create(webhookEventPayload);
 
     return reply.code(200).send({ ok: true });
   } catch (error) {

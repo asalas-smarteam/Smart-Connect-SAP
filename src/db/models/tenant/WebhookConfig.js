@@ -16,7 +16,7 @@ export const webhookConfigSchema = new Schema(
     },
     enabledObjectTypes: {
       type: [String],
-      default: [],
+      default: ['deal'],
     },
   },
   {
