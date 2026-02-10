@@ -8,16 +8,17 @@ function getTenantFieldMapping(tenantModels) {
 
 const mapFields = (inputData, mappings, objectType) => {
   const result = {};
+  const resolvedInput = inputData ?? {};
 
   mappings
     .filter((mapping) => mapping.isActive ?? true)
     .forEach((m) => {
-      result[m.targetField] = inputData[m.sourceField] || null;
+      result[m.targetField] = resolvedInput?.[m.sourceField] ?? null;
     });
 
   const mappedFields = { properties: result };
 
-  if (objectType === 'deal') {
+  if (objectType === 'deal' && inputData) {
     const specialDealFields = [
       'associatedContacts',
       'associatedCompanies',
@@ -32,6 +33,14 @@ const mapFields = (inputData, mappings, objectType) => {
   }
 
   return mappedFields;
+};
+
+const normalizeAssociations = (value) => {
+  if (!value) {
+    return [];
+  }
+
+  return Array.isArray(value) ? value : [value];
 };
 
 const mappingService = {
@@ -68,6 +77,45 @@ const mappingService = {
     } catch (error) {
       console.error('Failed to apply mappings:', error);
       return {};
+    }
+  },
+
+  async applyDealWebhookMapping(payload, hubspotCredentialId, tenantModels) {
+    try {
+      const [dealMappings, contactMappings, companyMappings, productMappings] = await Promise.all([
+        this.getMappings(hubspotCredentialId, 'deal', tenantModels),
+        this.getMappings(hubspotCredentialId, 'contact', tenantModels),
+        this.getMappings(hubspotCredentialId, 'company', tenantModels),
+        this.getMappings(hubspotCredentialId, 'product', tenantModels),
+      ]);
+
+      const dealPayload = payload?.deal ?? null;
+      const contactPayload = payload?.contact ?? null;
+      const companyPayload = payload?.company ?? null;
+      const lineItemsPayload = normalizeAssociations(payload?.line_items ?? []);
+
+      const dealMapped = mapFields(dealPayload, dealMappings, 'deal');
+      const contactMapped = contactPayload
+        ? mapFields(contactPayload, contactMappings, 'contact').properties
+        : null;
+      const companyMapped = companyPayload
+        ? mapFields(companyPayload, companyMappings, 'company').properties
+        : null;
+      const productMapped = lineItemsPayload.map(
+        (item) => mapFields(item, productMappings, 'product').properties
+      );
+
+      return {
+        properties: dealMapped.properties,
+        associations: {
+          contacts: normalizeAssociations(contactMapped),
+          companies: normalizeAssociations(companyMapped),
+          products: productMapped,
+        },
+      };
+    } catch (error) {
+      console.error('Failed to apply deal webhook mappings:', error);
+      return { properties: {}, associations: { contacts: [], companies: [], products: [] } };
     }
   },
 };

@@ -57,12 +57,21 @@ const webhookProcessor = {
         }
 
         try {
-          const mappedPayload = await mappingService.applyMapping(
-            eventRecord.payload.data,
-            eventRecord.hubspotCredentialId,
-            eventRecord.objectType,
-            tenantModels
-          );
+          const isDealWebhook =
+            eventRecord.objectType === 'deal' &&
+            eventRecord.payload?.data?.deal;
+          const mappedPayload = isDealWebhook
+            ? await mappingService.applyDealWebhookMapping(
+              eventRecord.payload.data,
+              eventRecord.hubspotCredentialId,
+              tenantModels
+            )
+            : await mappingService.applyMapping(
+              eventRecord.payload.data,
+              eventRecord.hubspotCredentialId,
+              eventRecord.objectType,
+              tenantModels
+            );
 
           await sapWebhookService.sendToSap({
             payload: mappedPayload,
