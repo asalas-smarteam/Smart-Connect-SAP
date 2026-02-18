@@ -1,5 +1,19 @@
 import { requireTenantModels } from '../utils/tenantModels.js';
 
+function normalizeBaseUrl(value) {
+  return String(value || '').trim().replace(/\/+$/, '');
+}
+
+function normalizeServiceLayerPath(value) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  const withoutQuery = trimmed.split('?')[0].trim();
+  return `/${withoutQuery.replace(/^\/+/, '')}`;
+}
+
 export const createClientConfig = async (req, reply) => {
   try {
     const { ClientConfig, IntegrationMode } = requireTenantModels(req);
@@ -20,7 +34,31 @@ export const createClientConfig = async (req, reply) => {
       });
     }
 
-    const data = await ClientConfig.create(req.body);
+    const payload = { ...req.body };
+
+    if (integrationMode.name === 'SERVICE_LAYER') {
+      const serviceLayerBaseUrl = normalizeBaseUrl(payload.serviceLayerBaseUrl);
+      const serviceLayerPath = normalizeServiceLayerPath(payload.serviceLayerPath);
+      const serviceLayerUsername = String(payload.serviceLayerUsername || '').trim();
+      const serviceLayerPassword = String(payload.serviceLayerPassword || '').trim();
+
+      if (!serviceLayerBaseUrl || !serviceLayerPath || !serviceLayerUsername || !serviceLayerPassword) {
+        return reply.send({
+          ok: false,
+          message:
+            'SERVICE_LAYER mode requires serviceLayerBaseUrl, serviceLayerPath, serviceLayerUsername and serviceLayerPassword',
+        });
+      }
+
+      payload.serviceLayerBaseUrl = serviceLayerBaseUrl;
+      payload.serviceLayerPath = serviceLayerPath;
+      payload.serviceLayerUsername = serviceLayerUsername;
+      payload.serviceLayerPassword = serviceLayerPassword;
+      payload.apiUrl = `${serviceLayerBaseUrl}/b1s/v2${serviceLayerPath}`;
+      payload.apiToken = null;
+    }
+
+    const data = await ClientConfig.create(payload);
 
     return reply.send({
       ok: true,
@@ -54,7 +92,7 @@ export const getClientConfig = async (req, reply) => {
 export const createIntegrationMode = async (req, reply) => {
   try {
     const { name, description } = req.body;
-    const allowedNames = ['API', 'STORE_PROCEDURE', 'SQL_SCRIPT'];
+    const allowedNames = ['API', 'STORE_PROCEDURE', 'SQL_SCRIPT', 'SERVICE_LAYER'];
 
     if (name && !allowedNames.includes(name)) {
       return reply.send({

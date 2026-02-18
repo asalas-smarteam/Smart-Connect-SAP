@@ -146,6 +146,20 @@ const mappingService = {
     }
   },
 
+  async getActiveMappingsByClientConfig(clientConfigId, tenantModels) {
+    try {
+      if (!clientConfigId) {
+        return [];
+      }
+
+      const FieldMapping = getTenantFieldMapping(tenantModels);
+      return await FieldMapping.find({ clientConfigId, isActive: true }).sort({ _id: 1 });
+    } catch (error) {
+      console.error('Failed to fetch mappings by clientConfig:', error);
+      return [];
+    }
+  },
+
   async applyMapping(inputData, hubspotCredentialId, objectType, tenantModels) {
     try {
       const mappings = await this.getMappings(hubspotCredentialId, objectType, tenantModels);
