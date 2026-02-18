@@ -40,6 +40,10 @@ const defaultIntegrationModes = [
     name: 'SQL_SCRIPT',
     description: 'Integración mediante script SQL',
   },
+  {
+    name: 'SERVICE_LAYER',
+    description: 'Integración mediante SAP Business One Service Layer',
+  },
 ];
 
 async function ensureIntegrationModes({ IntegrationMode }) {

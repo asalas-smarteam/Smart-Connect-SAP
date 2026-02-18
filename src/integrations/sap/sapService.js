@@ -2,6 +2,8 @@ import logger from '../../core/logger.js';
 import spMode from './modes/spMode.js';
 import scriptMode from './modes/scriptMode.js';
 import apiMode from './modes/apiMode.js';
+import mappingService from '../../services/mapping.service.js';
+import serviceLayerService from '../../services/serviceLayer.service.js';
 
 const sapService = {
   async fetchData(clientConfigId, tenantModels) {
@@ -27,6 +29,10 @@ const sapService = {
           return scriptMode.execute(config);
         case 'API':
           return apiMode.execute(config);
+        case 'SERVICE_LAYER': {
+          const mappings = await mappingService.getActiveMappingsByClientConfig(clientConfigId, tenantModels);
+          return serviceLayerService.execute(config, mappings);
+        }
         default:
           return null;
       }

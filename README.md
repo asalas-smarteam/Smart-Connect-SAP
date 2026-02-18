@@ -1,12 +1,12 @@
 # Smart-Connect-SAP
 
 ## 1. Descripción general
-Smart-Connect-SAP es un motor SaaS basado en Fastify que sincroniza datos desde fuentes SAP/BEST hacia HubSpot CRM. La plataforma es multiinquilino: cada configuración de cliente define cómo ingerir datos SAP (llamada API, procedimiento almacenado o script SQL), cómo mapear campos SAP a propiedades de HubSpot y qué credenciales OAuth de HubSpot usar. Un motor de sincronización impulsado por cron se ejecuta en un intervalo fijo (cada minuto) para ingerir registros SAP, transformarlos mediante mapeos administrados en base de datos, enviarlos a HubSpot y, opcionalmente, escribir los IDs de HubSpot de vuelta en SAP. Las conexiones SQL externas (SQL Server/MySQL) son opcionales y quedan fuera de la migración principal a MongoDB.
+Smart-Connect-SAP es un motor SaaS basado en Fastify que sincroniza datos desde fuentes SAP/BEST hacia HubSpot CRM. La plataforma es multiinquilino: cada configuración de cliente define cómo ingerir datos SAP (llamada API, procedimiento almacenado, script SQL o SAP Business One Service Layer), cómo mapear campos SAP a propiedades de HubSpot y qué credenciales OAuth de HubSpot usar. Un motor de sincronización impulsado por cron se ejecuta en un intervalo fijo (cada minuto) para ingerir registros SAP, transformarlos mediante mapeos administrados en base de datos, enviarlos a HubSpot y, opcionalmente, escribir los IDs de HubSpot de vuelta en SAP. Las conexiones SQL externas (SQL Server/MySQL) son opcionales y quedan fuera de la migración principal a MongoDB.
 
 Capacidades clave:
 - **Motor de integración SaaS** con API HTTP en Fastify para configuración, OAuth, mapeos y disparo manual de sincronizaciones.
 - **Arquitectura multiinquilino** usando filas de `ClientConfig` por cliente y mapeos compartidos asociados a `hubspotCredentialId`.
-- **Opciones de ingesta SAP:** llamada API externa, ejecución de procedimiento almacenado o script SQL crudo contra una base externa (SQL Server/MySQL opcional mediante dependencias externas).
+- **Opciones de ingesta SAP:** llamada API externa, ejecución de procedimiento almacenado, script SQL crudo contra una base externa o consumo de SAP Business One Service Layer con autenticación de sesión.
 - **OAuth de HubSpot por cliente** con pares de `accessToken`/`refreshToken` almacenados.
 - **Capa de mapeo** (Field, Pipeline, Stage, Owner) para transformar los datos SAP en propiedades y IDs de HubSpot.
 - **Motor de sincronización** programado cada minuto; también admite disparo manual.
@@ -121,7 +121,7 @@ Todos los esquemas principales usan **Mongoose/MongoDB**; los nombres de colecci
 - **Uso en sincronización:** Usado por el transporte personalizado `LogEntryTransport` para guardar logs en tiempo de ejecución.
 
 ### IntegrationMode
-- **Propósito:** Enumera modos de ingesta (`STORE_PROCEDURE`, `SQL_SCRIPT`, `API`).
+- **Propósito:** Enumera modos de ingesta (`STORE_PROCEDURE`, `SQL_SCRIPT`, `API`, `SERVICE_LAYER`).
 - **Columnas:** `id` (PK), `name` (único), `description`.
 - **Uso en sincronización:** Unido en `sapService.fetchData()` para seleccionar la estrategia de ejecución.
 
@@ -131,6 +131,7 @@ Todos los esquemas principales usan **Mongoose/MongoDB**; los nombres de colecci
 - **Almacenamiento de credenciales:** Host/puerto/usuario/contraseña/nombre/dialecto de la BD externa se almacenan en `ClientConfig` y se usan para las conexiones SQL opcionales.
 - **Modos:**
   - **Modo API:** `apiMode.execute()` realiza GET a `apiUrl` con `Authorization: Bearer {apiToken}` opcional y devuelve JSON.
+  - **Modo Service Layer:** `serviceLayer.service.execute()` autentica sesión en `POST {serviceLayerBaseUrl}/b1s/v2/Login`, construye una URL segura mediante `buildServiceLayerUrl(clientConfig, mappings)` y ejecuta un `GET` con `$select` dinámico derivado de los mappings activos del `clientConfigId`.
   - **Modo Procedimiento almacenado:** `spMode.execute()` ejecuta `EXEC {storeProcedureName}` mediante la conexión externa.
   - **Modo Script:** `scriptMode.execute()` ejecuta `sqlQuery` con semántica `SELECT`.
 - **Punto de entrada del mapeo:** `sapService.fetchData()` carga el `ClientConfig` con `IntegrationMode` y llama el modo adecuado; los resultados se envían a `mapping.service.mapRecords()`.
@@ -258,6 +259,52 @@ La aplicación **no ejecuta migraciones Sequelize** (se eliminaron los stubs de 
 
 ## 18. Ejemplos de uso
 Se asume el servidor en `localhost:3000` y la BD poblada con `ClientConfig` y mapeos.
+
+- **Crear `ClientConfig` en modo `SERVICE_LAYER` (sin `apiUrl` manual):**
+  ```bash
+  curl -X POST http://localhost:3000/config/client \
+       -H "Content-Type: application/json" \
+       -d '{
+         "clientName": "Obtener Clientes",
+         "integrationModeId": "<integrationModeId SERVICE_LAYER>",
+         "objectType": "contact",
+         "intervalMinutes": 5,
+         "serviceLayerBaseUrl": "https://201.7.208.10:23052",
+         "serviceLayerPath": "/BusinessPartners",
+         "serviceLayerUsername": "manager",
+         "serviceLayerPassword": "secret",
+         "serviceLayerCompanyDB": "SBODEMOCL",
+         "active": true,
+         "hubspotCredentialId": "<hubspotCredentialId>",
+         "requireUpdateHubspotID": false
+       }'
+  ```
+  > El backend normaliza y construye internamente `apiUrl = {serviceLayerBaseUrl}/b1s/v2{serviceLayerPath}`.
+
+- **Crear mappings para `$select` dinámico por `clientConfigId`:**
+  ```bash
+  curl -X POST http://localhost:3000/mapping \
+       -H "Content-Type: application/json" \
+       -d '{
+         "sourceField": "CardName",
+         "targetField": "firstname",
+         "objectType": "contact",
+         "clientConfigId": "<clientConfigId>",
+         "hubspotCredentialId": "<hubspotCredentialId>"
+       }'
+  ```
+  > Durante la sincronización, el modo `SERVICE_LAYER` consulta mappings activos del `clientConfigId` y arma automáticamente `?$select=...` eliminando duplicados y rechazando campos inválidos.
+
+- **Ejemplo de URL construida automáticamente por el sistema:**
+  - `serviceLayerBaseUrl`: `https://201.7.208.10:23052`
+  - `serviceLayerPath`: `/BusinessPartners`
+  - mappings activos: `CardCode`, `CardName`, `Phone1`, `EmailAddress`
+  - URL final de lectura SAP: `https://201.7.208.10:23052/b1s/v2/BusinessPartners?$select=CardCode,CardName,Phone1,EmailAddress`
+
+- **Seguridad OData en Service Layer:**
+  - El usuario **no** envía query params OData en `serviceLayerPath`; el backend elimina cualquier `?`/`#` incluido.
+  - `$select` se genera únicamente desde `FieldMapping.sourceField` válidos (`[A-Za-z_][A-Za-z0-9_]*`).
+  - `$filter` sólo se permite como parámetro interno controlado por backend (`controlledFilter`), con validación estricta de formato.
 
 - **Ejecutar sincronización manual:**
   ```bash
