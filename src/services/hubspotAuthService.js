@@ -74,7 +74,7 @@ const hubspotAuthService = {
     });
   },
 
-  async refreshAccessToken(clientConfigId, credentials, tenantModels) {
+  async refreshAccessToken(credentials) {
     const { HUBSPOT_CLIENT_ID, HUBSPOT_CLIENT_SECRET, HUBSPOT_REDIRECT_URI } = process.env;
 
     if (!credentials || !credentials.refreshToken) {
@@ -113,7 +113,7 @@ const hubspotAuthService = {
       return credentials.accessToken;
     }
 
-    return this.refreshAccessToken(clientConfigId, credentials, tenantModels);
+    return this.refreshAccessToken(credentials);
   },
 };
 
