@@ -1,5 +1,5 @@
 const SAP_FIELD_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const FILTER_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*\s+(eq|ne|gt|ge|lt|le)\s+('[^']*'|\d+(\.\d+)?|true|false)$/i;
+const FILTER_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*\s+(eq|ne|gt|ge|lt|le)\s+(?:'[^']*'|-?\d+(?:\.\d+)?|true|false|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?(?:Z|[+-]\d{2}:\d{2})?)$/i;
 
 function cleanValue(value) {
   return String(value || '').trim();
@@ -37,13 +37,11 @@ function sanitizeSelectFields(mappings) {
 
 function sanitizeControlledFilter(filter) {
   const value = cleanValue(filter);
+  if (!value) return '';
 
-  if (!value) {
-    return '';
-  }
-
-  if (!FILTER_PATTERN.test(value)) {
-    throw new Error('Controlled $filter has invalid format');
+  const pattern = new RegExp(FILTER_PATTERN.source); // evita estado compartido
+  if (!pattern.test(value)) {
+    throw new Error(`Controlled $filter has invalid format: ${value}`);
   }
 
   return value;
@@ -71,7 +69,7 @@ export function buildServiceLayerUrl(clientConfig, mappings, options = {}) {
 
   const controlledFilter = sanitizeControlledFilter(options.controlledFilter);
   if (controlledFilter) {
-    queryParts.push(`$filter=${encodeURIComponent(controlledFilter)}`);
+    queryParts.push(`$filter=${controlledFilter}`);
   }
 
   return `${baseUrl}/b1s/v2${path}?${queryParts.join('&')}`;
