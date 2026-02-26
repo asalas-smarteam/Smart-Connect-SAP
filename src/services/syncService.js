@@ -13,11 +13,12 @@ const syncService = {
       }
 
       const { HubspotCredentials, SyncLog } = tenantModels;
-      const rawData = await sapService.fetchData(clientConfigId, tenantModels);
 
       const credentials = await HubspotCredentials.findById(
         config.hubspotCredentialId
       );
+      
+      const rawData = await sapService.fetchData(clientConfigId, tenantModels);
 
       if (!credentials) {
         await SyncLog.create({
@@ -63,7 +64,8 @@ const syncService = {
           mappedRecords,
           config,
           objectType,
-          tenantModels
+          tenantModels,
+          credentials
         );
       } catch (error) {
         hubspotResult = { sent: 0, failed: mappedRecords.length };

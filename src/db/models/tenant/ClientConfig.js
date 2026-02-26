@@ -29,6 +29,9 @@ export const clientConfigSchema = new Schema(
     serviceLayerPassword: {
       type: String,
     },
+    serviceLayerTopFilter: {
+      type: Number,
+    },
     serviceLayerCompanyDB: {
       type: String,
     },

@@ -10,9 +10,10 @@ import axios from "axios";
 import { getConnection } from "../utils/externalDb.js";
 
 const hubspotService = {
-  async sendToHubSpot(mappedItems, clientConfig, objectType, tenantModels) {
+  async sendToHubSpot(mappedItems, clientConfig, objectType, tenantModels, credentials) {
     const token = await hubspotAuthService.getAccessToken(
       clientConfig.hubspotCredentialId,
+      credentials,
       tenantModels
     );
     const handler = objectTypeRouter.getObjectTypeHandler(objectType);

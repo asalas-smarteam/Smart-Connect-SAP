@@ -74,11 +74,9 @@ const hubspotAuthService = {
     });
   },
 
-  async refreshAccessToken(clientConfigId, tenantModels) {
-    const HubspotCredentials = getTenantHubspotCredentials(tenantModels);
+  async refreshAccessToken(clientConfigId, credentials, tenantModels) {
     const { HUBSPOT_CLIENT_ID, HUBSPOT_CLIENT_SECRET, HUBSPOT_REDIRECT_URI } = process.env;
 
-    const credentials = await HubspotCredentials.findOne({ clientConfigId });
     if (!credentials || !credentials.refreshToken) {
       throw new Error('Refresh token not found for client configuration');
     }
@@ -109,19 +107,13 @@ const hubspotAuthService = {
     return access_token;
   },
 
-  async getAccessToken(clientConfigId, tenantModels) {
-    const HubspotCredentials = getTenantHubspotCredentials(tenantModels);
-    const credentials = await HubspotCredentials.findOne({ clientConfigId });
-
-    if (!credentials) {
-      throw new Error('Credentials not found for client configuration');
-    }
+  async getAccessToken(clientConfigId, credentials, tenantModels) {
 
     if (credentials.expiresAt && credentials.expiresAt > new Date()) {
       return credentials.accessToken;
     }
 
-    return this.refreshAccessToken(clientConfigId, tenantModels);
+    return this.refreshAccessToken(clientConfigId, credentials, tenantModels);
   },
 };
 
