@@ -39,7 +39,12 @@ const serviceLayerService = {
       throw new Error('serviceLayerBaseUrl is required for SERVICE_LAYER mode');
     }
 
-
+    if (!options?.controlledFilter && config?.intervalMinutes && config.intervalMinutes > 0) {
+      const now = new Date();
+      const past = new Date(now.getTime() - config.intervalMinutes * 60000);
+      const formatted = past.toISOString().split('.')[0];
+      options.controlledFilter = `UpdateDate ge ${formatted}`;
+    }
 
     const loginUrl = `${baseUrl}/b1s/v2/Login`;
     const logoutUrl = `${baseUrl}/b1s/v2/Logout`;
