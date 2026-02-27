@@ -3,6 +3,7 @@ import app from './app.js';
 import db from './config/database.js';
 import logger from './core/logger.js';
 import { closeAllConnections } from './utils/externalDb.js';
+import { seedDefaultSapFilters } from '../database/seeds/defaultSapFilters.seed.js';
 
 dotenv.config();
 
@@ -61,7 +62,8 @@ process.once('beforeExit', () => {
 const start = async () => {
   try {
     const PORT = process.env.PORT || 3000;
-    await connect();
+    const masterConnection = await connect();
+    await seedDefaultSapFilters(masterConnection);
     await app.listen({ port: PORT, host: '0.0.0.0' });
     logger.info(`🚀 Server running on http://localhost:${PORT}`);
 
