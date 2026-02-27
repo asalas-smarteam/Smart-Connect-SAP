@@ -1,0 +1,46 @@
+import mongoose from 'mongoose';
+
+const { Schema } = mongoose;
+
+export const sapFilterSchema = new Schema(
+  {
+    objectType: {
+      type: String,
+      required: true,
+      index: true,
+    },
+    property: {
+      type: String,
+      required: true,
+    },
+    operator: {
+      type: String,
+      required: true,
+      enum: ['eq', 'ge'],
+    },
+    value: {
+      type: String,
+      default: null,
+    },
+    isDefault: {
+      type: Boolean,
+      default: true,
+    },
+    isDynamic: {
+      type: Boolean,
+      default: false,
+    },
+    active: {
+      type: Boolean,
+      default: true,
+    },
+  },
+  {
+    collection: 'SapFilters',
+    timestamps: true,
+  }
+);
+
+export function createSapFilterModel(connection) {
+  return connection.models.SapFilter || connection.model('SapFilter', sapFilterSchema);
+}
