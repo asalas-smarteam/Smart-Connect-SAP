@@ -4,9 +4,13 @@ const mockBuildTenantDatabaseName = jest.fn();
 const mockGetTenantConnection = jest.fn();
 const mockRegisterTenantModels = jest.fn();
 const mockSanitizeMongoCollectionName = jest.fn();
+const mockReplicateDefaultSapFilters = jest.fn();
+
+const mockMasterConnection = { id: 'master-connection' };
 
 const mockFeatureFlags = {
   updateOne: jest.fn(),
+  db: mockMasterConnection,
 };
 const mockGlobalAuditLog = {
   create: jest.fn(),
@@ -34,6 +38,10 @@ jest.unstable_mockModule('../../src/utils/provisioningValidation.js', () => ({
   sanitizeMongoCollectionName: mockSanitizeMongoCollectionName,
 }));
 
+jest.unstable_mockModule('../../src/services/tenant/replicateDefaultSapFilters.js', () => ({
+  replicateDefaultSapFilters: mockReplicateDefaultSapFilters,
+}));
+
 jest.unstable_mockModule('../../src/config/database.js', () => ({
   FeatureFlags: mockFeatureFlags,
   GlobalAuditLog: mockGlobalAuditLog,
@@ -47,6 +55,7 @@ const { provisionTenant } = await import('../../src/services/tenantProvisioning.
 describe('provisionTenant', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockReplicateDefaultSapFilters.mockResolvedValue();
   });
 
   it('creates tenant, subscription, and collections with generated tenantKey', async () => {
@@ -75,6 +84,10 @@ describe('provisionTenant', () => {
     mockRegisterTenantModels.mockReturnValue({
       Orders: { collection: { name: 'orders' } },
       Products: { collection: { name: 'products' } },
+      IntegrationMode: {
+        collection: { name: 'integrationmodes' },
+        updateOne: jest.fn().mockResolvedValue(),
+      },
     });
 
     mockPaymentStatus.updateOne.mockResolvedValue();
@@ -103,8 +116,13 @@ describe('provisionTenant', () => {
       status: 'active',
       paymentStatus: 'paid',
     });
-    expect(createCollection).toHaveBeenCalledTimes(1);
+    expect(mockReplicateDefaultSapFilters).toHaveBeenCalledWith({
+      masterConnection: mockMasterConnection,
+      tenantConnection,
+    });
+    expect(createCollection).toHaveBeenCalledTimes(2);
     expect(createCollection).toHaveBeenCalledWith('products');
+    expect(createCollection).toHaveBeenCalledWith('integrationmodes');
     expect(mockGlobalAuditLog.create).toHaveBeenCalledWith({
       action: 'tenant.provisioned',
       tenantKey: 'tenant_acme_inc',
@@ -149,6 +167,10 @@ describe('provisionTenant', () => {
 
     mockRegisterTenantModels.mockReturnValue({
       Orders: { collection: { name: 'orders' } },
+      IntegrationMode: {
+        collection: { name: 'integrationmodes' },
+        updateOne: jest.fn().mockResolvedValue(),
+      },
     });
 
     mockPaymentStatus.updateOne.mockResolvedValue();
