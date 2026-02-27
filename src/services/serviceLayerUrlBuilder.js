@@ -66,10 +66,56 @@ export function buildServiceLayerUrl(clientConfig, mappings, options = {}) {
   }
 
   const queryParts = [`$select=${selectFields.join(',')}`];
+  const configFilters = clientConfig?.filters;
 
-  const controlledFilter = sanitizeControlledFilter(options.controlledFilter);
-  if (controlledFilter) {
-    queryParts.push(`$filter=${controlledFilter}`);
+  if (Array.isArray(configFilters) && configFilters.length > 0) {
+    const conditions = [];
+
+    configFilters.forEach((filter, index) => {
+      const property = cleanValue(filter?.property);
+      const operator = cleanValue(filter?.operator).toLowerCase();
+
+      if (!property) {
+        throw new Error(`Filter at index ${index} has an empty property`);
+      }
+
+      if (!['eq', 'ge'].includes(operator)) {
+        throw new Error(`Filter at index ${index} has an invalid operator: ${operator || '(empty)'}`);
+      }
+
+      let value = filter?.value;
+      if (filter?.isDynamic === true) {
+        const intervalMinutes = Number(clientConfig?.intervalMinutes);
+        const now = new Date();
+        const past = new Date(now.getTime() - intervalMinutes * 60000);
+        value = past.toISOString().split('.')[0];
+      }
+
+      if (value === null || typeof value === 'undefined') {
+        throw new Error(`Filter at index ${index} requires a value`);
+      }
+
+      const stringValue = String(value);
+      if (operator === 'eq') {
+        const normalizedValue = typeof value === 'string'
+          ? `'${stringValue.replace(/'/g, "''")}'`
+          : stringValue;
+        conditions.push(`${property} eq ${normalizedValue}`);
+        return;
+      }
+
+      conditions.push(`${property} ge ${stringValue}`);
+    });
+
+    if (conditions.length > 0) {
+      const filterString = conditions.join(' and ');
+      queryParts.push(`$filter=${encodeURIComponent(filterString)}`);
+    }
+  } else {
+    const controlledFilter = sanitizeControlledFilter(options.controlledFilter);
+    if (controlledFilter) {
+      queryParts.push(`$filter=${controlledFilter}`);
+    }
   }
 
   return `${baseUrl}/b1s/v2${path}?${queryParts.join('&')}`;
