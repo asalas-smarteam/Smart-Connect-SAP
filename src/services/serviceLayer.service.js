@@ -1,34 +1,57 @@
 import axios from 'axios';
+import https from 'https';
 import { buildServiceLayerUrl } from './serviceLayerUrlBuilder.js';
 import logger from '../core/logger.js';
-import https from "https";
+import sapSessionManager, { isSessionInvalidError } from './sapSessionManager.js';
 
 const httpsAgent = new https.Agent({
-  rejectUnauthorized: false, // 👈 permite cert aunque no matchee el hostname
+  rejectUnauthorized: false,
 });
 
-function buildAuthPayload(config) {
-  const payload = {
-    UserName: config?.serviceLayerUsername,
-    Password: config?.serviceLayerPassword
-  };
-
-  if (config?.serviceLayerCompanyDB) {
-    payload.CompanyDB = config.serviceLayerCompanyDB;
-  }
-
-  return payload;
-}
-
-function readSessionCookie(response) {
-  const setCookie = response?.headers?.['set-cookie'] || [];
-  const sessionCookie = setCookie.find((cookie) => cookie.startsWith('B1SESSION='));
-
-  if (!sessionCookie) {
+function normalizeNextLink(baseUrl, nextLink) {
+  if (!nextLink) {
     return null;
   }
 
-  return sessionCookie.split(';')[0];
+  if (/^https?:\/\//i.test(nextLink)) {
+    return nextLink;
+  }
+
+  return `${baseUrl}${nextLink.startsWith('/') ? '' : '/'}${nextLink}`;
+}
+
+
+function withTopParam(url, top) {
+  const parsed = new URL(url);
+  if (!parsed.searchParams.has('$top')) {
+    parsed.searchParams.set('$top', String(top));
+  }
+  return parsed.toString();
+}
+
+async function fetchAllPages(baseUrl, initialUrl, headers) {
+  const items = [];
+  let nextUrl = initialUrl;
+
+  while (nextUrl) {
+    const response = await axios.get(nextUrl, {
+      headers,
+      httpsAgent,
+    });
+
+    const data = response?.data;
+    if (Array.isArray(data?.value)) {
+      items.push(...data.value);
+    } else if (Array.isArray(data)) {
+      items.push(...data);
+    } else if (data) {
+      items.push(data);
+    }
+
+    nextUrl = normalizeNextLink(baseUrl, data?.['@odata.nextLink']);
+  }
+
+  return items;
 }
 
 const serviceLayerService = {
@@ -46,37 +69,33 @@ const serviceLayerService = {
       options.controlledFilter = `UpdateDate ge ${formatted}`;
     }
 
-    const loginUrl = `${baseUrl}/b1s/v2/Login`;
-    const logoutUrl = `${baseUrl}/b1s/v2/Logout`;
-    const dataUrl = buildServiceLayerUrl(config, mappings, options);
+    const requestOptions = {
+      ...options,
+      top: options?.top || 20,
+    };
 
-    const loginResponse = await axios.post(
-    loginUrl,
-    buildAuthPayload(config),
-    { httpsAgent } 
-    );
-    const sessionCookie = readSessionCookie(loginResponse);
+    const dataUrl = withTopParam(buildServiceLayerUrl(config, mappings, requestOptions), requestOptions.top);
 
-    if (!sessionCookie) {
-      throw new Error('Unable to establish SAP Service Layer session');
-    }
-
-    const headers = {
-      Cookie: sessionCookie,
+    const requestWithSession = async () => {
+      const { cookie } = await sapSessionManager.getSessionCookie(config);
+      return fetchAllPages(baseUrl, dataUrl, { Cookie: cookie });
     };
 
     try {
-      const response = await axios.get(dataUrl, {
-        headers,
-        httpsAgent, 
-      });
-      return response?.data?.value || response?.data || [];
-    } finally {
-      try {
-        await axios.post(logoutUrl, {}, { headers, httpsAgent });;
-      } catch (logoutError) {
-        logger.warn('SAP Service Layer logout failed', { error: logoutError.message });
+      return await requestWithSession();
+    } catch (error) {
+      if (!isSessionInvalidError(error)) {
+        throw error;
       }
+
+      const tenantKey = sapSessionManager.resolveTenantKey(config);
+      logger.warn('Invalid SAP session, invalidating and retrying once', {
+        tenantKey,
+        error: error.message,
+      });
+
+      await sapSessionManager.invalidateSession(tenantKey);
+      return requestWithSession();
     }
   },
 };
