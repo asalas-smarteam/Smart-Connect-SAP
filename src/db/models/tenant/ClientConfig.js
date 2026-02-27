@@ -2,6 +2,37 @@ import mongoose from 'mongoose';
 
 const { Schema } = mongoose;
 
+const clientFilterSchema = new Schema(
+  {
+    operator: {
+      type: String,
+      enum: ['eq', 'ge'],
+      required: true,
+    },
+    property: {
+      type: String,
+      required: true,
+    },
+    value: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
+    isDefault: {
+      type: Boolean,
+      default: false,
+    },
+    isDynamic: {
+      type: Boolean,
+      default: false,
+    },
+    editable: {
+      type: Boolean,
+      default: true,
+    },
+  },
+  { _id: false }
+);
+
 export const clientConfigSchema = new Schema(
   {
     clientName: {
@@ -78,6 +109,10 @@ export const clientConfigSchema = new Schema(
     objectType: {
       type: String,
       default: null,
+    },
+    filters: {
+      type: [clientFilterSchema],
+      default: [],
     },
     active: {
       type: Boolean,
