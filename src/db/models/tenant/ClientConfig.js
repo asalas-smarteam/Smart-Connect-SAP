@@ -6,7 +6,7 @@ const clientFilterSchema = new Schema(
   {
     operator: {
       type: String,
-      enum: ['eq', 'ge'],
+      enum: ['eq', 'ge', 'startswith', 'not_startswith'],
       required: true,
     },
     property: {

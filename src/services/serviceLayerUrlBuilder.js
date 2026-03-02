@@ -79,10 +79,6 @@ export function buildServiceLayerUrl(clientConfig, mappings, options = {}) {
         throw new Error(`Filter at index ${index} has an empty property`);
       }
 
-      if (!['eq', 'ge'].includes(operator)) {
-        throw new Error(`Filter at index ${index} has an invalid operator: ${operator || '(empty)'}`);
-      }
-
       let value = filter?.value;
       if (filter?.isDynamic === true) {
         const intervalMinutes = Number(clientConfig?.intervalMinutes);
@@ -96,15 +92,27 @@ export function buildServiceLayerUrl(clientConfig, mappings, options = {}) {
       }
 
       const stringValue = String(value);
-      if (operator === 'eq') {
-        const normalizedValue = typeof value === 'string'
-          ? `'${stringValue.replace(/'/g, "''")}'`
-          : stringValue;
-        conditions.push(`${property} eq ${normalizedValue}`);
-        return;
-      }
 
-      conditions.push(`${property} ge ${stringValue}`);
+      switch (operator) {
+        case 'eq': {
+          const normalizedValue = typeof value === 'string'
+            ? `'${stringValue.replace(/'/g, "''")}'`
+            : stringValue;
+          conditions.push(`${property} eq ${normalizedValue}`);
+          return;
+        }
+        case 'ge':
+          conditions.push(`${property} ge ${stringValue}`);
+          return;
+        case 'startswith':
+          conditions.push(`startswith(${property},'${stringValue.replace(/'/g, "''")}')`);
+          return;
+        case 'not_startswith':
+          conditions.push(`not startswith(${property},'${stringValue.replace(/'/g, "''")}')`);
+          return;
+        default:
+          throw new Error(`Unsupported SAP filter operator: ${operator}`);
+      }
     });
 
     if (conditions.length > 0) {

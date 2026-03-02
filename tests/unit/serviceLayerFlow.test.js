@@ -149,6 +149,41 @@ describe('SERVICE_LAYER configuration flow', () => {
     jest.useRealTimers();
   });
 
+
+  it('builds startswith and not_startswith filters in OData syntax', () => {
+    const companyUrl = buildServiceLayerUrl(
+      {
+        integrationModeName: 'SERVICE_LAYER',
+        serviceLayerBaseUrl: 'https://201.7.208.10:23052',
+        serviceLayerPath: '/BusinessPartners',
+        filters: [
+          { property: 'CardType', operator: 'eq', value: 'C' },
+          { property: 'FederalTaxID', operator: 'startswith', value: 'J' },
+          { property: 'UpdateDate', operator: 'ge', value: '2024-01-01' },
+        ],
+      },
+      [{ sourceField: 'CardCode' }]
+    );
+
+    expect(companyUrl).toContain("$filter=CardType%20eq%20'C'%20and%20startswith(FederalTaxID%2C'J')%20and%20UpdateDate%20ge%202024-01-01");
+
+    const contactUrl = buildServiceLayerUrl(
+      {
+        integrationModeName: 'SERVICE_LAYER',
+        serviceLayerBaseUrl: 'https://201.7.208.10:23052',
+        serviceLayerPath: '/BusinessPartners',
+        filters: [
+          { property: 'CardType', operator: 'eq', value: 'C' },
+          { property: 'FederalTaxID', operator: 'not_startswith', value: 'J' },
+          { property: 'UpdateDate', operator: 'ge', value: '2024-01-01' },
+        ],
+      },
+      [{ sourceField: 'CardCode' }]
+    );
+
+    expect(contactUrl).toContain("$filter=CardType%20eq%20'C'%20and%20not%20startswith(FederalTaxID%2C'J')%20and%20UpdateDate%20ge%202024-01-01");
+  });
+
   it('throws when filter has invalid operator', () => {
     expect(() =>
       buildServiceLayerUrl(
@@ -160,7 +195,7 @@ describe('SERVICE_LAYER configuration flow', () => {
         },
         [{ sourceField: 'CardCode' }]
       )
-    ).toThrow('invalid operator');
+    ).toThrow('Unsupported SAP filter operator: ne');
   });
 
 });
