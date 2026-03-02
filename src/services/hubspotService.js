@@ -6,8 +6,34 @@ import dealMappingResolver from "./dealMappingResolver.js";
 import { getMappedOwnerId } from "./dealOwnerMapping.service.js";
 import associationRegistryService from "./associationRegistryService.js";
 import associationService from "./associationService.js";
+import mappingService from "./mapping.service.js";
 import axios from "axios";
 import { getConnection } from "../utils/externalDb.js";
+
+function slugCompanyName(companyName) {
+  return String(companyName || '')
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function generateFallbackEmail(baseEmail, companyName) {
+  const normalizedEmail = String(baseEmail || '').trim().toLowerCase();
+
+  if (!normalizedEmail || !normalizedEmail.includes('@')) {
+    return null;
+  }
+
+  const [localPart, domain] = normalizedEmail.split('@');
+  if (!localPart || !domain) {
+    return null;
+  }
+
+  const companySlug = slugCompanyName(companyName) || 'company';
+  const randomThreeDigits = Math.floor(Math.random() * 900) + 100;
+
+  return `${localPart}+${companySlug}${randomThreeDigits}@${domain}`;
+}
 
 const hubspotService = {
   async sendToHubSpot(mappedItems, clientConfig, objectType, tenantModels, credentials) {
@@ -217,6 +243,78 @@ const hubspotService = {
             contactAssociations,
             tenantModels
           );
+
+          try {
+            const sapContacts = item?.rawSapData?.ContactEmployees || [];
+
+            if (Array.isArray(sapContacts) && sapContacts.length > 0) {
+              const mappedContacts = await mappingService.mapRecords(
+                sapContacts,
+                clientConfig.hubspotCredentialId,
+                "contact",
+                tenantModels
+              );
+
+              for (const [index, mappedContact] of mappedContacts.entries()) {
+                const sapContact = sapContacts[index] || {};
+                const sapInternalCode = sapContact?.InternalCode;
+                const contactPayload = {
+                  ...mappedContact,
+                  properties: {
+                    ...(mappedContact?.properties || {}),
+                  },
+                };
+
+                if (!contactPayload.properties.email) {
+                  const fallbackEmail = generateFallbackEmail(
+                    item?.properties?.email,
+                    item?.properties?.name || item?.properties?.company || item?.properties?.domain
+                  );
+
+                  if (fallbackEmail) {
+                    contactPayload.properties.email = fallbackEmail;
+                  }
+                }
+
+                const existingContact = await this.findContactByEmail(
+                  token,
+                  contactPayload?.properties?.email
+                );
+
+                let createdContact;
+
+                if (existingContact) {
+                  await this.updateContact(token, existingContact.id, contactPayload);
+                } else {
+                  createdContact = await this.createContact(token, contactPayload);
+
+                  if (createdContact?.id && sapInternalCode) {
+                    await associationRegistryService.registerBaseObjectMapping(
+                      clientConfig.hubspotCredentialId,
+                      "contact",
+                      sapInternalCode,
+                      createdContact.id,
+                      tenantModels
+                    );
+                  }
+                }
+
+                const contactHubspotId = existingContact?.id ?? createdContact?.id;
+
+                if (contactHubspotId) {
+                  await associationService.associateCompanyWithContacts(
+                    token,
+                    clientConfig.hubspotCredentialId,
+                    hubspotId,
+                    [{ hubspotId: contactHubspotId, sapId: sapInternalCode }],
+                    tenantModels
+                  );
+                }
+              }
+            }
+          } catch (contactSyncError) {
+            console.error("Company contact sync error:", contactSyncError);
+          }
         }
       }
 
