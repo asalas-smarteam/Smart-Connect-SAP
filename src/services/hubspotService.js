@@ -252,7 +252,8 @@ const hubspotService = {
                 sapContacts,
                 clientConfig.hubspotCredentialId,
                 "contact",
-                tenantModels
+                tenantModels,
+                "contactEmployee"
               );
 
               for (const [index, mappedContact] of mappedContacts.entries()) {

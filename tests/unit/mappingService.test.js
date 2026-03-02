@@ -39,4 +39,30 @@ describe('mappingService.mapRecords', () => {
 
     expect(mapped).toEqual([{ properties: { address: null } }]);
   });
+
+  it('falls back to businessPartner mappings when source context has no mappings', async () => {
+    const find = jest
+      .fn()
+      .mockReturnValueOnce({ sort: jest.fn().mockResolvedValue([]) })
+      .mockReturnValueOnce({
+        sort: jest.fn().mockResolvedValue([
+          { sourceField: 'Name', targetField: 'name', isActive: true, sourceContext: 'businessPartner' },
+        ]),
+      });
+
+    const tenantModels = {
+      FieldMapping: { find },
+    };
+
+    const mapped = await mappingService.mapRecords(
+      [{ Name: 'Alice' }],
+      'cred-1',
+      'contact',
+      tenantModels,
+      'contactEmployee'
+    );
+
+    expect(mapped).toEqual([{ properties: { name: 'Alice' } }]);
+    expect(find).toHaveBeenCalledTimes(2);
+  });
 });

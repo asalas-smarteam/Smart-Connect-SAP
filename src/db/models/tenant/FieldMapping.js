@@ -13,6 +13,11 @@ export const fieldMappingSchema = new Schema(
     objectType: {
       type: String,
     },
+    sourceContext: {
+      type: String,
+      enum: ['businessPartner', 'contactEmployee'],
+      default: 'businessPartner',
+    },
     clientConfigId: {
       type: Schema.Types.ObjectId,
       ref: 'ClientConfig',

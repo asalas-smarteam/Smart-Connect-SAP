@@ -1,6 +1,42 @@
 import logger from '../core/logger.js';
 import { requireTenantModels } from '../utils/tenantModels.js';
 
+
+const DEFAULT_CONTACT_EMPLOYEE_MAPPINGS = [
+  { sourceField: 'Name', targetField: 'name' },
+  { sourceField: 'InternalCode', targetField: 'internalcode' },
+  { sourceField: 'Street', targetField: 'address' },
+];
+
+async function ensureDefaultContactEmployeeMappings({ FieldMapping, clientConfig }) {
+  if (!clientConfig?._id || !clientConfig?.hubspotCredentialId) {
+    return;
+  }
+
+  await Promise.all(
+    DEFAULT_CONTACT_EMPLOYEE_MAPPINGS.map(async (mapping) => {
+      const existing = await FieldMapping.findOne({
+        clientConfigId: clientConfig._id,
+        hubspotCredentialId: clientConfig.hubspotCredentialId,
+        objectType: 'contact',
+        sourceContext: 'contactEmployee',
+        sourceField: mapping.sourceField,
+        targetField: mapping.targetField,
+      });
+
+      if (!existing) {
+        await FieldMapping.create({
+          ...mapping,
+          objectType: 'contact',
+          sourceContext: 'contactEmployee',
+          clientConfigId: clientConfig._id,
+          hubspotCredentialId: clientConfig.hubspotCredentialId,
+        });
+      }
+    })
+  );
+}
+
 function normalizeBaseUrl(value) {
   return String(value || '').trim().replace(/\/+$/, '');
 }
@@ -84,7 +120,7 @@ function applyCustomFilterPatch(existingCustomFilters, incomingFilters) {
 
 export const createClientConfig = async (req, reply) => {
   try {
-    const { ClientConfig, IntegrationMode, SapFilter } = requireTenantModels(req);
+    const { ClientConfig, FieldMapping, IntegrationMode, SapFilter } = requireTenantModels(req);
     const { integrationModeId } = req.body;
 
     if (!integrationModeId) {
@@ -182,6 +218,10 @@ export const createClientConfig = async (req, reply) => {
     }
 
     const data = await ClientConfig.create(payload);
+    await ensureDefaultContactEmployeeMappings({
+      FieldMapping,
+      clientConfig: data,
+    });
 
     return reply.send({
       ok: true,
