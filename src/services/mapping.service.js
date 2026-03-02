@@ -83,23 +83,58 @@ const normalizeAssociations = (value) => {
 };
 
 const mappingService = {
-  async getMappings(hubspotCredentialId, objectType, tenantModels) {
+  async getMappings(hubspotCredentialId, objectType, tenantModels, sourceContext = 'businessPartner') {
     try {
       if (!hubspotCredentialId) {
         return [];
       }
 
       const FieldMapping = getTenantFieldMapping(tenantModels);
-      return await FieldMapping.find({ hubspotCredentialId, objectType }).sort({ _id: 1 });
+      const buildContextFilter = (context) => {
+        if (context === 'businessPartner') {
+          return {
+            $or: [{ sourceContext: 'businessPartner' }, { sourceContext: { $exists: false } }],
+          };
+        }
+
+        return { sourceContext: context };
+      };
+
+      let mappings = await FieldMapping.find({
+        hubspotCredentialId,
+        objectType,
+        ...buildContextFilter(sourceContext),
+      }).sort({ _id: 1 });
+
+      if (mappings.length === 0 && sourceContext !== 'businessPartner') {
+        mappings = await FieldMapping.find({
+          hubspotCredentialId,
+          objectType,
+          ...buildContextFilter('businessPartner'),
+        }).sort({ _id: 1 });
+      }
+
+      return mappings;
     } catch (error) {
       console.error('Failed to fetch mappings:', error);
       return [];
     }
   },
 
-  async mapRecords(sapRecords, hubspotCredentialId, objectType, tenantModels) {
+  async mapRecords(
+    sapRecords,
+    hubspotCredentialId,
+    objectType,
+    tenantModels,
+    sourceContext = 'businessPartner'
+  ) {
     try {
-      const mappings = await this.getMappings(hubspotCredentialId, objectType, tenantModels);
+      const mappings = await this.getMappings(
+        hubspotCredentialId,
+        objectType,
+        tenantModels,
+        sourceContext
+      );
 
       return sapRecords.map((record) => mapFields(record, mappings, objectType));
     } catch (error) {
@@ -122,9 +157,20 @@ const mappingService = {
     }
   },
 
-  async applyMapping(inputData, hubspotCredentialId, objectType, tenantModels) {
+  async applyMapping(
+    inputData,
+    hubspotCredentialId,
+    objectType,
+    tenantModels,
+    sourceContext = 'businessPartner'
+  ) {
     try {
-      const mappings = await this.getMappings(hubspotCredentialId, objectType, tenantModels);
+      const mappings = await this.getMappings(
+        hubspotCredentialId,
+        objectType,
+        tenantModels,
+        sourceContext
+      );
 
       return mapFields(inputData, mappings, objectType);
     } catch (error) {

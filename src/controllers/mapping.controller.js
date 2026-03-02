@@ -4,13 +4,55 @@ import { requireTenantModels } from '../utils/tenantModels.js';
 export const createMapping = async (req, reply) => {
   try {
     const { FieldMapping } = requireTenantModels(req);
-    const { sourceField, targetField, objectType, clientConfigId, hubspotCredentialId } =
-      req.body;
+    const {
+      sourceField,
+      targetField,
+      objectType,
+      clientConfigId,
+      hubspotCredentialId,
+      sourceContext = 'businessPartner',
+    } = req.body;
 
     const data = await FieldMapping.create({
       sourceField,
       targetField,
       objectType,
+      clientConfigId,
+      hubspotCredentialId,
+      sourceContext,
+    });
+
+    return reply.send({ ok: true, data });
+  } catch (error) {
+    return reply.send({ ok: false, message: error.message });
+  }
+};
+
+
+export const createAdminMapping = async (req, reply) => {
+  try {
+    const { FieldMapping } = requireTenantModels(req);
+    const {
+      sourceField,
+      targetField,
+      objectType,
+      sourceContext,
+      clientConfigId,
+      hubspotCredentialId,
+    } = req.body;
+
+    if (!sourceContext) {
+      return reply.code(400).send({
+        ok: false,
+        message: 'sourceContext is required',
+      });
+    }
+
+    const data = await FieldMapping.create({
+      sourceField,
+      targetField,
+      objectType,
+      sourceContext,
       clientConfigId,
       hubspotCredentialId,
     });

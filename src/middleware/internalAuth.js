@@ -34,3 +34,18 @@ export function internalRequestValidator(req, reply, next) {
   }
   return undefined;
 }
+
+
+export function internalKeyAuthOnly(req, reply, next) {
+  const internalKey = req.headers?.['x-internal-key'];
+
+  if (!INTERNAL_KEY || internalKey !== INTERNAL_KEY) {
+    return respond(reply, next, 403, { error: 'Invalid internal key' });
+  }
+
+  if (typeof next === 'function') {
+    return next();
+  }
+
+  return undefined;
+}
