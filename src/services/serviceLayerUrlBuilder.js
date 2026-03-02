@@ -84,7 +84,7 @@ export function buildServiceLayerUrl(clientConfig, mappings, options = {}) {
         const intervalMinutes = Number(clientConfig?.intervalMinutes);
         const now = new Date();
         const past = new Date(now.getTime() - intervalMinutes * 60000);
-        value = past.toISOString().split('.')[0];
+        value = past.toISOString().split('.')[0]; //### SaveDoc
       }
 
       if (value === null || typeof value === 'undefined') {

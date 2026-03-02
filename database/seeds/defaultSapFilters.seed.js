@@ -24,7 +24,7 @@ const BASE_DEFAULT_SAP_FILTERS = [
     objectType: 'contact',
     property: 'FederalTaxID',
     operator: 'not_startswith',
-    value: 'J',
+    value: 'I',
     isDefault: true,
     isDynamic: false,
     active: true,
