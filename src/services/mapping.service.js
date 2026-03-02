@@ -6,6 +6,45 @@ function getTenantFieldMapping(tenantModels) {
   return tenantModels.FieldMapping;
 }
 
+
+const resolveValueByPath = (inputData, sourceField) => {
+  if (!sourceField) {
+    return null;
+  }
+
+  const pathParts = String(sourceField)
+    .split('.')
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  if (pathParts.length === 0) {
+    return null;
+  }
+
+  let currentValue = inputData;
+
+  for (const segment of pathParts) {
+    if (currentValue === null || typeof currentValue === 'undefined') {
+      return null;
+    }
+
+    if (Array.isArray(currentValue)) {
+      currentValue = currentValue[0];
+      if (currentValue === null || typeof currentValue === 'undefined') {
+        return null;
+      }
+    }
+
+    currentValue = currentValue?.[segment];
+  }
+
+  if (Array.isArray(currentValue)) {
+    return currentValue[0] ?? null;
+  }
+
+  return currentValue ?? null;
+};
+
 const mapFields = (inputData, mappings, objectType) => {
   const result = {};
   const resolvedInput = inputData ?? {};
@@ -13,7 +52,7 @@ const mapFields = (inputData, mappings, objectType) => {
   mappings
     .filter((mapping) => mapping.isActive ?? true)
     .forEach((m) => {
-      result[m.targetField] = resolvedInput?.[m.sourceField] ?? null;
+      result[m.targetField] = resolveValueByPath(resolvedInput, m.sourceField);
     });
 
   const mappedFields = { properties: result };

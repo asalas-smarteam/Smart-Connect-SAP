@@ -184,6 +184,27 @@ describe('SERVICE_LAYER configuration flow', () => {
     expect(contactUrl).toContain("$filter=CardType%20eq%20'C'%20and%20not%20startswith(FederalTaxID%2C'J')%20and%20UpdateDate%20ge%202024-01-01");
   });
 
+
+  it('appends company additional fields from env into $select', () => {
+    process.env.COMPANY_ADD_FIELDS_URL_SAP = 'BPAddresses,ContactEmployees';
+
+    const url = buildServiceLayerUrl(
+      {
+        integrationModeName: 'SERVICE_LAYER',
+        objectType: 'company',
+        serviceLayerBaseUrl: 'https://201.7.208.10:23052',
+        serviceLayerPath: '/BusinessPartners',
+      },
+      [{ sourceField: 'CardCode' }, { sourceField: 'CardName' }]
+    );
+
+    expect(url).toBe(
+      'https://201.7.208.10:23052/b1s/v2/BusinessPartners?$select=CardCode,CardName,BPAddresses,ContactEmployees'
+    );
+
+    delete process.env.COMPANY_ADD_FIELDS_URL_SAP;
+  });
+
   it('throws when filter has invalid operator', () => {
     expect(() =>
       buildServiceLayerUrl(

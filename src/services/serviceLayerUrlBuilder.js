@@ -35,6 +35,22 @@ function sanitizeSelectFields(mappings) {
   return Array.from(unique);
 }
 
+function getCompanyAdditionalFields(objectType) {
+  if (objectType !== 'company') {
+    return [];
+  }
+
+  const rawFields = cleanValue(process.env.COMPANY_ADD_FIELDS_URL_SAP);
+  if (!rawFields) {
+    return [];
+  }
+
+  return rawFields
+    .split(',')
+    .map((field) => cleanValue(field))
+    .filter((field) => field && SAP_FIELD_PATTERN.test(field));
+}
+
 function sanitizeControlledFilter(filter) {
   const value = cleanValue(filter);
   if (!value) return '';
@@ -61,11 +77,13 @@ export function buildServiceLayerUrl(clientConfig, mappings, options = {}) {
   }
 
   const selectFields = sanitizeSelectFields(mappings);
-  if (selectFields.length === 0) {
+  const companyAdditionalFields = getCompanyAdditionalFields(clientConfig?.objectType);
+  const mergedSelectFields = Array.from(new Set([...selectFields, ...companyAdditionalFields]));
+  if (mergedSelectFields.length === 0) {
     throw new Error('At least one active mapping with a valid sourceField is required');
   }
 
-  const queryParts = [`$select=${selectFields.join(',')}`];
+  const queryParts = [`$select=${mergedSelectFields.join(',')}`];
   const configFilters = clientConfig?.filters;
 
   if (Array.isArray(configFilters) && configFilters.length > 0) {

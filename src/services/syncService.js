@@ -57,21 +57,26 @@ const syncService = {
         tenantModels
       );
 
+      const mappedRecordsWithRawSap = mappedRecords.map((record, index) => ({
+        ...record,
+        rawSapData: sapRecords?.[index] ?? null,
+      }));
+
       let hubspotResult = { sent: 0, failed: 0 };
 
       try {
         hubspotResult = await hubspotService.sendToHubSpot(
-          mappedRecords,
+          mappedRecordsWithRawSap,
           config,
           objectType,
           tenantModels,
           credentials
         );
       } catch (error) {
-        hubspotResult = { sent: 0, failed: mappedRecords.length };
+        hubspotResult = { sent: 0, failed: mappedRecordsWithRawSap.length };
       }
 
-      const recordsProcessed = mappedRecords.length;
+      const recordsProcessed = mappedRecordsWithRawSap.length;
 
       await SyncLog.create({
         clientConfigId,
