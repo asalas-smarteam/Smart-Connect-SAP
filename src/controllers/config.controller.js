@@ -17,7 +17,7 @@ function normalizeServiceLayerPath(value) {
 
 
 
-const ALLOWED_OPERATORS = ['eq', 'ge'];
+const ALLOWED_OPERATORS = ['eq', 'ge', 'startswith', 'not_startswith'];
 const FILTER_CONTROLLED_FIELDS = ['isDefault', 'isDynamic', 'editable'];
 
 function normalizeFilterKey(filter) {

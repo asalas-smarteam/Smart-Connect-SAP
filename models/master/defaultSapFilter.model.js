@@ -16,7 +16,7 @@ export const defaultSapFilterSchema = new Schema(
     operator: {
       type: String,
       required: true,
-      enum: ['eq', 'ge'],
+      enum: ['eq', 'ge', 'startswith', 'not_startswith'],
     },
     value: {
       type: String,
