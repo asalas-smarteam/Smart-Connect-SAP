@@ -25,12 +25,14 @@ function sanitizeSelectFields(mappings) {
 
   const unique = new Set();
 
-  mappings.forEach((mapping) => {
-    const field = cleanValue(mapping?.sourceField);
-    if (field && SAP_FIELD_PATTERN.test(field)) {
-      unique.add(field);
-    }
-  });
+  mappings.filter((mapping) => mapping.sourceContext !== "contactEmployee")
+    .forEach((mapping) => {
+      const field = cleanValue(mapping.sourceField);
+
+      if (field && SAP_FIELD_PATTERN.test(field)) {
+        unique.add(field);
+      }
+    });
 
   return Array.from(unique);
 }

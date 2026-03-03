@@ -268,7 +268,7 @@ const hubspotService = {
 
                 if (!contactPayload.properties.email) {
                   const fallbackEmail = generateFallbackEmail(
-                    item?.properties?.email,
+                    item?.rawSapData?.EmailAddress,
                     item?.properties?.name || item?.properties?.company || item?.properties?.domain
                   );
 

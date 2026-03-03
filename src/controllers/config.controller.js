@@ -3,9 +3,9 @@ import { requireTenantModels } from '../utils/tenantModels.js';
 
 
 const DEFAULT_CONTACT_EMPLOYEE_MAPPINGS = [
-  { sourceField: 'Name', targetField: 'name' },
+  { sourceField: 'Name', targetField: 'firstname' },
   { sourceField: 'InternalCode', targetField: 'internalcode' },
-  { sourceField: 'Street', targetField: 'address' },
+  { sourceField: 'Address', targetField: 'address' },
 ];
 
 async function ensureDefaultContactEmployeeMappings({ FieldMapping, clientConfig }) {
