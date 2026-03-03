@@ -9,7 +9,12 @@ const DEFAULT_CONTACT_EMPLOYEE_MAPPINGS = [
 ];
 
 async function ensureDefaultContactEmployeeMappings({ FieldMapping, clientConfig }) {
-  if (!clientConfig?._id || !clientConfig?.hubspotCredentialId) {
+  if (
+    !FieldMapping ||
+    !clientConfig?._id ||
+    !clientConfig?.hubspotCredentialId ||
+    clientConfig?.objectType !== 'company'
+  ) {
     return;
   }
 

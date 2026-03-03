@@ -64,6 +64,79 @@ describe('SERVICE_LAYER configuration flow', () => {
     });
   });
 
+
+
+  it('creates contactEmployee defaults only for company configs', async () => {
+    const createdCompanyConfig = {
+      _id: 'cfg-company',
+      objectType: 'company',
+      hubspotCredentialId: 'cred-1',
+    };
+
+    const createdContactConfig = {
+      _id: 'cfg-contact',
+      objectType: 'contact',
+      hubspotCredentialId: 'cred-1',
+    };
+
+    const ClientConfig = {
+      create: jest
+        .fn()
+        .mockResolvedValueOnce(createdCompanyConfig)
+        .mockResolvedValueOnce(createdContactConfig),
+    };
+
+    const FieldMapping = {
+      findOne: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({ _id: 'map-1' }),
+    };
+
+    const IntegrationMode = {
+      findById: jest.fn().mockResolvedValue({ name: 'API' }),
+    };
+
+    mockRequireTenantModels.mockReturnValue({ ClientConfig, FieldMapping, IntegrationMode });
+
+    const reply = { send: jest.fn((payload) => payload) };
+
+    await createClientConfig(
+      {
+        body: {
+          integrationModeId: 'mode-id',
+          objectType: 'company',
+          hubspotCredentialId: 'cred-1',
+        },
+      },
+      reply
+    );
+
+    await createClientConfig(
+      {
+        body: {
+          integrationModeId: 'mode-id',
+          objectType: 'contact',
+          hubspotCredentialId: 'cred-1',
+        },
+      },
+      reply
+    );
+
+    expect(FieldMapping.findOne).toHaveBeenCalledTimes(3);
+    expect(FieldMapping.create).toHaveBeenCalledTimes(3);
+    expect(FieldMapping.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        objectType: 'contact',
+        sourceContext: 'contactEmployee',
+        clientConfigId: 'cfg-company',
+      })
+    );
+    expect(FieldMapping.findOne).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientConfigId: 'cfg-contact',
+      })
+    );
+  });
+
   it('rejects SERVICE_LAYER config when required fields are missing', async () => {
     mockRequireTenantModels.mockReturnValue({
       ClientConfig: { create: jest.fn() },

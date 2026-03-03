@@ -248,6 +248,17 @@ const hubspotService = {
             const sapContacts = item?.rawSapData?.ContactEmployees || [];
 
             if (Array.isArray(sapContacts) && sapContacts.length > 0) {
+              const contactMappings = await mappingService.getMappingsByObjectType(
+                clientConfig.hubspotCredentialId,
+                "contact",
+                "contactEmployee",
+                tenantModels
+              );
+
+              if (!Array.isArray(contactMappings) || contactMappings.length === 0) {
+                console.warn("No contactEmployee mappings found for company contact sync");
+              }
+
               const mappedContacts = await mappingService.mapRecords(
                 sapContacts,
                 clientConfig.hubspotCredentialId,
