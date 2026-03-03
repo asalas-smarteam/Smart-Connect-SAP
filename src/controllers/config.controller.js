@@ -6,6 +6,7 @@ const DEFAULT_CONTACT_EMPLOYEE_MAPPINGS = [
   { sourceField: 'Name', targetField: 'firstname' },
   { sourceField: 'InternalCode', targetField: 'internalcode' },
   { sourceField: 'Address', targetField: 'address' },
+  { sourceField: 'EmailAddress', targetField: 'email' },
 ];
 
 async function ensureDefaultContactEmployeeMappings({ FieldMapping, clientConfig }) {

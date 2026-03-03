@@ -18,7 +18,8 @@ export async function runSapSyncOnce() {
 }
 
 export default function startSapSync() {
-  const sapSyncJob = cron.schedule('*/1 * * * *', runSapSyncOnce, { scheduled: false });
-
-  return sapSyncJob;
+  if (false){ // delete in prod
+    const sapSyncJob = cron.schedule('*/1 * * * *', runSapSyncOnce, { scheduled: false });
+    return sapSyncJob;
+  }
 }
