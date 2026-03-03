@@ -38,14 +38,14 @@ src/
   controllers/
     oauth.controller.js
     dealMapping.controller.js
-    dealOwnerMapping.controller.js
+    ownerMapping.controller.js
     mapping.controller.js
     sapSync.controller.js
     ...
   routes/
     oauth.routes.js
     dealMapping.routes.js
-    dealOwnerMapping.routes.js
+    ownerMapping.routes.js
     mapping.routes.js
     sapSync.routes.js
     ...
@@ -58,7 +58,7 @@ src/
     mapping.service.js
     objectTypeRouter.js
     dealMappingResolver.js
-    dealOwnerMapping.service.js
+    ownerMapping.service.js
   integrations/
     sap/
       sapService.js

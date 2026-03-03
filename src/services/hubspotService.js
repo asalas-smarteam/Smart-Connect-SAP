@@ -3,7 +3,7 @@ import objectTypeRouter from "./objectTypeRouter.js";
 import * as hubspotClient from "./hubspotClient.js";
 import { sapUpdateService } from "./sapUpdateService.js";
 import dealMappingResolver from "./dealMappingResolver.js";
-import { getMappedOwnerId } from "./dealOwnerMapping.service.js";
+import { getMappedOwnerId } from "./ownerMapping.service.js";
 import associationRegistryService from "./associationRegistryService.js";
 import associationService from "./associationService.js";
 import mappingService from "./mapping.service.js";
