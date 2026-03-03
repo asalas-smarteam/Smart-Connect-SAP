@@ -30,7 +30,12 @@ const sapService = {
         case 'API':
           return apiMode.execute(config);
         case 'SERVICE_LAYER': {
-          const mappings = await mappingService.getActiveMappingsByClientConfig(clientConfigId, tenantModels);
+          const mappings = await mappingService.getMappingsByObjectType(
+            config.hubspotCredentialId,
+            config.objectType,
+            'businessPartner',
+            tenantModels
+          );
           return serviceLayerService.execute(config, mappings);
         }
         default:

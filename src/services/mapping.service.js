@@ -157,6 +157,42 @@ const mappingService = {
     }
   },
 
+  async getMappingsByObjectType(
+    hubspotCredentialId,
+    objectType,
+    sourceContext = 'businessPartner',
+    tenantModels
+  ) {
+    try {
+      if (!hubspotCredentialId || !objectType) {
+        return [];
+      }
+
+      const FieldMapping = getTenantFieldMapping(tenantModels);
+
+      let mappings = await FieldMapping.find({
+        hubspotCredentialId,
+        objectType,
+        sourceContext,
+        isActive: true,
+      }).sort({ _id: 1 });
+
+      if (mappings.length === 0 && sourceContext !== 'businessPartner') {
+        mappings = await FieldMapping.find({
+          hubspotCredentialId,
+          objectType,
+          sourceContext: 'businessPartner',
+          isActive: true,
+        }).sort({ _id: 1 });
+      }
+
+      return mappings;
+    } catch (error) {
+      console.error('Failed to fetch mappings by objectType:', error);
+      return [];
+    }
+  },
+
   async applyMapping(
     inputData,
     hubspotCredentialId,
@@ -220,4 +256,3 @@ const mappingService = {
 };
 
 export default mappingService;
-
