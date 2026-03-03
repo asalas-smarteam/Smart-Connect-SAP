@@ -144,6 +144,7 @@ export const createClientConfig = async (req, reply) => {
     }
 
     const payload = { ...req.body };
+
     const customFilters = sanitizeIncomingCustomFilters(payload.filters);
     const defaultFilters = await SapFilter.find({
       objectType: payload.objectType,
@@ -314,6 +315,7 @@ export const patchClientConfig = async (req, reply) => {
     const { ClientConfig } = requireTenantModels(req);
     const { id } = req.params;
     const payload = { ...req.body };
+
 
     const config = await ClientConfig.findById(id);
     if (!config) {

@@ -38,6 +38,32 @@ export const fieldMappingSchema = new Schema(
   }
 );
 
+
+fieldMappingSchema.index(
+  {
+    hubspotCredentialId: 1,
+    objectType: 1,
+    sourceContext: 1,
+    sourceField: 1,
+  },
+  { unique: true }
+);
+
 export function createFieldMappingModel(connection) {
-  return connection.models.FieldMapping || connection.model('FieldMapping', fieldMappingSchema);
+  if (connection.models.FieldMapping) {
+    return connection.models.FieldMapping;
+  }
+
+  const model = connection.model('FieldMapping', fieldMappingSchema);
+
+  model.createIndexes().catch((error) => {
+    if (error?.code === 11000 || /E11000/.test(error?.message || '')) {
+      console.warn('Skipping FieldMapping unique index creation due to duplicate existing documents.');
+      return;
+    }
+
+    console.warn('FieldMapping index creation warning:', error?.message || error);
+  });
+
+  return model;
 }

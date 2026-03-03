@@ -17,7 +17,7 @@ const syncService = {
       const credentials = await HubspotCredentials.findById(
         config.hubspotCredentialId
       );
-      
+
       const rawData = await sapService.fetchData(clientConfigId, tenantModels);
 
       if (!credentials) {

@@ -1,6 +1,17 @@
 import mappingService from '../services/mapping.service.js';
 import { requireTenantModels } from '../utils/tenantModels.js';
 
+function isDuplicateKeyError(error) {
+  return error?.code === 11000 || /E11000/.test(error?.message || '');
+}
+
+function duplicateConflictReply(reply) {
+  return reply.code(409).send({
+    ok: false,
+    message: 'Mapping already exists for this sourceField and objectType.',
+  });
+}
+
 export const createMapping = async (req, reply) => {
   try {
     const { FieldMapping } = requireTenantModels(req);
@@ -13,6 +24,17 @@ export const createMapping = async (req, reply) => {
       sourceContext = 'businessPartner',
     } = req.body;
 
+    const existing = await FieldMapping.findOne({
+      hubspotCredentialId,
+      objectType,
+      sourceContext,
+      sourceField,
+    }).lean();
+
+    if (existing) {
+      return duplicateConflictReply(reply);
+    }
+
     const data = await FieldMapping.create({
       sourceField,
       targetField,
@@ -24,6 +46,10 @@ export const createMapping = async (req, reply) => {
 
     return reply.send({ ok: true, data });
   } catch (error) {
+    if (isDuplicateKeyError(error)) {
+      return duplicateConflictReply(reply);
+    }
+
     return reply.send({ ok: false, message: error.message });
   }
 };
@@ -59,6 +85,10 @@ export const createAdminMapping = async (req, reply) => {
 
     return reply.send({ ok: true, data });
   } catch (error) {
+    if (isDuplicateKeyError(error)) {
+      return duplicateConflictReply(reply);
+    }
+
     return reply.send({ ok: false, message: error.message });
   }
 };

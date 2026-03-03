@@ -27,7 +27,9 @@ describe('SERVICE_LAYER configuration flow', () => {
       findById: jest.fn().mockResolvedValue({ name: 'SERVICE_LAYER' }),
     };
 
-    mockRequireTenantModels.mockReturnValue({ ClientConfig, IntegrationMode });
+    const SapFilter = { find: jest.fn().mockResolvedValue([]) };
+
+    mockRequireTenantModels.mockReturnValue({ ClientConfig, IntegrationMode, SapFilter });
 
     const req = {
       body: {
@@ -64,8 +66,6 @@ describe('SERVICE_LAYER configuration flow', () => {
     });
   });
 
-
-
   it('creates contactEmployee defaults only for company configs', async () => {
     const createdCompanyConfig = {
       _id: 'cfg-company',
@@ -95,7 +95,9 @@ describe('SERVICE_LAYER configuration flow', () => {
       findById: jest.fn().mockResolvedValue({ name: 'API' }),
     };
 
-    mockRequireTenantModels.mockReturnValue({ ClientConfig, FieldMapping, IntegrationMode });
+    const SapFilter = { find: jest.fn().mockResolvedValue([]) };
+
+    mockRequireTenantModels.mockReturnValue({ ClientConfig, FieldMapping, IntegrationMode, SapFilter });
 
     const reply = { send: jest.fn((payload) => payload) };
 
@@ -141,6 +143,7 @@ describe('SERVICE_LAYER configuration flow', () => {
     mockRequireTenantModels.mockReturnValue({
       ClientConfig: { create: jest.fn() },
       IntegrationMode: { findById: jest.fn().mockResolvedValue({ name: 'SERVICE_LAYER' }) },
+      SapFilter: { find: jest.fn().mockResolvedValue([]) },
     });
 
     const reply = { send: jest.fn((payload) => payload) };
