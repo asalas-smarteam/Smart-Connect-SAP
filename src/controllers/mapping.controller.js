@@ -1,10 +1,6 @@
 import mappingService from '../services/mapping.service.js';
 import { requireTenantModels } from '../utils/tenantModels.js';
 
-function isDuplicateKeyError(error) {
-  return error?.code === 11000 || /E11000/.test(error?.message || '');
-}
-
 function duplicateConflictReply(reply) {
   return reply.code(409).send({
     ok: false,
@@ -46,10 +42,6 @@ export const createMapping = async (req, reply) => {
 
     return reply.send({ ok: true, data });
   } catch (error) {
-    if (isDuplicateKeyError(error)) {
-      return duplicateConflictReply(reply);
-    }
-
     return reply.send({ ok: false, message: error.message });
   }
 };
