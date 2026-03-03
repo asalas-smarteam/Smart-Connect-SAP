@@ -122,25 +122,97 @@ const mappingService = {
   },
 
   async mapRecords(
-    sapRecords,
+    records,
     hubspotCredentialId,
     objectType,
     tenantModels,
     sourceContext = 'businessPartner'
   ) {
     try {
-      const mappings = await this.getMappings(
+      let mappings = await this.getMappingsByObjectType(
         hubspotCredentialId,
         objectType,
-        tenantModels,
-        sourceContext
+        sourceContext,
+        tenantModels
       );
 
-      return sapRecords.map((record) => mapFields(record, mappings, objectType));
+      if (mappings.length === 0 && sourceContext !== 'businessPartner') {
+        mappings = await this.getMappingsByObjectType(
+          hubspotCredentialId,
+          objectType,
+          'businessPartner',
+          tenantModels
+        );
+      }
+
+      if (mappings.length === 0) {
+        return [];
+      }
+
+      return records.map((record) => {
+        const properties = {};
+
+        mappings.forEach((mapping) => {
+          const resolvedValue = this.resolvePath(record, mapping.sourceField);
+
+          if (typeof resolvedValue !== 'undefined') {
+            properties[mapping.targetField] = resolvedValue;
+          }
+        });
+
+        const mappedRecord = { properties };
+
+        if (objectType === 'deal' && record) {
+          const specialDealFields = [
+            'associatedContacts',
+            'associatedCompanies',
+            'associatedProducts',
+          ];
+
+          specialDealFields.forEach((field) => {
+            if (Object.prototype.hasOwnProperty.call(record, field)) {
+              mappedRecord[field] = record[field];
+            }
+          });
+        }
+
+        return mappedRecord;
+      });
     } catch (error) {
       console.error('Failed to apply mappings:', error);
       return [];
     }
+  },
+
+  resolvePath(obj, path) {
+    if (!obj || !path) {
+      return null;
+    }
+
+    if (!String(path).includes('.')) {
+      return obj[path] ?? null;
+    }
+
+    const segments = String(path)
+      .split('.')
+      .map((segment) => segment.trim())
+      .filter(Boolean);
+
+    let current = obj;
+
+    for (const segment of segments) {
+      if (typeof current === 'undefined' || current === null) {
+        return null;
+      }
+
+      if (Array.isArray(current)) {
+        current = current[0];
+      }
+
+      current = current?.[segment];
+    }
+
+    return typeof current === 'undefined' ? null : current;
   },
 
   async getActiveMappingsByClientConfig(clientConfigId, tenantModels) {

@@ -40,6 +40,41 @@ describe('mappingService.mapRecords', () => {
     expect(mapped).toEqual([{ properties: { address: null } }]);
   });
 
+  it('preserves deal association fields in mapped output', async () => {
+    const tenantModels = {
+      FieldMapping: {
+        find: jest.fn().mockReturnValue({
+          sort: jest.fn().mockResolvedValue([
+            { sourceField: 'Name', targetField: 'dealname', isActive: true },
+          ]),
+        }),
+      },
+    };
+
+    const mapped = await mappingService.mapRecords(
+      [
+        {
+          Name: 'Deal 1',
+          associatedContacts: ['c-1'],
+          associatedCompanies: ['co-1'],
+          associatedProducts: ['p-1'],
+        },
+      ],
+      'cred-1',
+      'deal',
+      tenantModels
+    );
+
+    expect(mapped).toEqual([
+      {
+        properties: { dealname: 'Deal 1' },
+        associatedContacts: ['c-1'],
+        associatedCompanies: ['co-1'],
+        associatedProducts: ['p-1'],
+      },
+    ]);
+  });
+
   it('falls back to businessPartner mappings when source context has no mappings', async () => {
     const find = jest
       .fn()
