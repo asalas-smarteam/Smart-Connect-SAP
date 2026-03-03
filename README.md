@@ -20,7 +20,7 @@ La plataforma se compone de las siguientes piezas en tiempo de ejecución:
   - **Modo API (`apiMode.js`)**: realiza un HTTP GET con token Bearer opcional.
   - **Modo Procedimiento almacenado (`spMode.js`)**: ejecuta el procedimiento configurado mediante conexión externa a BD.
   - **Modo Script SQL (`scriptMode.js`)**: ejecuta una consulta SQL arbitraria mediante conexión externa.
-- **Capa de mapeo (`mapping.service.js`)**: aplica filas de `FieldMapping` para producir `properties` compatibles con HubSpot; los mapeos de deals usan `DealPipelineMapping`, `DealStageMapping` y `DealOwnerMapping`.
+- **Capa de mapeo (`mapping.service.js`)**: aplica filas de `FieldMapping` para producir `properties` compatibles con HubSpot; los mapeos de deals usan `DealPipelineMapping`, `DealStageMapping` y `OwnerMapping`.
 - **OAuth de HubSpot (`hubspotAuthService.js`)**: administra URL de autorización, intercambio de código, refresco y obtención de token de acceso usando valores almacenados de `accessToken`/`refreshToken`.
 - **Cliente de HubSpot (`hubspotClient.js`)**: envuelve las APIs de objetos CRM v3 con utilidades de búsqueda/creación/actualización.
 - **SyncService (`syncService.js`)**: ejecución por tarea: ingesta de datos SAP, mapeo de registros, upsert en HubSpot, registro de resultados y actualización de metadatos de corrida.
@@ -74,7 +74,7 @@ src/
     HubspotCredentials.js
     DealPipelineMapping.js
     DealStageMapping.js
-    DealOwnerMapping.js
+    OwnerMapping.js
     SyncLog.js
     LogEntry.js
     IntegrationMode.js
@@ -141,7 +141,7 @@ Todos los esquemas principales usan **Mongoose/MongoDB**; los nombres de colecci
 - **mapRecords():** Carga filas activas de `FieldMapping` por `hubspotCredentialId` y `objectType`, luego proyecta cada registro SAP a `{ properties: { targetField: value } }` preservando el orden del mapeo.
 - **Almacenamiento:** Las filas de `FieldMapping` guardan `sourceField` (columna/clave SAP) a `targetField` (propiedad HubSpot) por `objectType` (`contact`, `company`, `deal`, `product`).
 - **Lógica multiinquilino:** Los mapeos se obtienen por `hubspotCredentialId`; los mismos mapeos sirven a cualquier `ClientConfig` ligado a esa credencial, habilitando la reutilización.
-- **Enriquecimiento de deals:** Durante el procesamiento de deals, los IDs de pipeline, etapa y owner se resuelven mediante `DealPipelineMapping`, `DealStageMapping` y `DealOwnerMapping` antes del upsert en HubSpot.
+- **Enriquecimiento de deals:** Durante el procesamiento de deals, los IDs de pipeline, etapa y owner se resuelven mediante `DealPipelineMapping`, `DealStageMapping` y `OwnerMapping` antes del upsert en HubSpot.
 - **Propiedades dinámicas:** Cualquier campo SAP mapeado se convierte en propiedad de HubSpot en el payload saliente; los campos no mapeados se omiten.
 
 ## 7. Flujo OAuth de HubSpot
