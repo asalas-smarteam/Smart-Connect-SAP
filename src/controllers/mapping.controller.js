@@ -10,15 +10,36 @@ function duplicateConflictReply(reply) {
 
 export const createMapping = async (req, reply) => {
   try {
-    const { FieldMapping } = requireTenantModels(req);
+    const tenantModels = requireTenantModels(req);
+    const { FieldMapping, ClientConfig } = tenantModels;
     const {
       sourceField,
       targetField,
       objectType,
       clientConfigId,
-      hubspotCredentialId,
       sourceContext = 'businessPartner',
     } = req.body;
+
+    const config = await ClientConfig.findOne({
+      objectType,
+      active: true,
+    }).lean();
+
+    if (!config) {
+      return reply.code(400).send({
+        ok: false,
+        message: 'You must create a client task before creating mappings.',
+      });
+    }
+
+    const hubspotCredentialId = config.hubspotCredentialId;
+
+    if (!hubspotCredentialId) {
+      return reply.code(400).send({
+        ok: false,
+        message: 'You must create a client task before creating mappings.',
+      });
+    }
 
     const existing = await FieldMapping.findOne({
       hubspotCredentialId,
