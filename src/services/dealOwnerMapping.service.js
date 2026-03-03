@@ -1,10 +1,10 @@
-function getTenantDealOwnerModel(tenantModels) {
+function getTenantOwnerMappingModel(tenantModels) {
   if (!tenantModels) {
-    throw new Error('Tenant models are required for deal owner mappings');
+    throw new Error('Tenant models are required for owner mappings');
   }
 
-  const { DealOwnerMapping } = tenantModels;
-  return DealOwnerMapping;
+  const { OwnerMapping } = tenantModels;
+  return OwnerMapping;
 }
 
 export async function getMappedOwnerId(hubspotCredentialId, sapOwnerId, tenantModels) {
@@ -12,8 +12,8 @@ export async function getMappedOwnerId(hubspotCredentialId, sapOwnerId, tenantMo
     return null;
   }
 
-  const DealOwnerMapping = getTenantDealOwnerModel(tenantModels);
-  const mapping = await DealOwnerMapping.findOne({ hubspotCredentialId, sapOwnerId });
+  const OwnerMapping = getTenantOwnerMappingModel(tenantModels);
+  const mapping = await OwnerMapping.findOne({ hubspotCredentialId, sapOwnerId, active: true });
 
   if (!mapping) {
     return null;
@@ -29,20 +29,21 @@ export async function upsertOwnerMapping(
   displayName,
   tenantModels
 ) {
-  const DealOwnerMapping = getTenantDealOwnerModel(tenantModels);
-  const existing = await DealOwnerMapping.findOne({ hubspotCredentialId, sapOwnerId });
+  const OwnerMapping = getTenantOwnerMappingModel(tenantModels);
+  const existing = await OwnerMapping.findOne({ hubspotCredentialId, sapOwnerId });
 
   if (existing) {
     existing.hubspotOwnerId = hubspotOwnerId;
-    existing.displayName = displayName;
+    existing.hubspotOwnerName = displayName;
+    existing.active = true;
     return existing.save();
   }
 
-  return DealOwnerMapping.create({
+  return OwnerMapping.create({
     hubspotCredentialId,
     sapOwnerId,
     hubspotOwnerId,
-    displayName,
+    hubspotOwnerName: displayName,
   });
 }
 
@@ -51,6 +52,6 @@ export async function listOwnerMappings(hubspotCredentialId, tenantModels) {
     return [];
   }
 
-  const DealOwnerMapping = getTenantDealOwnerModel(tenantModels);
-  return DealOwnerMapping.find({ hubspotCredentialId }).sort({ sapOwnerId: 1 });
+  const OwnerMapping = getTenantOwnerMappingModel(tenantModels);
+  return OwnerMapping.find({ hubspotCredentialId }).sort({ sapOwnerId: 1, hubspotOwnerId: 1 });
 }
