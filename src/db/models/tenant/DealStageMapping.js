@@ -11,7 +11,7 @@ export const dealStageMappingSchema = new Schema(
     },
     sapStageKey: {
       type: String,
-      required: true,
+      default: null,
     },
     hubspotStageId: {
       type: String,
@@ -42,8 +42,17 @@ export const dealStageMappingSchema = new Schema(
 );
 
 dealStageMappingSchema.index(
-  { hubspotCredentialId: 1, sapStageKey: 1, hubspotPipelineId: 1 },
-  { unique: true, name: 'idx_unique_stage_mapping' }
+  { hubspotCredentialId: 1, hubspotPipelineId: 1, hubspotStageId: 1 },
+  { unique: true, name: 'uniq_hubspot_stage_mapping' }
+);
+
+dealStageMappingSchema.index(
+  { hubspotCredentialId: 1, hubspotPipelineId: 1, sapStageKey: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { sapStageKey: { $type: 'string' } },
+    name: 'uniq_sap_stage_mapping_partial',
+  }
 );
 
 export function createDealStageMappingModel(connection) {
