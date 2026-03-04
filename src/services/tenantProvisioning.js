@@ -6,8 +6,10 @@ import {
   Subscription,
 } from '../config/database.js';
 import { buildTenantDatabaseName, getTenantConnection } from '../config/tenantDatabase.js';
+import logger from '../core/logger.js';
 import { registerTenantModels } from '../db/models/tenant/index.js';
 import { sanitizeMongoCollectionName } from '../utils/provisioningValidation.js';
+import { seedHubspotMappings } from './tenant/tenantHubspotSeed.service.js';
 import { replicateDefaultSapFilters } from './tenant/replicateDefaultSapFilters.js';
 
 function slugifyCompanyName(companyName) {
@@ -55,6 +57,28 @@ async function ensureIntegrationModes({ IntegrationMode }) {
       { upsert: true }
     ))
   );
+}
+
+async function resolveHubspotCredential({ hubspot, tenantModels }) {
+  if (!hubspot || !tenantModels?.HubspotCredentials) {
+    return null;
+  }
+
+  if (hubspot.hubspotCredentialId) {
+    return tenantModels.HubspotCredentials.findById(hubspot.hubspotCredentialId);
+  }
+
+  if (!hubspot.accessToken) {
+    return null;
+  }
+
+  return tenantModels.HubspotCredentials.create({
+    portalId: hubspot.portalId ?? null,
+    accessToken: hubspot.accessToken,
+    refreshToken: hubspot.refreshToken ?? null,
+    expiresAt: hubspot.expiresAt ?? null,
+    scope: hubspot.scope ?? null,
+  });
 }
 
 
@@ -176,6 +200,28 @@ export async function provisionTenant({
       tenantConnection,
     });
     await ensureIntegrationModes(tenantModels);
+
+    const hubspotCredential = await resolveHubspotCredential({
+      hubspot,
+      tenantModels,
+    });
+
+    if (hubspotCredential?._id && hubspotCredential?.accessToken) {
+      try {
+        await seedHubspotMappings({
+          tenantConnection,
+          hubspotCredential,
+        });
+      } catch (seedError) {
+        logger.error({
+          msg: 'HubSpot tenant seed failed during tenant provisioning',
+          tenantKey,
+          hubspotCredentialId: hubspotCredential._id.toString(),
+          error: seedError.message,
+          details: seedError.details ?? null,
+        });
+      }
+    }
     // Strategy: only create collections during provisioning; tests/fixtures must insert data as needed.
 
     await GlobalAuditLog.create({
