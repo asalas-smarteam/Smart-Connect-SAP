@@ -15,7 +15,7 @@ export const dealPipelineMappingSchema = new Schema(
     },
     sapPipelineKey: {
       type: String,
-      required: true,
+      default: null,
     },
     hubspotPipelineLabel: {
       type: String,
@@ -33,8 +33,17 @@ export const dealPipelineMappingSchema = new Schema(
 );
 
 dealPipelineMappingSchema.index(
+  { hubspotCredentialId: 1, hubspotPipelineId: 1 },
+  { unique: true, name: 'uniq_hubspot_pipeline_mapping' }
+);
+
+dealPipelineMappingSchema.index(
   { hubspotCredentialId: 1, sapPipelineKey: 1 },
-  { unique: true, name: 'idx_unique_pipeline_mapping' }
+  {
+    unique: true,
+    partialFilterExpression: { sapPipelineKey: { $type: 'string' } },
+    name: 'uniq_sap_pipeline_mapping_partial',
+  }
 );
 
 export function createDealPipelineMappingModel(connection) {
