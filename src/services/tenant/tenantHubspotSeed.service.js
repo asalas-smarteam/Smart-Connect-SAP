@@ -3,7 +3,7 @@ import {
   fetchDealPipelines,
   fetchDealStages,
   fetchOwners,
-} from '../hubspot/hubspotMetadata.service.js';
+} from '../hubspot/hubspotMetadata.controller.js';
 
 function getTenantModel(tenantConnection, modelName) {
   const model = tenantConnection?.models?.[modelName];

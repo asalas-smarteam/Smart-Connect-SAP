@@ -20,6 +20,7 @@ async function hubspotRequest(method, endpoint, token, data) {
       method,
       url: `${HUBSPOT_BASE_URL}${endpoint}`,
       data,
+      params: method.toLowerCase() === 'get' ? data : undefined,
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -43,6 +44,35 @@ async function hubspotRequest(method, endpoint, token, data) {
     wrappedError.details = errorDetails;
     throw wrappedError;
   }
+}
+
+async function fetchPaginatedResults(token, path) {
+  const results = [];
+  let after;
+
+  do {
+    // eslint-disable-next-line no-await-in-loop
+    const response = await hubspotGet(token, path, {
+      ...(after ? { after } : {}),
+      limit: 100,
+    });
+
+    if (Array.isArray(response?.results)) {
+      results.push(...response.results);
+    }
+
+    after = response?.paging?.next?.after;
+  } while (after);
+
+  return results;
+}
+
+export async function hubspotGet(token, path, params = {}) {
+  return hubspotRequest('get', path, token, params);
+}
+
+export async function hubspotPost(token, path, data) {
+  return hubspotRequest('post', path, token, data);
 }
 
 async function searchObject(token, objectType, filters) {
@@ -179,4 +209,34 @@ export async function createLineItem(token, properties) {
   );
 
   return response.data;
+}
+
+export async function fetchDealPipelines(token) {
+  const pipelines = await fetchPaginatedResults(token, '/crm/v3/pipelines/deals');
+
+  return pipelines.map((pipeline) => ({
+    hubspotPipelineId: String(pipeline.id),
+    hubspotPipelineLabel: pipeline.label ?? null,
+  }));
+}
+
+export async function fetchDealStages(token, pipelineId) {
+  const response = await hubspotGet(token, `/crm/v3/pipelines/deals/${pipelineId}`);
+  const stages = Array.isArray(response?.stages) ? response.stages : [];
+
+  return stages.map((stage) => ({
+    hubspotPipelineId: String(pipelineId),
+    hubspotStageId: String(stage.id),
+    hubspotStageLabel: stage.label ?? null,
+  }));
+}
+
+export async function fetchOwners(token) {
+  const owners = await fetchPaginatedResults(token, '/crm/v3/owners');
+
+  return owners.map((owner) => ({
+    hubspotOwnerId: String(owner.id),
+    hubspotOwnerEmail: owner.email ?? null,
+    hubspotOwnerName: [owner.firstName, owner.lastName].filter(Boolean).join(' ').trim() || owner.email || null,
+  }));
 }
