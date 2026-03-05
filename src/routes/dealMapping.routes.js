@@ -4,29 +4,57 @@ import { tenantResolver } from '../middleware/tenantResolver.js';
 export default async function routes(app) {
   app.route({
     method: 'GET',
-    url: '/mappings/deals/pipelines/:hubspotCredentialId',
+    url: '/mappings/deal-pipelines',
     preHandler: tenantResolver,
     handler: dealMappingController.listPipelines,
   });
 
   app.route({
+    method: 'POST',
+    url: '/mappings/deal-pipelines',
+    preHandler: tenantResolver,
+    handler: dealMappingController.createPipeline,
+  });
+
+  app.route({
+    method: 'PATCH',
+    url: '/mappings/deal-pipelines/:id',
+    preHandler: tenantResolver,
+    handler: dealMappingController.patchPipeline,
+  });
+
+  app.route({
+    method: 'DELETE',
+    url: '/mappings/deal-pipelines/:id',
+    preHandler: tenantResolver,
+    handler: dealMappingController.deletePipeline,
+  });
+
+  app.route({
     method: 'GET',
-    url: '/mappings/deals/stages/:hubspotCredentialId/:pipelineId',
+    url: '/mappings/deal-stages',
     preHandler: tenantResolver,
     handler: dealMappingController.listStages,
   });
 
   app.route({
     method: 'POST',
-    url: '/mappings/deals/pipelines/:hubspotCredentialId',
+    url: '/mappings/deal-stages',
     preHandler: tenantResolver,
-    handler: dealMappingController.upsertPipeline,
+    handler: dealMappingController.createStage,
   });
 
   app.route({
-    method: 'POST',
-    url: '/mappings/deals/stages/:hubspotCredentialId',
+    method: 'PATCH',
+    url: '/mappings/deal-stages/:id',
     preHandler: tenantResolver,
-    handler: dealMappingController.upsertStage,
+    handler: dealMappingController.patchStage,
+  });
+
+  app.route({
+    method: 'DELETE',
+    url: '/mappings/deal-stages/:id',
+    preHandler: tenantResolver,
+    handler: dealMappingController.deleteStage,
   });
 }
