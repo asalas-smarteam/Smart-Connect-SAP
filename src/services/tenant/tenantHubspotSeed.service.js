@@ -1,4 +1,5 @@
 import {
+  ensureObjectProperty,
   fetchDealPipelines,
   fetchDealStages,
   fetchOwners,
@@ -115,5 +116,34 @@ export async function seedHubspotMappings({ tenantConnection, hubspotCredential 
     pipelinesCount: pipelines.length,
     stagesCount: allStages.length,
     ownersCount: owners.length,
+  };
+}
+
+export async function seedCreateFieldsHubspot({ hubspotCredential }) {
+  const accessToken = hubspotCredential?.accessToken;
+  const hubspotCredentialId = hubspotCredential?._id;
+
+  if (!accessToken || !hubspotCredentialId) {
+    throw new Error('Valid hubspotCredential with _id and accessToken is required for HubSpot field seed');
+  }
+
+  const fieldsToEnsure = [
+    { objectType: 'contacts', label: 'ID SAP', name: 'idsap' },
+    { objectType: 'contacts', label: 'Código Interno SAP', name: 'InternalCode' },
+    { objectType: 'companies', label: 'ID SAP', name: 'idsap' },
+  ];
+
+  const results = [];
+  for (const field of fieldsToEnsure) {
+    // eslint-disable-next-line no-await-in-loop
+    const ensured = await ensureObjectProperty(accessToken, field);
+    results.push(ensured);
+  }
+
+  return {
+    totalFields: results.length,
+    createdFields: results.filter((item) => item.created).length,
+    existingFields: results.filter((item) => !item.created).length,
+    results,
   };
 }

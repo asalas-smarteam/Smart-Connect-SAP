@@ -6,10 +6,8 @@ import {
   Subscription,
 } from '../config/database.js';
 import { buildTenantDatabaseName, getTenantConnection } from '../config/tenantDatabase.js';
-import logger from '../core/logger.js';
 import { registerTenantModels } from '../db/models/tenant/index.js';
 import { sanitizeMongoCollectionName } from '../utils/provisioningValidation.js';
-import { seedHubspotMappings } from './tenant/tenantHubspotSeed.service.js';
 import { replicateDefaultSapFilters } from './tenant/replicateDefaultSapFilters.js';
 
 function slugifyCompanyName(companyName) {
@@ -201,27 +199,10 @@ export async function provisionTenant({
     });
     await ensureIntegrationModes(tenantModels);
 
-    const hubspotCredential = await resolveHubspotCredential({
+    await resolveHubspotCredential({
       hubspot,
       tenantModels,
     });
-
-    if (hubspotCredential?._id && hubspotCredential?.accessToken) {
-      try {
-        await seedHubspotMappings({
-          tenantConnection,
-          hubspotCredential,
-        });
-      } catch (seedError) {
-        logger.error({
-          msg: 'HubSpot tenant seed failed during tenant provisioning',
-          tenantKey,
-          hubspotCredentialId: hubspotCredential._id.toString(),
-          error: seedError.message,
-          details: seedError.details ?? null,
-        });
-      }
-    }
     // Strategy: only create collections during provisioning; tests/fixtures must insert data as needed.
 
     await GlobalAuditLog.create({

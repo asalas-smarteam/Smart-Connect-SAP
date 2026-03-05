@@ -34,6 +34,20 @@ async function hubspotGet(accessToken, path, params = {}) {
   }
 }
 
+async function hubspotPost(accessToken, path, data) {
+  try {
+    const response = await axios.post(`${HUBSPOT_BASE_URL}${path}`, data, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    return response.data;
+  } catch (error) {
+    throw buildHubspotError(error, `POST ${path}`);
+  }
+}
+
 async function fetchPaginatedResults(accessToken, path) {
   const results = [];
   let after = undefined;
@@ -82,4 +96,47 @@ export async function fetchOwners(accessToken) {
     hubspotOwnerEmail: owner.email ?? null,
     hubspotOwnerName: [owner.firstName, owner.lastName].filter(Boolean).join(' ').trim() || owner.email || null,
   }));
+}
+
+export async function ensureObjectProperty(accessToken, {
+  objectType,
+  name,
+  label,
+  type = 'string',
+  fieldType = 'text',
+  groupName,
+}) {
+  const groupByObjectType = {
+    contacts: 'contactinformation',
+    companies: 'companyinformation',
+  };
+
+  try {
+    const existing = await hubspotGet(accessToken, `/crm/v3/properties/${objectType}/${name}`);
+    return {
+      created: false,
+      objectType,
+      name,
+      property: existing,
+    };
+  } catch (error) {
+    if (error?.details?.status !== 404) {
+      throw error;
+    }
+  }
+
+  const created = await hubspotPost(accessToken, `/crm/v3/properties/${objectType}`, {
+    name,
+    label,
+    type,
+    fieldType,
+    groupName: groupName || groupByObjectType[objectType] || 'contactinformation',
+  });
+
+  return {
+    created: true,
+    objectType,
+    name,
+    property: created,
+  };
 }

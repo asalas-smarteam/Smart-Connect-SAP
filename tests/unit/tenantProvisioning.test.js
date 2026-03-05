@@ -5,8 +5,6 @@ const mockGetTenantConnection = jest.fn();
 const mockRegisterTenantModels = jest.fn();
 const mockSanitizeMongoCollectionName = jest.fn();
 const mockReplicateDefaultSapFilters = jest.fn();
-const mockSeedHubspotMappings = jest.fn();
-const mockLoggerError = jest.fn();
 
 const mockMasterConnection = { id: 'master-connection' };
 
@@ -44,16 +42,6 @@ jest.unstable_mockModule('../../src/services/tenant/replicateDefaultSapFilters.j
   replicateDefaultSapFilters: mockReplicateDefaultSapFilters,
 }));
 
-jest.unstable_mockModule('../../src/services/tenant/tenantHubspotSeed.service.js', () => ({
-  seedHubspotMappings: mockSeedHubspotMappings,
-}));
-
-jest.unstable_mockModule('../../src/core/logger.js', () => ({
-  default: {
-    error: mockLoggerError,
-  },
-}));
-
 jest.unstable_mockModule('../../src/config/database.js', () => ({
   FeatureFlags: mockFeatureFlags,
   GlobalAuditLog: mockGlobalAuditLog,
@@ -68,7 +56,6 @@ describe('provisionTenant', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockReplicateDefaultSapFilters.mockResolvedValue();
-    mockSeedHubspotMappings.mockResolvedValue({ pipelinesCount: 0, stagesCount: 0, ownersCount: 0 });
   });
 
   it('creates tenant, subscription, and collections with generated tenantKey', async () => {
@@ -133,7 +120,6 @@ describe('provisionTenant', () => {
       masterConnection: mockMasterConnection,
       tenantConnection,
     });
-    expect(mockSeedHubspotMappings).not.toHaveBeenCalled();
     expect(createCollection).toHaveBeenCalledTimes(2);
     expect(createCollection).toHaveBeenCalledWith('products');
     expect(createCollection).toHaveBeenCalledWith('integrationmodes');
@@ -214,13 +200,14 @@ describe('provisionTenant', () => {
     });
   });
 
-  it('seeds HubSpot mappings when tenant has access token in hubspot payload', async () => {
+  it('creates HubSpot credentials when tenant payload contains access token', async () => {
     mockSanitizeMongoCollectionName.mockReturnValue('seeded');
     mockBuildTenantDatabaseName.mockReturnValue('tenant_seeded');
 
     const client = { _id: 'client-id', companyName: 'Seeded Inc' };
     const subscription = { _id: 'subscription-id' };
     const hubspotCredential = { _id: 'credential-id', accessToken: 'token-123' };
+    const mockCreateHubspotCredentials = jest.fn().mockResolvedValue(hubspotCredential);
 
     mockSaaSClient.create.mockResolvedValue(client);
     mockSubscription.create.mockResolvedValue(subscription);
@@ -243,7 +230,7 @@ describe('provisionTenant', () => {
         updateOne: jest.fn().mockResolvedValue(),
       },
       HubspotCredentials: {
-        create: jest.fn().mockResolvedValue(hubspotCredential),
+        create: mockCreateHubspotCredentials,
       },
     });
 
@@ -259,10 +246,12 @@ describe('provisionTenant', () => {
       },
     });
 
-    expect(mockSeedHubspotMappings).toHaveBeenCalledWith({
-      tenantConnection,
-      hubspotCredential,
+    expect(mockCreateHubspotCredentials).toHaveBeenCalledWith({
+      portalId: '1001',
+      accessToken: 'token-123',
+      refreshToken: null,
+      expiresAt: null,
+      scope: null,
     });
-    expect(mockLoggerError).not.toHaveBeenCalled();
   });
 });

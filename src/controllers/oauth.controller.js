@@ -1,6 +1,8 @@
 import { SaaSClient } from '../config/database.js';
-import { getTenantModels } from '../config/tenantDatabase.js';
+import { getTenantConnection, getTenantModels } from '../config/tenantDatabase.js';
+import logger from '../core/logger.js';
 import hubspotAuthService from '../services/hubspotAuthService.js';
+import { seedCreateFieldsHubspot, seedHubspotMappings } from '../services/tenant/tenantHubspotSeed.service.js';
 import { requireTenantModels } from '../utils/tenantModels.js';
 
 function base64UrlEncode(buffer) {
@@ -65,7 +67,29 @@ export const oauthCallback = async (req, reply) => {
     tenantModels = requireTenantModels(req);
   }
 
-  await hubspotAuthService.exchangeCodeForTokens(code, clientConfigId, tenantModels);
+  const credentials = await hubspotAuthService.exchangeCodeForTokens(code, clientConfigId, tenantModels);
+
+  const resolvedTenantKey = req.tenantKey || tenantKey;
+  if (resolvedTenantKey && credentials?._id && credentials?.accessToken) {
+    try {
+      const tenantConnection = await getTenantConnection(resolvedTenantKey);
+      await seedHubspotMappings({
+        tenantConnection,
+        hubspotCredential: credentials,
+      });
+      await seedCreateFieldsHubspot({
+        hubspotCredential: credentials,
+      });
+    } catch (seedError) {
+      logger.error({
+        msg: 'HubSpot tenant seed failed after OAuth callback',
+        tenantKey: resolvedTenantKey,
+        hubspotCredentialId: credentials._id.toString(),
+        error: seedError.message,
+        details: seedError.details ?? null,
+      });
+    }
+  }
 
   return reply.send({ ok: true, message: 'HubSpot connected' });
 };
