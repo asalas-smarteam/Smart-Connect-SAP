@@ -36,18 +36,22 @@ const dealMappingService = {
     }
 
     const { DealPipelineMapping } = getTenantDealModels(tenantModels);
-    return DealPipelineMapping.find({ hubspotCredentialId }).sort({ createdAt: 1 });
+    return DealPipelineMapping.find({ hubspotCredentialId }).sort({ hubspotPipelineLabel: 1, createdAt: 1 });
   },
 
   async listStageMappings(hubspotCredentialId, hubspotPipelineId, tenantModels) {
-    if (!hubspotCredentialId || !hubspotPipelineId) {
+    if (!hubspotCredentialId) {
       return [];
     }
 
     const { DealStageMapping } = getTenantDealModels(tenantModels);
-    return DealStageMapping.find({ hubspotCredentialId, hubspotPipelineId }).sort({
-      createdAt: 1,
-    });
+    const filter = { hubspotCredentialId };
+
+    if (hubspotPipelineId) {
+      filter.hubspotPipelineId = hubspotPipelineId;
+    }
+
+    return DealStageMapping.find(filter).sort({ hubspotStageLabel: 1, createdAt: 1 });
   },
 
   async createOrUpdatePipelineMapping({
@@ -101,6 +105,46 @@ const dealMappingService = {
       sapStageKey,
       hubspotPipelineId,
     });
+  },
+
+  async getPipelineMappingById(id, tenantModels) {
+    const { DealPipelineMapping } = getTenantDealModels(tenantModels);
+    return DealPipelineMapping.findById(id);
+  },
+
+  async updatePipelineMappingById(id, payload, tenantModels) {
+    const { DealPipelineMapping } = getTenantDealModels(tenantModels);
+    return DealPipelineMapping.findByIdAndUpdate(id, payload, { new: true, runValidators: true });
+  },
+
+  async deletePipelineMappingById(id, tenantModels) {
+    const { DealPipelineMapping } = getTenantDealModels(tenantModels);
+    return DealPipelineMapping.findByIdAndDelete(id);
+  },
+
+  async createPipelineMapping(payload, tenantModels) {
+    const { DealPipelineMapping } = getTenantDealModels(tenantModels);
+    return DealPipelineMapping.create(payload);
+  },
+
+  async getStageMappingById(id, tenantModels) {
+    const { DealStageMapping } = getTenantDealModels(tenantModels);
+    return DealStageMapping.findById(id);
+  },
+
+  async updateStageMappingById(id, payload, tenantModels) {
+    const { DealStageMapping } = getTenantDealModels(tenantModels);
+    return DealStageMapping.findByIdAndUpdate(id, payload, { new: true, runValidators: true });
+  },
+
+  async deleteStageMappingById(id, tenantModels) {
+    const { DealStageMapping } = getTenantDealModels(tenantModels);
+    return DealStageMapping.findByIdAndDelete(id);
+  },
+
+  async createStageMapping(payload, tenantModels) {
+    const { DealStageMapping } = getTenantDealModels(tenantModels);
+    return DealStageMapping.create(payload);
   },
 };
 

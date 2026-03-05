@@ -1,3 +1,5 @@
+import mongoose from 'mongoose';
+
 function getTenantOwnerMappingModel(tenantModels) {
   if (!tenantModels) {
     throw new Error('Tenant models are required for owner mappings');
@@ -5,6 +7,10 @@ function getTenantOwnerMappingModel(tenantModels) {
 
   const { OwnerMapping } = tenantModels;
   return OwnerMapping;
+}
+
+export function isValidObjectId(value) {
+  return mongoose.Types.ObjectId.isValid(value);
 }
 
 export async function getMappedOwnerId(hubspotCredentialId, sapOwnerId, tenantModels) {
@@ -53,5 +59,31 @@ export async function listOwnerMappings(hubspotCredentialId, tenantModels) {
   }
 
   const OwnerMapping = getTenantOwnerMappingModel(tenantModels);
-  return OwnerMapping.find({ hubspotCredentialId }).sort({ sapOwnerId: 1, hubspotOwnerId: 1 });
+  return OwnerMapping.find({ hubspotCredentialId }).sort({ hubspotOwnerName: 1 });
+}
+
+export async function getOwnerMappingById(id, tenantModels) {
+  const OwnerMapping = getTenantOwnerMappingModel(tenantModels);
+  return OwnerMapping.findById(id);
+}
+
+export async function updateOwnerMappingById(id, payload, tenantModels) {
+  const OwnerMapping = getTenantOwnerMappingModel(tenantModels);
+  return OwnerMapping.findByIdAndUpdate(id, payload, {
+    new: true,
+    runValidators: true,
+  });
+}
+
+export async function deleteOwnerMappingById(id, tenantModels) {
+  const OwnerMapping = getTenantOwnerMappingModel(tenantModels);
+  return OwnerMapping.findByIdAndDelete(id);
+}
+
+export async function createOwnerMapping(payload, tenantModels) {
+  const OwnerMapping = getTenantOwnerMappingModel(tenantModels);
+  return OwnerMapping.create({
+    ...payload,
+    source: payload.source || 'manual',
+  });
 }
