@@ -157,7 +157,7 @@ const hubspotService = {
         );
 
         const hubspotId = created?.id;
-        const sapId = item?.properties?.sap_id;
+        const sapId = objectType === 'product'  ? item?.properties?.hs_sku : item?.properties?.sap_id ;
 
         if (hubspotId && sapId) {
           await associationRegistryService.registerBaseObjectMapping(

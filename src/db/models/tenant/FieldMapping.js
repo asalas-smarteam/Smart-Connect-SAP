@@ -15,8 +15,8 @@ export const fieldMappingSchema = new Schema(
     },
     sourceContext: {
       type: String,
-      enum: ['businessPartner', 'contactEmployee'],
-      default: 'businessPartner',
+      enum: ['businessPartner', 'contactEmployee', 'product', 'ItemWarehouseInfoCollection'],
+      default: '',
     },
     clientConfigId: {
       type: Schema.Types.ObjectId,
@@ -28,6 +28,10 @@ export const fieldMappingSchema = new Schema(
       default: null,
     },
     isActive: {
+      type: Boolean,
+      default: true,
+    },
+    editable: {
       type: Boolean,
       default: true,
     },

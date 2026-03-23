@@ -17,8 +17,9 @@ export const createMapping = async (req, reply) => {
       targetField,
       objectType,
       clientConfigId,
-      sourceContext = 'businessPartner',
+      sourceContext,
     } = req.body;
+    const resolvedSourceContext = sourceContext || (objectType === 'product' ? 'product' : 'businessPartner');
 
     const config = await ClientConfig.findOne({
       objectType,
@@ -44,7 +45,7 @@ export const createMapping = async (req, reply) => {
     const existing = await FieldMapping.findOne({
       hubspotCredentialId,
       objectType,
-      sourceContext,
+      sourceContext: resolvedSourceContext,
       sourceField,
     }).lean();
 
@@ -58,7 +59,7 @@ export const createMapping = async (req, reply) => {
       objectType,
       clientConfigId,
       hubspotCredentialId,
-      sourceContext,
+      sourceContext: resolvedSourceContext,
     });
 
     return reply.send({ ok: true, data });

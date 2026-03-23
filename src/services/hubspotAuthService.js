@@ -89,9 +89,13 @@ const hubspotAuthService = {
       refresh_token: credentials.refreshToken,
     });
 
-    const response = await axios.post(HUBSPOT_TOKEN_URL, payload, {
+    try {
+      const response = await axios.post(HUBSPOT_TOKEN_URL, payload, {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     });
+    } catch (error) {
+      console.log(error.response.data)
+    }
 
     const { access_token, expires_in, refresh_token } = response.data;
     const expiresAt = new Date(Date.now() + expires_in * 1000);

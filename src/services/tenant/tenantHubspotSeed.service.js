@@ -127,10 +127,16 @@ export async function seedCreateFieldsHubspot({ hubspotCredential }) {
     throw new Error('Valid hubspotCredential with _id and accessToken is required for HubSpot field seed');
   }
 
+  // TODO: CREAR EL GRUPO PARA UNIR CON LAS PROPIEDADES DE SAP
+
   const fieldsToEnsure = [
     { objectType: 'contacts', label: 'ID SAP', name: 'idsap' },
-    { objectType: 'contacts', label: 'Código Interno SAP', name: 'InternalCode' },
+    { objectType: 'contacts', label: 'Código Interno SAP', name: 'internalcode' },
     { objectType: 'companies', label: 'ID SAP', name: 'idsap' },
+    { objectType: 'products', label: 'Código de producto', name: 'itemCode' },
+    { objectType: 'products', label: 'Stock disponible', name: 'OnHand' },
+    { objectType: 'products', label: 'Stock reservado', name: 'OnHold' },
+    { objectType: 'products', label: 'Stock comprometido', name: 'Committed' },
   ];
 
   const results = [];

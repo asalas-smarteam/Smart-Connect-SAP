@@ -37,12 +37,18 @@ function sanitizeSelectFields(mappings) {
   return Array.from(unique);
 }
 
-function getCompanyAdditionalFields(objectType) {
-  if (objectType !== 'company') {
+const additionalFieldsEnvByObjectType = {
+  company: 'COMPANY_ADD_FIELDS_URL_SAP',
+  product: 'PRODUCT_ADD_FIELDS_URL_SAP',
+};
+
+function getAdditionalFieldsByObjectType(objectType) {
+  const envName = additionalFieldsEnvByObjectType[objectType];
+  if (!envName) {
     return [];
   }
 
-  const rawFields = cleanValue(process.env.COMPANY_ADD_FIELDS_URL_SAP);
+  const rawFields = cleanValue(process.env[envName]);
   if (!rawFields) {
     return [];
   }
@@ -79,8 +85,8 @@ export function buildServiceLayerUrl(clientConfig, mappings, options = {}) {
   }
 
   const selectFields = sanitizeSelectFields(mappings);
-  const companyAdditionalFields = getCompanyAdditionalFields(clientConfig?.objectType);
-  const mergedSelectFields = Array.from(new Set([...selectFields, ...companyAdditionalFields]));
+  const additionalFields = getAdditionalFieldsByObjectType(clientConfig?.objectType);
+  const mergedSelectFields = Array.from(new Set([...selectFields, ...additionalFields]));
   if (mergedSelectFields.length === 0) {
     throw new Error('At least one active mapping with a valid sourceField is required');
   }
@@ -104,7 +110,7 @@ export function buildServiceLayerUrl(clientConfig, mappings, options = {}) {
         const intervalMinutes = Number(clientConfig?.intervalMinutes);
         const now = new Date();
         const past = new Date(now.getTime() - intervalMinutes * 60000);
-        value = past.toISOString().split('.')[0]; //### SaveDoc
+        value = "2026-01-01T00:00:00"//past.toISOString().split('.')[0]; //### SaveDoc
       }
 
       if (value === null || typeof value === 'undefined') {

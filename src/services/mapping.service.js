@@ -6,6 +6,19 @@ function getTenantFieldMapping(tenantModels) {
   return tenantModels.FieldMapping;
 }
 
+function resolveSourceContext(objectType, sourceContext) {
+  
+  if (objectType === 'product') {
+    return 'product';
+  }
+  
+  if (sourceContext) {
+    return sourceContext;
+  }
+
+  return 'businessPartner';
+}
+
 
 const resolveValueByPath = (inputData, sourceField) => {
   if (!sourceField) {
@@ -83,12 +96,13 @@ const normalizeAssociations = (value) => {
 };
 
 const mappingService = {
-  async getMappings(hubspotCredentialId, objectType, tenantModels, sourceContext = 'businessPartner') {
+  async getMappings(hubspotCredentialId, objectType, tenantModels, sourceContext) {
     try {
       if (!hubspotCredentialId) {
         return [];
       }
-
+      
+      const resolvedSourceContext = resolveSourceContext(objectType, sourceContext);
       const FieldMapping = getTenantFieldMapping(tenantModels);
       const buildContextFilter = (context) => {
         if (context === 'businessPartner') {
@@ -103,10 +117,10 @@ const mappingService = {
       let mappings = await FieldMapping.find({
         hubspotCredentialId,
         objectType,
-        ...buildContextFilter(sourceContext),
+        ...buildContextFilter(resolvedSourceContext),
       }).sort({ _id: 1 });
 
-      if (mappings.length === 0 && sourceContext !== 'businessPartner') {
+      if (mappings.length === 0 && resolvedSourceContext !== 'businessPartner') {
         mappings = await FieldMapping.find({
           hubspotCredentialId,
           objectType,
@@ -126,17 +140,18 @@ const mappingService = {
     hubspotCredentialId,
     objectType,
     tenantModels,
-    sourceContext = 'businessPartner'
+    sourceContext
   ) {
     try {
+      const resolvedSourceContext = resolveSourceContext(objectType, sourceContext);
       let mappings = await this.getMappingsByObjectType(
         hubspotCredentialId,
         objectType,
-        sourceContext,
+        resolvedSourceContext,
         tenantModels
       );
 
-      if (mappings.length === 0 && sourceContext !== 'businessPartner') {
+      if (mappings.length === 0 && resolvedSourceContext !== 'businessPartner') {
         mappings = await this.getMappingsByObjectType(
           hubspotCredentialId,
           objectType,
@@ -232,7 +247,7 @@ const mappingService = {
   async getMappingsByObjectType(
     hubspotCredentialId,
     objectType,
-    sourceContext = 'businessPartner',
+    sourceContext,
     tenantModels
   ) {
     try {
@@ -240,16 +255,17 @@ const mappingService = {
         return [];
       }
 
+      const resolvedSourceContext = resolveSourceContext(objectType, sourceContext);
       const FieldMapping = getTenantFieldMapping(tenantModels);
 
       let mappings = await FieldMapping.find({
         hubspotCredentialId,
         objectType,
-        sourceContext,
+        sourceContext: resolvedSourceContext,
         isActive: true,
       }).sort({ _id: 1 });
 
-      if (mappings.length === 0 && sourceContext !== 'businessPartner') {
+      if (mappings.length === 0 && resolvedSourceContext !== 'businessPartner') {
         mappings = await FieldMapping.find({
           hubspotCredentialId,
           objectType,
@@ -270,7 +286,7 @@ const mappingService = {
     hubspotCredentialId,
     objectType,
     tenantModels,
-    sourceContext = 'businessPartner'
+    sourceContext
   ) {
     try {
       const mappings = await this.getMappings(
