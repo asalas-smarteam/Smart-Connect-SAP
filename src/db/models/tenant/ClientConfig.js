@@ -116,7 +116,7 @@ export const clientConfigSchema = new Schema(
     },
     active: {
       type: Boolean,
-      default: true,
+      default: false,
     },
     lastRun: {
       type: Date,
