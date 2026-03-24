@@ -1,5 +1,9 @@
 import logger from '../core/logger.js';
 import { requireTenantModels } from '../utils/tenantModels.js';
+import {
+  buildMergedFilters,
+  sanitizeIncomingCustomFilters,
+} from '../services/tenant/clientConfigFilters.service.js';
 
 
 const DEFAULT_CONTACT_EMPLOYEE_MAPPINGS = [
@@ -98,56 +102,6 @@ function normalizeServiceLayerPath(value) {
   return `/${withoutQuery.replace(/^\/+/, '')}`;
 }
 
-
-
-const ALLOWED_OPERATORS = ['eq', 'ge', 'startswith', 'not_startswith'];
-const FILTER_CONTROLLED_FIELDS = ['isDefault', 'isDynamic', 'editable'];
-
-function normalizeFilterKey(filter) {
-  return `${filter.property}::${filter.operator}::${String(filter.value ?? '')}`;
-}
-
-function sanitizeIncomingCustomFilters(filters) {
-  if (filters == null) {
-    return [];
-  }
-
-  if (!Array.isArray(filters)) {
-    throw new Error('filters must be an array');
-  }
-
-  return filters.map((filter, index) => {
-    if (!filter || typeof filter !== 'object' || Array.isArray(filter)) {
-      throw new Error(`filters[${index}] must be an object`);
-    }
-
-    for (const field of FILTER_CONTROLLED_FIELDS) {
-      if (Object.prototype.hasOwnProperty.call(filter, field)) {
-        throw new Error(`filters[${index}].${field} is not allowed`);
-      }
-    }
-
-    const operator = String(filter.operator || '').trim();
-    if (!ALLOWED_OPERATORS.includes(operator)) {
-      throw new Error(`filters[${index}].operator must be one of: ${ALLOWED_OPERATORS.join(', ')}`);
-    }
-
-    const property = String(filter.property || '').trim();
-    if (!property) {
-      throw new Error(`filters[${index}].property is required`);
-    }
-
-    return {
-      operator,
-      property,
-      value: filter.value ?? null,
-      isDefault: false,
-      isDynamic: false,
-      editable: true,
-    };
-  });
-}
-
 function applyCustomFilterPatch(existingCustomFilters, incomingFilters) {
   const customByProperty = new Map(existingCustomFilters.map((f) => [f.property, f]));
 
@@ -193,54 +147,17 @@ export const createClientConfig = async (req, reply) => {
       active: true,
     }).lean();
 
-    const defaultFilterKeys = new Set(
-      defaultFilters.map((filter) => normalizeFilterKey(filter))
-    );
-    const defaultPropertyOperatorKeys = new Set(
-      defaultFilters.map((filter) => `${filter.property}::${filter.operator}`)
-    );
-
-    const dedupedCustomFilters = [];
-    const seenCustomKeys = new Set();
-
-    for (const filter of customFilters) {
-      const fullKey = normalizeFilterKey(filter);
-      const propertyOperatorKey = `${filter.property}::${filter.operator}`;
-
-      if (defaultFilterKeys.has(fullKey)) {
-        continue;
-      }
-
-      if (defaultPropertyOperatorKeys.has(propertyOperatorKey)) {
-        return reply.code(400).send({
-          ok: false,
-          message: `Custom filter for ${filter.property} with operator ${filter.operator} conflicts with a default filter`,
-        });
-      }
-
-      if (!seenCustomKeys.has(fullKey)) {
-        dedupedCustomFilters.push(filter);
-        seenCustomKeys.add(fullKey);
-      }
-    }
-
-    payload.filters = [
-      ...defaultFilters.map((filter) => ({
-        operator: filter.operator,
-        property: filter.property,
-        value: filter.value,
-        isDefault: true,
-        isDynamic: Boolean(filter.isDynamic),
-        editable: false,
-      })),
-      ...dedupedCustomFilters,
-    ];
+    const merged = buildMergedFilters({
+      defaultFilters,
+      customFilters,
+    });
+    payload.filters = merged.filters;
 
     logger.info({
       msg: 'Integrated default SAP filters into ClientConfig creation',
       objectType: payload.objectType,
-      defaultCount: defaultFilters.length,
-      customCount: dedupedCustomFilters.length,
+      defaultCount: merged.defaultCount,
+      customCount: merged.customCount,
     });
 
     if (integrationMode.name === 'SERVICE_LAYER') {
@@ -281,7 +198,7 @@ export const createClientConfig = async (req, reply) => {
     });
   } catch (error) {
     logger.error({ msg: 'Failed creating ClientConfig', error: error.message });
-    const statusCode = /filters/.test(error.message) ? 400 : 500;
+    const statusCode = /filters|Custom filter/.test(error.message) ? 400 : 500;
     return reply.code(statusCode).send({
       ok: false,
       message: error.message,
