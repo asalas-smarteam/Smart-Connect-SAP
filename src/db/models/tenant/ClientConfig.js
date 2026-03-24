@@ -48,22 +48,7 @@ export const clientConfigSchema = new Schema(
     apiToken: {
       type: String,
     },
-    serviceLayerBaseUrl: {
-      type: String,
-    },
     serviceLayerPath: {
-      type: String,
-    },
-    serviceLayerUsername: {
-      type: String,
-    },
-    serviceLayerPassword: {
-      type: String,
-    },
-    serviceLayerTopFilter: {
-      type: Number,
-    },
-    serviceLayerCompanyDB: {
       type: String,
     },
     storeProcedureName: {

@@ -71,7 +71,7 @@ const serviceLayerService = {
 
     const requestOptions = {
       ...options,
-      top: options?.top || 20,
+      top: options?.top || config?.serviceLayerTopFilter || 20,
     };
 
     const dataUrl = withTopParam(buildServiceLayerUrl(config, mappings, requestOptions), requestOptions.top);

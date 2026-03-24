@@ -2,7 +2,12 @@ import logger from '../../core/logger.js';
 import { createMasterClientConfigModel } from '../../../models/master/ClientConfig.js';
 import { buildMergedFilters } from './clientConfigFilters.service.js';
 
-function buildClientConfigPayload({ masterConfig, integrationModeId, defaultFilters }) {
+function buildClientConfigPayload({
+  masterConfig,
+  integrationModeId,
+  defaultFilters,
+  hubspotCredentialId,
+}) {
   const merged = buildMergedFilters({
     defaultFilters,
     customFilters: [],
@@ -14,12 +19,17 @@ function buildClientConfigPayload({ masterConfig, integrationModeId, defaultFilt
     intervalMinutes: masterConfig.intervalMinutes,
     serviceLayerPath: masterConfig.serviceLayerPath,
     integrationModeId,
+    hubspotCredentialId: hubspotCredentialId || null,
     active: false,
     filters: merged.filters,
   };
 }
 
-export async function replicateMasterClientConfigs({ masterConnection, tenantModels }) {
+export async function replicateMasterClientConfigs({
+  masterConnection,
+  tenantModels,
+  hubspotCredentialId = null,
+}) {
   const { ClientConfig, IntegrationMode, SapFilter } = tenantModels;
 
   try {
@@ -64,6 +74,7 @@ export async function replicateMasterClientConfigs({ masterConnection, tenantMod
         masterConfig,
         integrationModeId: serviceLayerMode._id,
         defaultFilters,
+        hubspotCredentialId,
       });
 
       // eslint-disable-next-line no-await-in-loop

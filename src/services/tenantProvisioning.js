@@ -9,7 +9,6 @@ import { buildTenantDatabaseName, getTenantConnection } from '../config/tenantDa
 import { registerTenantModels } from '../db/models/tenant/index.js';
 import { sanitizeMongoCollectionName } from '../utils/provisioningValidation.js';
 import { replicateDefaultSapFilters } from './tenant/replicateDefaultSapFilters.js';
-import { replicateMasterClientConfigs } from './tenant/replicateMasterClientConfigs.js';
 
 function slugifyCompanyName(companyName) {
   return sanitizeMongoCollectionName(companyName);
@@ -198,10 +197,6 @@ export async function provisionTenant({
     await replicateDefaultSapFilters({
       masterConnection: FeatureFlags.db,
       tenantConnection,
-    });
-    await replicateMasterClientConfigs({
-      masterConnection: FeatureFlags.db,
-      tenantModels,
     });
 
     await resolveHubspotCredential({

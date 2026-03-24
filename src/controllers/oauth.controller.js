@@ -1,7 +1,8 @@
-import { SaaSClient } from '../config/database.js';
+import { FeatureFlags, SaaSClient } from '../config/database.js';
 import { getTenantConnection, getTenantModels } from '../config/tenantDatabase.js';
 import logger from '../core/logger.js';
 import hubspotAuthService from '../services/hubspotAuthService.js';
+import { replicateMasterClientConfigs } from '../services/tenant/replicateMasterClientConfigs.js';
 import { seedCreateFieldsHubspot, seedHubspotMappings } from '../services/tenant/tenantHubspotSeed.service.js';
 import { requireTenantModels } from '../utils/tenantModels.js';
 
@@ -71,6 +72,12 @@ export const oauthCallback = async (req, reply) => {
 
   const resolvedTenantKey = req.tenantKey || tenantKey;
   if (resolvedTenantKey && credentials?._id && credentials?.accessToken) {
+    await replicateMasterClientConfigs({
+      masterConnection: FeatureFlags.db,
+      tenantModels,
+      hubspotCredentialId: credentials._id,
+    });
+
     try {
       const tenantConnection = await getTenantConnection(resolvedTenantKey);
       await seedHubspotMappings({

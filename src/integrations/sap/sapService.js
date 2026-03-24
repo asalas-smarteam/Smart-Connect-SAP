@@ -12,7 +12,7 @@ const sapService = {
         throw new Error('Tenant models are required to fetch SAP data');
       }
 
-      const { ClientConfig } = tenantModels;
+      const { ClientConfig, SapCredentials } = tenantModels;
       const config = await ClientConfig.findById(clientConfigId).populate({
         path: 'integrationModeId',
         select: 'name',
@@ -30,13 +30,23 @@ const sapService = {
         case 'API':
           return apiMode.execute(config);
         case 'SERVICE_LAYER': {
+          const sapCredentials = await SapCredentials.find().lean();
+
+          if (!sapCredentials) {
+            throw new Error('SAP credentials not found for SERVICE_LAYER mode');
+          }
+
           const mappings = await mappingService.getMappingsByObjectType(
             config.hubspotCredentialId,
             config.objectType,
             'businessPartner',
             tenantModels
           );
-          return serviceLayerService.execute(config, mappings);
+          const mergedConfig = {
+            ...sapCredentials[0],
+            ...config.toObject(),
+          };
+          return serviceLayerService.execute(mergedConfig, mappings);
         }
         default:
           return null;

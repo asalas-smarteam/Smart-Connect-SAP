@@ -88,20 +88,6 @@ async function ensureDefaultProductMappings({ FieldMapping, clientConfig }) {
   });
 }
 
-function normalizeBaseUrl(value) {
-  return String(value || '').trim().replace(/\/+$/, '');
-}
-
-function normalizeServiceLayerPath(value) {
-  const trimmed = String(value || '').trim();
-  if (!trimmed) {
-    return '';
-  }
-
-  const withoutQuery = trimmed.split('?')[0].trim();
-  return `/${withoutQuery.replace(/^\/+/, '')}`;
-}
-
 function applyCustomFilterPatch(existingCustomFilters, incomingFilters) {
   const customByProperty = new Map(existingCustomFilters.map((f) => [f.property, f]));
 
@@ -131,8 +117,8 @@ export const createClientConfig = async (req, reply) => {
       });
     }
 
-    const integrationMode = await IntegrationMode.findById(integrationModeId);
-    if (!integrationMode) {
+    const integrationModeExists = await IntegrationMode.exists({ _id: integrationModeId });
+    if (!integrationModeExists) {
       return reply.send({
         ok: false,
         message: 'integrationModeId is invalid',
@@ -159,28 +145,6 @@ export const createClientConfig = async (req, reply) => {
       defaultCount: merged.defaultCount,
       customCount: merged.customCount,
     });
-
-    if (integrationMode.name === 'SERVICE_LAYER') {
-      const serviceLayerBaseUrl = normalizeBaseUrl(payload.serviceLayerBaseUrl);
-      const serviceLayerPath = normalizeServiceLayerPath(payload.serviceLayerPath);
-      const serviceLayerUsername = String(payload.serviceLayerUsername || '').trim();
-      const serviceLayerPassword = String(payload.serviceLayerPassword || '').trim();
-
-      if (!serviceLayerBaseUrl || !serviceLayerPath || !serviceLayerUsername || !serviceLayerPassword) {
-        return reply.send({
-          ok: false,
-          message:
-            'SERVICE_LAYER mode requires serviceLayerBaseUrl, serviceLayerPath, serviceLayerUsername and serviceLayerPassword',
-        });
-      }
-
-      payload.serviceLayerBaseUrl = serviceLayerBaseUrl;
-      payload.serviceLayerPath = serviceLayerPath;
-      payload.serviceLayerUsername = serviceLayerUsername;
-      payload.serviceLayerPassword = serviceLayerPassword;
-      payload.apiUrl = `${serviceLayerBaseUrl}/b1s/v2${serviceLayerPath}`;
-      payload.apiToken = null;
-    }
 
     const data = await ClientConfig.create(payload);
     await ensureDefaultContactEmployeeMappings({
