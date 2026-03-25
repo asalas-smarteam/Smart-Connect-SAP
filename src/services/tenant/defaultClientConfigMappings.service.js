@@ -18,9 +18,10 @@ const DEFAULT_COMPANY_EMPLOYEE_MAPPINGS = [
 
 
 const DEFAULT_PRODUCT_MAPPINGS = [
-  { sourceField: 'OnHand', targetField: 'OnHand', sourceContext: 'ItemWarehouseInfoCollection' },
-  { sourceField: 'OnHold', targetField: 'OnHold', sourceContext: 'ItemWarehouseInfoCollection' },
-  { sourceField: 'Committed', targetField: 'Committed', sourceContext: 'ItemWarehouseInfoCollection' },
+  { sourceField: 'Calculated', targetField: 'available', sourceContext: 'ItemWarehouseInfoCollection' },
+  { sourceField: 'Ordered', targetField: 'ordered', sourceContext: 'ItemWarehouseInfoCollection' },
+  { sourceField: 'Committed', targetField: 'committed', sourceContext: 'ItemWarehouseInfoCollection' },
+  { sourceField: 'InStock', targetField: 'instock', sourceContext: 'ItemWarehouseInfoCollection' },
   { sourceField: 'ItemCode', targetField: 'hs_sku', sourceContext: 'product' },
   { sourceField: 'ItemName', targetField: 'name', sourceContext: 'product' },
 ];
@@ -67,7 +68,7 @@ async function ensureDefaultMappings({
 
 
 export async function ensureDefaultCompanyEmployeeMappings({ FieldMapping, clientConfig }) {
-  if (clientConfig?.objectType === 'company') {
+  if (clientConfig?.objectType !== 'company') {
     return;
   }
 

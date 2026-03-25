@@ -163,9 +163,10 @@ export async function seedCreateFieldsHubspot({ hubspotCredential }) {
       ],
     },
     { objectType: 'products', label: 'Código de producto', name: 'itemCode' },
-    { objectType: 'products', label: 'Stock disponible', name: 'OnHand' },
-    { objectType: 'products', label: 'Stock reservado', name: 'OnHold' },
-    { objectType: 'products', label: 'Stock comprometido', name: 'Committed' },
+    { objectType: 'products', label: 'Stock En Orden', name: 'ordered' },
+    { objectType: 'products', label: 'Stock comprometido', name: 'committed' },
+    { objectType: 'products', label: 'Stock disponible', name: 'available' },
+    { objectType: 'products', label: 'Stock Total', name: 'instock' },
   ];
 
   const results = [];

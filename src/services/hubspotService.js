@@ -126,6 +126,9 @@ const hubspotService = {
           find: () => this.findProductBySKU(token, item?.properties?.hs_sku),
           update: (id) => this.updateProduct(token, id, item),
           create: () => this.createProduct(token, item),
+          preprocess: async () => {
+            item.rawSapData.ItemWarehouseInfoCollection.filter(i.WarehouseCode !== 'B13')
+          }
         },
       };
 
