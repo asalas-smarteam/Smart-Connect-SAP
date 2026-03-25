@@ -1,42 +1,23 @@
 import { getTenantModels } from '../config/tenantDatabase.js';
-import { listActiveTenants, resolveActiveTenant } from '../utils/tenantSubscriptions.js';
+import logger from '../core/logger.js';
+import { queueCreateDealEvent } from '../services/webhookEvent.service.js';
+import { resolveActiveTenant } from '../utils/tenantSubscriptions.js';
 
-function resolveObjectType(req) {
-  return (
-    req.body?.objectType
-    || req.query?.objectType
-    || req.headers?.['x-object-type']
-    || 'deal'
-  ).toString().toLowerCase();
-}
-
-function resolveHubspotCredentialId(req) {
-  return (
-    req.body?.hubspotCredentialId
-    || req.query?.hubspotCredentialId
-    || req.headers?.['x-hubspot-credential-id']
-  );
-}
-
-async function resolveTenantContext({ hubspotCredentialId, portalId, tenantKey, tenantId }) {
-  const directTenant = await resolveActiveTenant({ tenantKey, tenantId, portalId });
-  if (directTenant) {
-    return directTenant;
+function validatePayload(body) {
+  if (!body?.tenantId) {
+    return 'tenantId is required';
   }
 
-  if (!hubspotCredentialId) {
-    return null;
+  if (!body?.portalId) {
+    return 'portalId is required';
   }
 
-  const activeTenants = await listActiveTenants();
+  if (!body?.deal) {
+    return 'deal is required';
+  }
 
-  for (const { client, subscription } of activeTenants) {
-    const tenantModels = await getTenantModels(client.tenantKey);
-  
-    const credential = await tenantModels.HubspotCredentials.findById(hubspotCredentialId);
-    if (credential) {
-      return { client, subscription };
-    }
+  if (!body?.deal?.hs_object_id) {
+    return 'deal.hs_object_id is required';
   }
 
   return null;
@@ -44,62 +25,67 @@ async function resolveTenantContext({ hubspotCredentialId, portalId, tenantKey, 
 
 export const receiveHubspotWebhook = async (req, reply) => {
   try {
-    const hubspotCredentialId = resolveHubspotCredentialId(req);
-    const objectType = resolveObjectType(req);
-    const portalId = req.body?.portalId || req.query?.portalId || req.headers?.['x-hubspot-portal-id'];
-    const tenantKey = req.body?.tenantKey || req.query?.tenantKey || req.headers?.['x-tenant-key'];
-    const tenantId = req.body?.tenantId || req.query?.tenantId || req.headers?.['x-tenant-id'];
+    const body = req.body ?? {};
+    const validationError = validatePayload(body);
 
-    const tenantContext = await resolveTenantContext({
-      hubspotCredentialId,
-      portalId,
-      tenantKey,
-      tenantId,
+    logger.info({
+      msg: 'HubSpot createDeal webhook received',
+      tenantId: body.tenantId,
+      portalId: body.portalId,
+      dealId: body?.deal?.hs_object_id,
     });
 
+    if (validationError) {
+      return reply.code(400).send({ success: false, message: validationError });
+    }
+
+    const tenantContext = await resolveActiveTenant({ tenantId: body.tenantId });
+
     if (!tenantContext) {
-      return reply.code(200).send({ ok: true, message: 'Tenant not found' });
+      return reply.code(404).send({ success: false, message: 'Tenant not found or inactive' });
+    }
+
+    const tenantPortalId = tenantContext.client?.hubspot?.portalId;
+    if (tenantPortalId && tenantPortalId !== body.portalId) {
+      return reply.code(400).send({ success: false, message: 'portalId does not match tenant' });
     }
 
     const tenantModels = await getTenantModels(tenantContext.client.tenantKey);
-    const { WebhookConfig, WebhookEvent, HubspotCredentials } = tenantModels;
+    const { WebhookEvent } = tenantModels;
+    const queueResult = await queueCreateDealEvent({ WebhookEvent, payload: body });
 
-    let resolvedCredentialId = hubspotCredentialId;
+    if (queueResult.duplicated) {
+      logger.info({
+        msg: 'Duplicate HubSpot createDeal webhook detected',
+        tenantId: body.tenantId,
+        portalId: body.portalId,
+        dealId: body.deal.hs_object_id,
+        webhookEventId: queueResult.eventId,
+      });
 
-    if (!resolvedCredentialId && portalId) {
-      const credentialQuery = { portalId };
-      
-      const credential = await HubspotCredentials.findOne(credentialQuery);
-      resolvedCredentialId = credential?._id;
+      return reply.code(200).send({
+        success: true,
+        message: 'Duplicate event ignored',
+      });
     }
 
-    if (!resolvedCredentialId) {
-      return reply.code(200).send({ ok: true, message: 'Missing HubSpot credential' });
-    }
+    logger.info({
+      msg: 'HubSpot createDeal webhook event queued',
+      tenantId: body.tenantId,
+      portalId: body.portalId,
+      dealId: body.deal.hs_object_id,
+      webhookEventId: queueResult.eventId,
+    });
 
-    const webhookConfigQuery = {
-      hubspotCredentialId: resolvedCredentialId,
-      enabled: true,
-      enabledObjectTypes: { $in: [objectType] },
-    };
-
-    const config = await WebhookConfig.findOne(webhookConfigQuery);
-
-    if (!config) {
-      return reply.code(200).send({ ok: true, message: 'Webhook disabled' });
-    }
-
-    const webhookEventPayload = {
-      hubspotCredentialId: resolvedCredentialId,
-      objectType,
-      payload: req.body,
-      status: 'pending',
-    };
-
-    await WebhookEvent.create(webhookEventPayload);
-
-    return reply.code(200).send({ ok: true });
+    return reply.code(200).send({
+      success: true,
+      message: 'Event queued',
+    });
   } catch (error) {
-    return reply.code(200).send({ ok: true, error: error.message });
+    logger.error({
+      msg: 'Failed to queue HubSpot createDeal webhook',
+      error: error.message,
+    });
+    return reply.code(500).send({ success: false, message: 'Internal error' });
   }
 };

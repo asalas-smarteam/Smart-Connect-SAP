@@ -4,15 +4,10 @@ const { Schema } = mongoose;
 
 export const webhookEventSchema = new Schema(
   {
-    hubspotCredentialId: {
-      type: Schema.Types.ObjectId,
-      ref: 'HubspotCredentials',
-      required: true,
-      index: true,
-    },
-    objectType: {
+    eventType: {
       type: String,
       required: true,
+      index: true,
     },
     payload: {
       type: Schema.Types.Mixed,
@@ -20,26 +15,40 @@ export const webhookEventSchema = new Schema(
     },
     status: {
       type: String,
-      enum: ['pending', 'processing', 'done', 'failed'],
-      default: 'pending',
+      enum: ['waiting', 'inprocess', 'completed', 'errored'],
+      default: 'waiting',
       index: true,
     },
-    attempts: {
+    retries: {
       type: Number,
       default: 0,
     },
-    errorMessage: {
-      type: String,
-      default: null,
+    maxRetries: {
+      type: Number,
+      default: 3,
     },
-    processedAt: {
-      type: Date,
+    lastError: {
+      type: String,
       default: null,
     },
   },
   {
-    timestamps: { createdAt: true, updatedAt: false },
+    timestamps: true,
     collection: 'WebhookEvents',
+  }
+);
+
+webhookEventSchema.index(
+  {
+    eventType: 1,
+    'payload.deal.hs_object_id': 1,
+  },
+  {
+    unique: true,
+    partialFilterExpression: {
+      eventType: 'createDeal',
+      'payload.deal.hs_object_id': { $exists: true },
+    },
   }
 );
 
