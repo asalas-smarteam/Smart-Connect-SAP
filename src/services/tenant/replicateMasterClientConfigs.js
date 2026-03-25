@@ -21,7 +21,9 @@ function buildClientConfigPayload({
   return {
     clientName: masterConfig.clientName,
     objectType: masterConfig.objectType,
+    mode: masterConfig.mode || 'INCREMENTAL',
     intervalMinutes: masterConfig.intervalMinutes,
+    executionTime: masterConfig.executionTime || null,
     serviceLayerPath: masterConfig.serviceLayerPath,
     integrationModeId,
     hubspotCredentialId: hubspotCredentialId || null,

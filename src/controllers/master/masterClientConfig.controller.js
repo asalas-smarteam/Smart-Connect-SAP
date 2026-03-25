@@ -7,7 +7,7 @@ import {
 } from '../../services/master/masterClientConfig.service.js';
 
 function resolveStatusCode(error) {
-  if (/Missing required fields|intervalMinutes/.test(error.message)) {
+  if (/Missing required fields|intervalMinutes|mode|executionTime|ValidationError/.test(error.message)) {
     return 400;
   }
 

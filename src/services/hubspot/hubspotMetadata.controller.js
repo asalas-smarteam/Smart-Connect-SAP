@@ -25,6 +25,7 @@ export async function ensureObjectProperty(accessToken, {
   type = 'string',
   fieldType = 'text',
   groupName,
+  options,
 }) {
   const groupByObjectType = {
     contacts: 'contactinformation',
@@ -45,13 +46,19 @@ export async function ensureObjectProperty(accessToken, {
     }
   }
 
-  const created = await hubspotPost(accessToken, `/crm/v3/properties/${objectType}`, {
+  const payload = {
     name,
     label,
     type,
     fieldType,
     groupName: groupName || groupByObjectType[objectType] || 'contactinformation',
-  });
+  };
+
+  if (Array.isArray(options) && options.length > 0) {
+    payload.options = options;
+  }
+
+  const created = await hubspotPost(accessToken, `/crm/v3/properties/${objectType}`, payload);
 
   return {
     created: true,

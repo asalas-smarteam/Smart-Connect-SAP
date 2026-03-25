@@ -98,7 +98,7 @@ export const createClientConfig = async (req, reply) => {
     });
   } catch (error) {
     logger.error({ msg: 'Failed creating ClientConfig', error: error.message });
-    const statusCode = /filters|Custom filter/.test(error.message) ? 400 : 500;
+    const statusCode = /filters|Custom filter|mode|executionTime|intervalMinutes|ValidationError/.test(error.message) ? 400 : 500;
     return reply.code(statusCode).send({
       ok: false,
       message: error.message,
@@ -244,7 +244,7 @@ export const patchClientConfig = async (req, reply) => {
     return reply.send({ ok: true, data: config });
   } catch (error) {
     logger.error({ msg: 'Failed patching ClientConfig', error: error.message });
-    const statusCode = /filters/.test(error.message) ? 400 : 500;
+    const statusCode = /filters|mode|executionTime|intervalMinutes|ValidationError/.test(error.message) ? 400 : 500;
     return reply.code(statusCode).send({
       ok: false,
       message: error.message,

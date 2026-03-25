@@ -44,11 +44,23 @@ export function getSapSyncQueue() {
   return sapSyncQueue;
 }
 
-export function buildSapSyncPayload({ tenantKey, configId, objectType, triggerType = 'scheduled' }) {
+export function buildSapSyncPayload({
+  tenantKey,
+  configId,
+  objectType,
+  mode,
+  intervalMinutes,
+  executionTime,
+  triggerType = 'scheduled',
+}) {
+  const normalizedInterval = Number(intervalMinutes);
   return {
     tenantKey,
     configId: String(configId),
     objectType: objectType || null,
+    mode: mode || null,
+    intervalMinutes: Number.isFinite(normalizedInterval) && normalizedInterval > 0 ? normalizedInterval : null,
+    executionTime: executionTime || null,
     triggerType,
   };
 }
@@ -60,8 +72,25 @@ export async function addManualSapSyncJob(payload) {
   });
 }
 
-export async function addScheduledSapSyncJob({ tenantKey, configId, objectType, intervalMinutes }) {
+export async function addScheduledSapSyncJob({
+  tenantKey,
+  configId,
+  objectType,
+  mode,
+  intervalMinutes,
+  executionTime,
+  repeatEvery,
+  repeatPattern,
+}) {
   const queue = getSapSyncQueue();
+  const repeat = {};
+  if (Number.isFinite(Number(repeatEvery)) && Number(repeatEvery) > 0) {
+    repeat.every = Number(repeatEvery);
+  } else if (typeof repeatPattern === 'string' && repeatPattern.trim()) {
+    repeat.pattern = repeatPattern.trim();
+  } else {
+    throw new Error('repeatEvery or repeatPattern is required');
+  }
 
   return queue.add(
     SAP_SYNC_JOB_NAME,
@@ -69,13 +98,14 @@ export async function addScheduledSapSyncJob({ tenantKey, configId, objectType, 
       tenantKey,
       configId,
       objectType,
+      mode,
+      intervalMinutes,
+      executionTime,
       triggerType: 'scheduled',
     }),
     {
       jobId: buildScheduledJobId({ tenantKey, configId }),
-      repeat: {
-        every: Number(intervalMinutes) * 60 * 1000,
-      },
+      repeat,
     }
   );
 }

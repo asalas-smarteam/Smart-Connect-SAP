@@ -57,8 +57,19 @@ export const clientConfigSchema = new Schema(
     sqlQuery: {
       type: String,
     },
+    mode: {
+      type: String,
+      enum: ['FULL', 'INCREMENTAL'],
+      required: true,
+      default: 'INCREMENTAL',
+    },
     intervalMinutes: {
       type: Number,
+      default: null,
+    },
+    executionTime: {
+      type: String,
+      default: null,
     },
     externalDbHost: {
       type: String,

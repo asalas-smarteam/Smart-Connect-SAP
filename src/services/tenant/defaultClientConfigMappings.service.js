@@ -6,12 +6,14 @@ const DEFAULT_CONTACT_EMPLOYEE_MAPPINGS = [
   { sourceField: 'CardName', targetField: 'firstname', sourceContext: 'businessPartner' },
   { sourceField: 'CardCode', targetField: 'idsap', sourceContext: 'businessPartner' },
   { sourceField: 'EmailAddress', targetField: 'email', sourceContext: 'businessPartner' },
+  { sourceField: 'PriceListNum', targetField: 'pricelist', sourceContext: 'businessPartner' },
 ];
 
 const DEFAULT_COMPANY_EMPLOYEE_MAPPINGS = [
   { sourceField: 'CardName', targetField: 'name', sourceContext: 'businessPartner' },
   { sourceField: 'CardCode', targetField: 'idsap', sourceContext: 'businessPartner' },
   { sourceField: 'EmailAddress', targetField: 'email', sourceContext: 'businessPartner' },
+  { sourceField: 'PriceListNum', targetField: 'pricelist', sourceContext: 'businessPartner' },
 ];
 
 

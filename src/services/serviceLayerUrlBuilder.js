@@ -71,6 +71,17 @@ function sanitizeControlledFilter(filter) {
   return value;
 }
 
+function resolveDynamicFilterValue(clientConfig, options) {
+  const intervalMinutes = Number(options?.dynamicIntervalMinutes ?? clientConfig?.intervalMinutes);
+  if (!Number.isFinite(intervalMinutes) || intervalMinutes <= 0) {
+    return null;
+  }
+
+  const nowDate = options?.now instanceof Date ? options.now : new Date();
+  const past = new Date(nowDate.getTime() - intervalMinutes * 60000);
+  return past.toISOString().split('.')[0];
+}
+
 export function buildServiceLayerUrl(clientConfig, mappings, options = {}) {
   const modeName = clientConfig?.integrationModeId?.name || clientConfig?.integrationModeName;
   if (modeName !== 'SERVICE_LAYER') {
@@ -93,10 +104,10 @@ export function buildServiceLayerUrl(clientConfig, mappings, options = {}) {
 
   const queryParts = [`$select=${mergedSelectFields.join(',')}`];
   const configFilters = clientConfig?.filters;
+  const controlledFilter = sanitizeControlledFilter(options.controlledFilter);
+  const conditions = [];
 
   if (Array.isArray(configFilters) && configFilters.length > 0) {
-    const conditions = [];
-
     configFilters.forEach((filter, index) => {
       const property = cleanValue(filter?.property);
       const operator = cleanValue(filter?.operator).toLowerCase();
@@ -107,10 +118,11 @@ export function buildServiceLayerUrl(clientConfig, mappings, options = {}) {
 
       let value = filter?.value;
       if (filter?.isDynamic === true) {
-        const intervalMinutes = Number(clientConfig?.intervalMinutes);
-        const now = new Date();
-        const past = new Date(now.getTime() - intervalMinutes * 60000);
-        value = "2026-01-01T00:00:00"//past.toISOString().split('.')[0]; //### SaveDoc
+        if (options?.skipDynamicFilters === true) {
+          return;
+        }
+
+        value = resolveDynamicFilterValue(clientConfig, options);
       }
 
       if (value === null || typeof value === 'undefined') {
@@ -141,15 +153,15 @@ export function buildServiceLayerUrl(clientConfig, mappings, options = {}) {
       }
     });
 
-    if (conditions.length > 0) {
-      const filterString = conditions.join(' and ');
-      queryParts.push(`$filter=${encodeURIComponent(filterString)}`);
-    }
-  } else {
-    const controlledFilter = sanitizeControlledFilter(options.controlledFilter);
-    if (controlledFilter) {
-      queryParts.push(`$filter=${controlledFilter}`);
-    }
+  }
+
+  if (controlledFilter) {
+    conditions.push(controlledFilter);
+  }
+
+  if (conditions.length > 0) {
+    const filterString = conditions.join(' and ');
+    queryParts.push(`$filter=${encodeURIComponent(filterString)}`);
   }
 
   return `${baseUrl}/b1s/v2${path}?${queryParts.join('&')}`;

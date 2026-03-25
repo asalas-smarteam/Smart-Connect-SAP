@@ -6,7 +6,7 @@ import mappingService from '../../services/mapping.service.js';
 import serviceLayerService from '../../services/serviceLayer.service.js';
 
 const sapService = {
-  async fetchData(clientConfigId, tenantModels) {
+  async fetchData(clientConfigId, tenantModels, fetchOptions = {}) {
     try {
       if (!tenantModels) {
         throw new Error('Tenant models are required to fetch SAP data');
@@ -32,7 +32,7 @@ const sapService = {
         case 'SERVICE_LAYER': {
           const sapCredentials = await SapCredentials.find().lean();
 
-          if (!sapCredentials) {
+          if (!sapCredentials || sapCredentials.length === 0) {
             throw new Error('SAP credentials not found for SERVICE_LAYER mode');
           }
 
@@ -46,7 +46,7 @@ const sapService = {
             ...sapCredentials[0],
             ...config.toObject(),
           };
-          return serviceLayerService.execute(mergedConfig, mappings);
+          return serviceLayerService.execute(mergedConfig, mappings, fetchOptions);
         }
         default:
           return null;

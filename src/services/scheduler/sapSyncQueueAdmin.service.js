@@ -12,7 +12,9 @@ function serializeConfig(config) {
     id: String(config._id),
     active: Boolean(config.active),
     objectType: config.objectType || null,
+    mode: config.mode || 'INCREMENTAL',
     intervalMinutes: config.intervalMinutes || null,
+    executionTime: config.executionTime || null,
   };
 }
 
@@ -111,6 +113,9 @@ export async function runConfigManualJob({ tenantKey, configId }) {
     tenantKey,
     configId: String(config._id),
     objectType: config.objectType || null,
+    mode: config.mode || 'INCREMENTAL',
+    intervalMinutes: config.intervalMinutes || null,
+    executionTime: config.executionTime || null,
   });
 
   logger.info({

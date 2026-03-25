@@ -5,8 +5,9 @@ const BASE_MASTER_CLIENT_CONFIGS = [
   {
     clientName: 'Obtener Productos',
     objectType: 'product',
-    // Ejecuta una vez cada 24h; la ejecución diaria a las 3:00 AM depende del scheduler global del sistema.
-    intervalMinutes: 1440,
+    mode: 'FULL',
+    executionTime: '01:00',
+    intervalMinutes: null,
     serviceLayerPath: '/Items',
     active: false,
     syncInTenant: true,
@@ -14,7 +15,9 @@ const BASE_MASTER_CLIENT_CONFIGS = [
   {
     clientName: 'Obtener contactos',
     objectType: 'contact',
-    intervalMinutes: 1440,
+    mode: 'FULL',
+    executionTime: '02:00',
+    intervalMinutes: null,
     serviceLayerPath: '/BusinessPartners',
     active: false,
     syncInTenant: true,
@@ -22,7 +25,9 @@ const BASE_MASTER_CLIENT_CONFIGS = [
   {
     clientName: 'Obtener Empresas',
     objectType: 'company',
-    intervalMinutes: 1440,
+    mode: 'FULL',
+    executionTime: '03:00',
+    intervalMinutes: null,
     serviceLayerPath: '/BusinessPartners',
     active: false,
     syncInTenant: true,

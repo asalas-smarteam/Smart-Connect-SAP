@@ -15,6 +15,70 @@ function normalizeIntervalMinutes(intervalMinutes) {
   return value;
 }
 
+function normalizeMode(mode) {
+  const value = String(mode || 'INCREMENTAL').trim().toUpperCase();
+  if (value === 'FULL' || value === 'INCREMENTAL') {
+    return value;
+  }
+  return 'INCREMENTAL';
+}
+
+function buildDailyPattern(executionTime) {
+  const value = String(executionTime || '').trim();
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  if (!match) {
+    return null;
+  }
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) {
+    return null;
+  }
+
+  if (hours < 0 || hours > 5 || minutes < 0 || minutes > 59) {
+    return null;
+  }
+
+  if (hours === 5 && minutes > 0) {
+    return null;
+  }
+
+  return `${minutes} ${hours} * * *`;
+}
+
+function resolveSchedulePlan(config) {
+  const mode = normalizeMode(config?.mode);
+  const intervalMinutes = normalizeIntervalMinutes(config?.intervalMinutes);
+  const executionTime = String(config?.executionTime || '').trim() || null;
+  const cronPattern = buildDailyPattern(executionTime);
+
+  if (mode === 'FULL') {
+    if (!cronPattern) {
+      return null;
+    }
+    return {
+      mode,
+      intervalMinutes: null,
+      executionTime,
+      repeatEvery: null,
+      repeatPattern: cronPattern,
+    };
+  }
+
+  if (!intervalMinutes) {
+    return null;
+  }
+
+  return {
+    mode,
+    intervalMinutes,
+    executionTime: null,
+    repeatEvery: intervalMinutes * 60 * 1000,
+    repeatPattern: null,
+  };
+}
+
 function isRepeatableScheduledJob(repeatJob) {
   return typeof repeatJob?.id === 'string' && repeatJob.id.startsWith('sap-sync:');
 }
@@ -30,23 +94,36 @@ async function removeScheduledRepeatablesByJobId(jobId) {
 
 export async function registerScheduledJob({ tenantKey, config }) {
   const configId = String(config?._id || config?.id || '');
-  const intervalMinutes = normalizeIntervalMinutes(config?.intervalMinutes);
+  const schedulePlan = resolveSchedulePlan(config);
   const objectType = config?.objectType || null;
 
-  if (!tenantKey || !configId || !intervalMinutes) {
-    throw new Error('tenantKey, configId and positive intervalMinutes are required');
+  if (!tenantKey || !configId || !schedulePlan) {
+    throw new Error('tenantKey, configId and valid schedule config are required');
   }
 
   const jobId = buildScheduledJobId({ tenantKey, configId });
   await removeScheduledRepeatablesByJobId(jobId);
-  await addScheduledSapSyncJob({ tenantKey, configId, objectType, intervalMinutes });
+  await addScheduledSapSyncJob({
+    tenantKey,
+    configId,
+    objectType,
+    mode: schedulePlan.mode,
+    intervalMinutes: schedulePlan.intervalMinutes,
+    executionTime: schedulePlan.executionTime,
+    repeatEvery: schedulePlan.repeatEvery,
+    repeatPattern: schedulePlan.repeatPattern,
+  });
 
   logger.info({
     msg: 'Scheduled SAP sync job registered',
     tenantKey,
     configId,
     objectType,
-    intervalMinutes,
+    mode: schedulePlan.mode,
+    intervalMinutes: schedulePlan.intervalMinutes,
+    executionTime: schedulePlan.executionTime,
+    repeatEvery: schedulePlan.repeatEvery,
+    repeatPattern: schedulePlan.repeatPattern,
     jobId,
   });
 }
@@ -70,7 +147,8 @@ export async function removeScheduledJob({ tenantKey, configId }) {
 
 export async function syncScheduledJob({ tenantKey, config }) {
   const configId = String(config?._id || config?.id || '');
-  const shouldSchedule = Boolean(config?.active) && normalizeIntervalMinutes(config?.intervalMinutes);
+  const schedulePlan = resolveSchedulePlan(config);
+  const shouldSchedule = Boolean(config?.active) && Boolean(schedulePlan);
 
   if (!tenantKey || !configId) {
     throw new Error('tenantKey and config are required');
@@ -109,8 +187,9 @@ export async function bootstrapScheduledJobs() {
       for (const config of configs) {
         const configId = String(config._id);
         const jobId = buildScheduledJobId({ tenantKey, configId });
+        const schedulePlan = resolveSchedulePlan(config);
 
-        if (config.active && normalizeIntervalMinutes(config.intervalMinutes)) {
+        if (config.active && schedulePlan) {
           expectedJobIds.add(jobId);
           await registerScheduledJob({ tenantKey, config });
           summary.configsScheduled += 1;

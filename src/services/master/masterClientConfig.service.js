@@ -3,10 +3,15 @@ import { createMasterClientConfigModel } from '../../../models/master/ClientConf
 const EDITABLE_FIELDS = [
   'clientName',
   'objectType',
+  'mode',
   'intervalMinutes',
+  'executionTime',
   'serviceLayerPath',
   'syncInTenant',
 ];
+
+const ALLOWED_MODES = new Set(['FULL', 'INCREMENTAL']);
+const ALLOWED_INCREMENTAL_INTERVALS = new Set([5, 10, 15, 20, 30]);
 
 function normalizeServiceLayerPath(value) {
   const trimmed = String(value || '').trim();
@@ -39,17 +44,27 @@ function sanitizeMasterPayload(payload = {}) {
     sanitized.serviceLayerPath = normalizeServiceLayerPath(sanitized.serviceLayerPath);
   }
 
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'mode')) {
+    sanitized.mode = String(sanitized.mode || '').trim().toUpperCase();
+    if (!ALLOWED_MODES.has(sanitized.mode)) {
+      throw new Error('mode must be FULL or INCREMENTAL');
+    }
+  }
+
   if (Object.prototype.hasOwnProperty.call(sanitized, 'intervalMinutes')) {
     const interval = Number(sanitized.intervalMinutes);
-    if (!Number.isFinite(interval) || interval <= 0) {
-      throw new Error('intervalMinutes must be a positive number');
-    }
-
-    if (interval === 5) {
-      throw new Error('intervalMinutes = 5 is not allowed in master ClientConfig');
+    if (!Number.isFinite(interval) || !ALLOWED_INCREMENTAL_INTERVALS.has(interval)) {
+      throw new Error('intervalMinutes must be one of: 5, 10, 15, 20, 30');
     }
 
     sanitized.intervalMinutes = interval;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'executionTime')) {
+    sanitized.executionTime = String(sanitized.executionTime || '').trim();
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(sanitized.executionTime)) {
+      throw new Error('executionTime must use HH:mm format');
+    }
   }
 
   if (Object.prototype.hasOwnProperty.call(sanitized, 'syncInTenant')) {
@@ -62,7 +77,15 @@ function sanitizeMasterPayload(payload = {}) {
 }
 
 function ensureRequiredForCreate(payload) {
-  const required = ['clientName', 'objectType', 'intervalMinutes', 'serviceLayerPath'];
+  const required = ['clientName', 'objectType', 'serviceLayerPath'];
+  const mode = payload.mode || 'INCREMENTAL';
+
+  if (mode === 'FULL') {
+    required.push('executionTime');
+  } else {
+    required.push('intervalMinutes');
+  }
+
   const missing = required.filter((field) => !payload[field]);
 
   if (missing.length) {
