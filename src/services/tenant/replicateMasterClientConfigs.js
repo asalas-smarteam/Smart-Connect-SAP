@@ -1,6 +1,11 @@
 import logger from '../../core/logger.js';
 import { createMasterClientConfigModel } from '../../../models/master/ClientConfig.js';
 import { buildMergedFilters } from './clientConfigFilters.service.js';
+import {
+  ensureDefaultContactEmployeeMappings,
+  ensureDefaultProductMappings,
+  ensureDefaultCompanyEmployeeMappings,
+} from './defaultClientConfigMappings.service.js';
 
 function buildClientConfigPayload({
   masterConfig,
@@ -30,7 +35,12 @@ export async function replicateMasterClientConfigs({
   tenantModels,
   hubspotCredentialId = null,
 }) {
-  const { ClientConfig, IntegrationMode, SapFilter } = tenantModels;
+  const {
+    ClientConfig,
+    FieldMapping,
+    IntegrationMode,
+    SapFilter,
+  } = tenantModels;
 
   try {
     const MasterClientConfig = createMasterClientConfigModel(masterConnection);
@@ -77,8 +87,23 @@ export async function replicateMasterClientConfigs({
         hubspotCredentialId,
       });
 
-      // eslint-disable-next-line no-await-in-loop
-      await ClientConfig.create(payload);
+     
+      const createdConfig = await ClientConfig.create(payload);
+      
+      await ensureDefaultCompanyEmployeeMappings({
+        FieldMapping,
+        clientConfig: createdConfig,
+      });
+
+      await ensureDefaultContactEmployeeMappings({
+        FieldMapping,
+        clientConfig: createdConfig,
+      });
+      
+      await ensureDefaultProductMappings({
+        FieldMapping,
+        clientConfig: createdConfig,
+      });
       existingClientNames.add(clientName);
     }
 

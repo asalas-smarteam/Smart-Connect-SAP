@@ -12,7 +12,7 @@ async function registerBaseObjectMapping(
   hubspotId,
   tenantModels
 ) {
-  if (!hubspotCredentialId || !objectType || !sapId || !hubspotId) {
+  if (!hubspotCredentialId || !objectType || !sapId) {
     return null;
   }
 

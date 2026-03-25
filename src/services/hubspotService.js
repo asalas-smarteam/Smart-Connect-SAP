@@ -140,6 +140,18 @@ const hubspotService = {
         await handler.preprocess();
       }
 
+      if(!item.properties.email && objectType !== 'product'){
+        await associationRegistryService.registerBaseObjectMapping(
+          clientConfig.hubspotCredentialId,
+          objectType,
+          item.properties.idsap,
+          '',
+          tenantModels
+        );
+
+        return { ok: true };
+      }
+
       // --- buscar existente
       const existing = await handler.find();
       let created;
@@ -157,7 +169,7 @@ const hubspotService = {
         );
 
         const hubspotId = created?.id;
-        const sapId = objectType === 'product'  ? item?.properties?.hs_sku : item?.properties?.sap_id ;
+        const sapId = objectType === 'product'  ? item?.properties?.hs_sku : item?.properties?.idsap ;
 
         if (hubspotId && sapId) {
           await associationRegistryService.registerBaseObjectMapping(
@@ -280,7 +292,7 @@ const hubspotService = {
                 if (!contactPayload.properties.email) {
                   const fallbackEmail = generateFallbackEmail(
                     item?.rawSapData?.EmailAddress,
-                    item?.properties?.name || item?.properties?.company || item?.properties?.domain
+                    item?.properties?.name.slice(0, 10) || item?.properties?.company.slice(0, 10) || item?.properties?.domain.slice(0, 10)
                   );
 
                   if (fallbackEmail) {
@@ -400,27 +412,6 @@ const hubspotService = {
           );
         }
       }
-
-      // Sincronización de asociaciones (diseño):
-      // - Este bloque debe ejecutarse únicamente después de crear/actualizar el deal
-      //   y contar con un hubspotId confirmado.
-      // - Debe identificar contactos, empresas y productos relacionados mediante
-      //   el mapping actual y la tabla AssociationConfig (multi-tenant por
-      //   hubspotCredentialId).
-      // - Luego, llamar a associationService para cada relación:
-      //   associateDealToContact, associateDealToCompany y
-      //   associateDealToLineItem.
-      // - Mantener separada la lógica de asociaciones para no impactar el flujo
-      //   existente de contactos, empresas y productos.
-
-      // Ejemplo (pendiente de implementación):
-      // if (objectType === "deal") {
-      //   const hubspotId = existing?.id ?? created?.id;
-      //   // resolver relaciones a partir de mappings y AssociationConfig
-      //   await associationService.associateDealToContact({ ... });
-      //   await associationService.associateDealToCompany({ ... });
-      //   await associationService.associateDealToLineItem({ ... });
-      // }
 
       return { ok: true };
     } catch (error) {

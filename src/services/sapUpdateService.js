@@ -21,9 +21,9 @@ export const sapUpdateService = {
       }).lean();
 
       const hsObjectIdSource = mapping.find(m => m.targetField === "hs_object_id")?.sourceField;
-      const sapIdSource = mapping.find(m => m.targetField === "sap_id")?.sourceField;
+      const sapIdSource = mapping.find(m => m.targetField === "idsap")?.sourceField;
 
-      const idSap = sapRecord?.sap_id;
+      const idSap = sapRecord?.idsap;
 
       if (!idSap) {
         return;

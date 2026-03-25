@@ -4,89 +4,10 @@ import {
   buildMergedFilters,
   sanitizeIncomingCustomFilters,
 } from '../services/tenant/clientConfigFilters.service.js';
-
-
-const DEFAULT_CONTACT_EMPLOYEE_MAPPINGS = [
-  { sourceField: 'Name', targetField: 'firstname', sourceContext: 'contactEmployee'  },
-  { sourceField: 'InternalCode', targetField: 'internalcode', sourceContext: 'contactEmployee'  },
-  { sourceField: 'Address', targetField: 'address', sourceContext: 'contactEmployee'  },
-  { sourceField: 'EmailAddress', targetField: 'email', sourceContext: 'contactEmployee'  },
-];
-
-const DEFAULT_PRODUCT_MAPPINGS = [
-  { sourceField: 'OnHand', targetField: 'OnHand', sourceContext: 'ItemWarehouseInfoCollection' },
-  { sourceField: 'OnHold', targetField: 'OnHold', sourceContext: 'ItemWarehouseInfoCollection' },
-  { sourceField: 'Committed', targetField: 'Committed', sourceContext: 'ItemWarehouseInfoCollection' },
-  { sourceField: 'ItemCode', targetField: 'hs_sku', sourceContext: 'product' },
-];
-
-async function ensureDefaultMappings({
-  FieldMapping,
-  clientConfig,
-  mappings,
-  objectType,
-  editable = true,
-}) {
-  if (!FieldMapping || !clientConfig?._id || !clientConfig?.hubspotCredentialId) {
-    return;
-  }
-
-  if (!Array.isArray(mappings) || mappings.length === 0) {
-    return;
-  }
-
-  await Promise.all(
-    mappings.map(async (mapping) => {
-      const existing = await FieldMapping.findOne({
-        clientConfigId: clientConfig._id,
-        hubspotCredentialId: clientConfig.hubspotCredentialId,
-        objectType,
-        sourceContext: mapping.sourceContext,
-        sourceField: mapping.sourceField,
-        targetField: mapping.targetField,
-      });
-
-      if (!existing) {
-        await FieldMapping.create({
-          ...mapping,
-          objectType,
-          sourceContext: mapping.sourceContext,
-          clientConfigId: clientConfig._id,
-          hubspotCredentialId: clientConfig.hubspotCredentialId,
-          editable,
-        });
-      }
-    })
-  );
-}
-
-async function ensureDefaultContactEmployeeMappings({ FieldMapping, clientConfig }) {
-  if (clientConfig?.objectType !== 'company') {
-    return;
-  }
-
-  await ensureDefaultMappings({
-    FieldMapping,
-    clientConfig,
-    mappings: DEFAULT_CONTACT_EMPLOYEE_MAPPINGS,
-    objectType: 'contact',
-    sourceContext: 'contactEmployee',
-  });
-}
-
-async function ensureDefaultProductMappings({ FieldMapping, clientConfig }) {
-  if (clientConfig?.objectType !== 'product') {
-    return;
-  }
-
-  await ensureDefaultMappings({
-    FieldMapping,
-    clientConfig,
-    mappings: DEFAULT_PRODUCT_MAPPINGS,
-    objectType: 'product',
-    editable: false,
-  });
-}
+import {
+  ensureDefaultContactEmployeeMappings,
+  ensureDefaultProductMappings,
+} from '../services/tenant/defaultClientConfigMappings.service.js';
 
 function applyCustomFilterPatch(existingCustomFilters, incomingFilters) {
   const customByProperty = new Map(existingCustomFilters.map((f) => [f.property, f]));

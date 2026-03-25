@@ -19,7 +19,7 @@ export const associationRegistrySchema = new Schema(
     },
     baseHubspotId: {
       type: String,
-      required: true,
+      default: null
     },
     associatedObjectType: {
       type: String,

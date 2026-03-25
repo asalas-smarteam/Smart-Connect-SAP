@@ -173,8 +173,8 @@ Todos los esquemas principales usan **Mongoose/MongoDB**; los nombres de colecci
 - **Bandera:** `ClientConfig.requireUpdateHubspotID` habilita actualizaciones en SAP después de crear objetos en HubSpot.
 - **Modo:** Usa la misma conexión externa de BD con:
   - **Procedimiento almacenado:** `updateMethod === 'sp'` ejecuta `updateSpName` con parámetros `@idSap` y `@idHubspot`.
-  - **Script:** `updateMethod === 'script'` actualiza `updateTableName` estableciendo el campo SAP mapeado a `hs_object_id` usando el identificador SAP mapeado a `sap_id`.
-- **Dependencia de mapeo:** `sapUpdateService` revisa entradas de `FieldMapping` para `hs_object_id` y `sap_id` a fin de ubicar campos de origen SAP.
+  - **Script:** `updateMethod === 'script'` actualiza `updateTableName` estableciendo el campo SAP mapeado a `hs_object_id` usando el identificador SAP mapeado a `idsap`.
+- **Dependencia de mapeo:** `sapUpdateService` revisa entradas de `FieldMapping` para `hs_object_id` y `idsap` a fin de ubicar campos de origen SAP.
 - **Caso de uso:** Después de crear un registro en HubSpot, el nuevo ID de objeto se escribe en SAP/BEST.
 
 ## 10. Ciclo de ejecución de syncService

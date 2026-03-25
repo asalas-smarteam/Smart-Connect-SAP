@@ -133,6 +133,7 @@ export async function seedCreateFieldsHubspot({ hubspotCredential }) {
     { objectType: 'contacts', label: 'ID SAP', name: 'idsap' },
     { objectType: 'contacts', label: 'Código Interno SAP', name: 'internalcode' },
     { objectType: 'companies', label: 'ID SAP', name: 'idsap' },
+    { objectType: 'companies', label: 'Correo electronico', name: 'email' },
     { objectType: 'products', label: 'Código de producto', name: 'itemCode' },
     { objectType: 'products', label: 'Stock disponible', name: 'OnHand' },
     { objectType: 'products', label: 'Stock reservado', name: 'OnHold' },

@@ -91,22 +91,27 @@ const hubspotAuthService = {
 
     try {
       const response = await axios.post(HUBSPOT_TOKEN_URL, payload, {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    });
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      });
+
+      const { access_token, expires_in, refresh_token } = response.data;
+      const expiresAt = new Date(Date.now() + expires_in * 1000);
+
+      credentials.accessToken = access_token;
+      credentials.expiresAt = expiresAt;
+      if (refresh_token) {
+        credentials.refreshToken = refresh_token;
+      }
+
+      const test = await credentials.save();
+
+      console.log(test)
+
     } catch (error) {
       console.log(error.response.data)
     }
 
-    const { access_token, expires_in, refresh_token } = response.data;
-    const expiresAt = new Date(Date.now() + expires_in * 1000);
-
-    credentials.accessToken = access_token;
-    credentials.expiresAt = expiresAt;
-    if (refresh_token) {
-      credentials.refreshToken = refresh_token;
-    }
-
-    await credentials.save();
+   
 
     return access_token;
   },
