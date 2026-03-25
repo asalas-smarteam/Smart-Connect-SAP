@@ -5,6 +5,9 @@ import logger from './core/logger.js';
 import { closeAllConnections } from './utils/externalDb.js';
 import { seedDefaultSapFilters } from '../database/seeds/defaultSapFilters.seed.js';
 import { seedMasterClientConfigs } from '../database/seeds/masterClientConfigs.seed.js';
+import { closeSapSyncQueue } from './queues/sapSync.queue.js';
+import { closeSharedBullMQConnection } from './lib/bullmqRedis.js';
+import { disconnectTenantConnections } from './config/tenantDatabase.js';
 
 dotenv.config();
 
@@ -21,7 +24,10 @@ const closeDatabaseConnection = async () => {
   isClosingConnection = true;
 
   try {
+    await closeSapSyncQueue();
+    await closeSharedBullMQConnection();
     await disconnect();
+    await disconnectTenantConnections();
     isConnectionClosed = true;
     logger.info('🧹 MongoDB connection closed.');
     await closeAllConnections();

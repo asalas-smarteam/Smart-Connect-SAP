@@ -8,6 +8,7 @@ import {
   ensureDefaultContactEmployeeMappings,
   ensureDefaultProductMappings,
 } from '../services/tenant/defaultClientConfigMappings.service.js';
+import { syncScheduledJob } from '../services/scheduler/sapSyncScheduler.service.js';
 
 function applyCustomFilterPatch(existingCustomFilters, incomingFilters) {
   const customByProperty = new Map(existingCustomFilters.map((f) => [f.property, f]));
@@ -76,6 +77,20 @@ export const createClientConfig = async (req, reply) => {
       FieldMapping,
       clientConfig: data,
     });
+
+    try {
+      await syncScheduledJob({
+        tenantKey: req.tenantKey,
+        config: data,
+      });
+    } catch (syncError) {
+      logger.error({
+        msg: 'Failed syncing scheduler after ClientConfig create',
+        tenantKey: req.tenantKey,
+        clientConfigId: data?._id?.toString(),
+        error: syncError.message,
+      });
+    }
 
     return reply.send({
       ok: true,
@@ -211,6 +226,20 @@ export const patchClientConfig = async (req, reply) => {
 
     Object.assign(config, payload);
     await config.save();
+
+    try {
+      await syncScheduledJob({
+        tenantKey: req.tenantKey,
+        config,
+      });
+    } catch (syncError) {
+      logger.error({
+        msg: 'Failed syncing scheduler after ClientConfig patch',
+        tenantKey: req.tenantKey,
+        clientConfigId: config?._id?.toString(),
+        error: syncError.message,
+      });
+    }
 
     return reply.send({ ok: true, data: config });
   } catch (error) {

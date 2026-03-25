@@ -5,6 +5,8 @@ import startSapSync from './tasks/sapSyncTask.js';
 import startWebhookProcessor from './tasks/webhookProcessorTask.js';
 import { initializeExternalConnections } from './utils/externalDb.js';
 import env from './config/env.js';
+import { bootstrapSapSyncScheduler } from './bootstrap/sapSyncScheduler.bootstrap.js';
+import { registerBullBoard } from './bootstrap/bullBoard.js';
 
 const app = Fastify({
   logger: true
@@ -32,20 +34,26 @@ app.addHook('onRequest', async (req, reply) => {
 
 // Rutas principales
 app.register(routes);
+registerBullBoard(app);
 
 app.addHook('onReady', async () => {
   await initializeExternalConnections();
+  await bootstrapSapSyncScheduler();
   const isSapSyncEnabled = env.SAP_SYNC_CRON_ENABLED !== 'false';
 
   if (isSapSyncEnabled) {
     const job = await startSapSync();
-    job.start();
+    if (job?.start) {
+      job.start();
+    }
   }
 
   const isWebhookProcessorEnabled = env.WEBHOOK_PROCESSOR_CRON_ENABLED !== 'false';
   if (isWebhookProcessorEnabled) {
     const webhookJob = await startWebhookProcessor();
-    webhookJob.start();
+    if (webhookJob?.start) {
+      webhookJob.start();
+    }
   }
 });
 

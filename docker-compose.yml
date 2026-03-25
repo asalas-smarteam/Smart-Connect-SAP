@@ -1,0 +1,30 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: npm run start:api
+    ports:
+      - "${PORT:-3000}:3000"
+    env_file:
+      - .env
+    environment:
+      REDIS_HOST: ${REDIS_HOST:-host.docker.internal}
+      BULLMQ_REDIS_HOST: ${BULLMQ_REDIS_HOST:-host.docker.internal}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: npm run start:worker
+    env_file:
+      - .env
+    environment:
+      REDIS_HOST: ${REDIS_HOST:-host.docker.internal}
+      BULLMQ_REDIS_HOST: ${BULLMQ_REDIS_HOST:-host.docker.internal}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

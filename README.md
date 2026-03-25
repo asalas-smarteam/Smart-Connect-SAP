@@ -298,6 +298,55 @@ Se asume el servidor en `localhost:3000` y la BD poblada con `ClientConfig` y ma
 - **Ejemplo de URL construida automáticamente por el sistema:**
   - `serviceLayerBaseUrl`: `https://201.7.208.10:23052`
   - `serviceLayerPath`: `/BusinessPartners`
+
+## 19. BullMQ + Worker (fase 1)
+
+### Resumen
+- Se agregó una cola global `sap-sync` con BullMQ.
+- Cada job representa un `ClientConfig` específico (`tenantKey` + `configId`).
+- El worker aplica lock por tenant en Redis (`lock:sap-sync:{tenantKey}`) para impedir ejecuciones simultáneas dentro del mismo tenant.
+- `runSapSyncOnce` y el endpoint `POST /sap-sync/run` se mantienen para pruebas/manual.
+
+### Variables de entorno nuevas
+- `SAP_SYNC_WORKER_CONCURRENCY` (default `5`)
+- `SAP_SYNC_TENANT_LOCK_TTL_MS` (default `600000`)
+- `SAP_SYNC_JOB_ATTEMPTS` (default `20`)
+- `SAP_SYNC_JOB_BACKOFF_MS` (default `15000`)
+- `SAP_SYNC_REMOVE_ON_COMPLETE` (default `100`)
+- `SAP_SYNC_REMOVE_ON_FAIL` (default `500`)
+- `BULL_BOARD_PATH` (default `/admin/queues`)
+- `BULLMQ_REDIS_URL` o `BULLMQ_REDIS_HOST`/`BULLMQ_REDIS_PORT` (si no se define, usa `REDIS_*`)
+
+### Comandos
+```bash
+# API
+npm run start:api
+
+# Worker BullMQ
+npm run start:worker
+```
+
+### Bull Board
+- Ruta: `/admin/queues`
+- Protección: header `x-internal-key` (usa la misma clave interna del proyecto).
+
+### APIs de scheduler/jobs
+- `GET /sap-sync/jobs` (admin interno)
+- `POST /sap-sync/jobs/activate` body: `{ "tenantKey": "...", "configId": "..." }`
+- `POST /sap-sync/jobs/deactivate` body: `{ "tenantKey": "...", "configId": "..." }`
+- `POST /sap-sync/jobs/run` body: `{ "tenantKey": "...", "configId": "..." }`
+- `POST /sap-sync/jobs/resync` (admin interno)
+- `DELETE /sap-sync/jobs/tenant/:tenantKey` (admin interno)
+
+### Docker (API + Worker, Redis externo en host)
+```bash
+docker compose up --build
+```
+
+Notas:
+- `docker-compose.yml` no levanta Redis.
+- API y worker resuelven Redis del host usando `host.docker.internal` + `extra_hosts: host-gateway`.
+- Puedes ajustar `REDIS_HOST`/`BULLMQ_REDIS_HOST` en `.env` si usas otra IP/hostname.
   - mappings activos: `CardCode`, `CardName`, `Phone1`, `EmailAddress`
   - URL final de lectura SAP: `https://201.7.208.10:23052/b1s/v2/BusinessPartners?$select=CardCode,CardName,Phone1,EmailAddress`
 
