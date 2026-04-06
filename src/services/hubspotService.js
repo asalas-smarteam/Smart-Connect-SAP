@@ -30,9 +30,8 @@ function generateFallbackEmail(baseEmail, companyName) {
   }
 
   const companySlug = slugCompanyName(companyName) || 'company';
-  const randomThreeDigits = Math.floor(Math.random() * 900) + 100;
 
-  return `${localPart}+${companySlug}${randomThreeDigits}@${domain}`;
+  return `${localPart}+${companySlug}@${domain}`;
 }
 
 const hubspotService = {
@@ -79,7 +78,7 @@ const hubspotService = {
         },
 
         company: {
-          find: () => this.findCompanyByDomain(token, item?.properties?.domain),
+          find: () => this.findCompanyByEmail(token, item?.properties?.email),
           update: (id) => this.updateCompany(token, id, item),
           create: () => this.createCompany(token, item),
         },
@@ -316,7 +315,7 @@ const hubspotService = {
                 if (!contactPayload.properties.email) {
                   const fallbackEmail = generateFallbackEmail(
                     item?.rawSapData?.EmailAddress,
-                    item?.properties?.name.slice(0, 10) || item?.properties?.company.slice(0, 10) || item?.properties?.domain.slice(0, 10)
+                    sapInternalCode
                   );
 
                   if (fallbackEmail) {
@@ -461,12 +460,12 @@ const hubspotService = {
     return hubspotClient.updateContact(token, id, data);
   },
 
-  async findCompanyByDomain(token, domain) {
-    if (!domain) {
+  async findCompanyByEmail(token, email) {
+    if (!email) {
       return null;
     }
 
-    return hubspotClient.findCompanyByDomain(token, domain);
+    return hubspotClient.findCompanyByEmail(token, email);
   },
 
   async createCompany(token, data) {

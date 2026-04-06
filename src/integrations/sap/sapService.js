@@ -4,6 +4,7 @@ import scriptMode from './modes/scriptMode.js';
 import apiMode from './modes/apiMode.js';
 import mappingService from '../../services/mapping.service.js';
 import serviceLayerService from '../../services/serviceLayer.service.js';
+import { ensureDefaultProductMappings } from '../../services/tenant/defaultClientConfigMappings.service.js';
 
 const sapService = {
   async fetchData(clientConfigId, tenantModels, fetchOptions = {}) {
@@ -34,6 +35,13 @@ const sapService = {
 
           if (!sapCredentials || sapCredentials.length === 0) {
             throw new Error('SAP credentials not found for SERVICE_LAYER mode');
+          }
+
+          if (config.objectType === 'product') {
+            await ensureDefaultProductMappings({
+              FieldMapping: tenantModels.FieldMapping,
+              clientConfig: config,
+            });
           }
 
           const mappings = await mappingService.getMappingsByObjectType(

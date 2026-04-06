@@ -4,13 +4,16 @@ import logger from './core/logger.js';
 import { closeAllConnections } from './utils/externalDb.js';
 import { disconnectTenantConnections } from './config/tenantDatabase.js';
 import { closeSapSyncQueue } from './queues/sapSync.queue.js';
+import { closeWebhookQueue } from './queues/webhook.queue.js';
 import { closeSharedBullMQConnection } from './lib/bullmqRedis.js';
 import { startSapSyncWorker } from './workers/sapSync.worker.js';
+import { startWebhookWorker } from './workers/webhook.worker.js';
 
 dotenv.config();
 
 const { connect, disconnect } = db;
 let workerInstance = null;
+let webhookWorkerInstance = null;
 let isClosing = false;
 
 async function shutdownWorker() {
@@ -26,7 +29,12 @@ async function shutdownWorker() {
       await workerInstance.close();
       workerInstance = null;
     }
+    if (webhookWorkerInstance) {
+      await webhookWorkerInstance.close();
+      webhookWorkerInstance = null;
+    }
     await closeSapSyncQueue();
+    await closeWebhookQueue();
     await closeSharedBullMQConnection();
     await closeAllConnections();
     await disconnectTenantConnections();
@@ -58,7 +66,8 @@ async function start() {
   try {
     await connect();
     workerInstance = startSapSyncWorker();
-    logger.info({ msg: 'SAP sync worker process is running' });
+    webhookWorkerInstance = startWebhookWorker();
+    logger.info({ msg: 'SAP sync and webhook worker process is running' });
   } catch (error) {
     logger.error({
       msg: 'Failed starting SAP sync worker process',

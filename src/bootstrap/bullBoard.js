@@ -2,19 +2,21 @@ import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter.js';
 import { FastifyAdapter } from '@bull-board/fastify';
 import { getSapSyncQueue } from '../queues/sapSync.queue.js';
+import { getWebhookQueue } from '../queues/webhook.queue.js';
 import { internalKeyAuthOnly } from '../middleware/internalAuth.js';
 import logger from '../core/logger.js';
 
 const DEFAULT_BULL_BOARD_PATH = '/admin/queues';
 
 export function registerBullBoard(app) {
-  const queue = getSapSyncQueue();
+  const sapSyncQueue = getSapSyncQueue();
+  const webhookQueue = getWebhookQueue();
   const serverAdapter = new FastifyAdapter();
   const basePath = process.env.BULL_BOARD_PATH || DEFAULT_BULL_BOARD_PATH;
   serverAdapter.setBasePath(basePath);
 
   createBullBoard({
-    queues: [new BullMQAdapter(queue)],
+    queues: [new BullMQAdapter(sapSyncQueue), new BullMQAdapter(webhookQueue)],
     serverAdapter,
     options: {
       uiConfig: {

@@ -111,12 +111,12 @@ export async function updateContact(token, id, data) {
   return hubspotRequest('patch', `/crm/v3/objects/contacts/${id}`, token, data);
 }
 
-export async function findCompanyByDomain(token, domain) {
+export async function findCompanyByEmail(token, email) {
   return searchObject(token, 'companies', [
     {
-      propertyName: 'domain',
+      propertyName: 'email',
       operator: 'EQ',
-      value: domain,
+      value: email,
     },
   ]);
 }

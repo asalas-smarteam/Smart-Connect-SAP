@@ -1,114 +1,755 @@
+import axios from 'axios';
+import https from 'https';
+import logger from '../core/logger.js';
 import mappingService from './mapping.service.js';
-import sapWebhookService from './sapWebhookService.js';
-import {
-  DEFAULT_BATCH_SIZE,
-  DEFAULT_RETRY_OPTIONS,
-  processInBatches,
-} from '../utils/batchProcessor.js';
+import hubspotAuthService from './hubspotAuthService.js';
+import * as hubspotClient from './hubspotClient.js';
+import sapSessionManager, { isSessionInvalidError } from './sapSessionManager.js';
+
+const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+const DEFAULT_BATCH_SIZE = Number(process.env.WEBHOOK_EVENT_BATCH_SIZE || 10);
+const DEFAULT_MAX_RETRIES = Number(process.env.WEBHOOK_EVENT_MAX_RETRIES || 3);
+
+class PermanentWebhookError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'PermanentWebhookError';
+    this.permanent = true;
+  }
+}
+
+function cleanBaseUrl(baseUrl) {
+  return String(baseUrl || '').trim().replace(/\/+$/, '');
+}
+
+function resolveEventPayload(event) {
+  const payload = event?.payload || {};
+  return {
+    payload,
+    deal: payload?.deal || payload?.data?.deal || null,
+    company: payload?.company || payload?.data?.company || null,
+    contact: payload?.contact || payload?.data?.contact || null,
+    lineItems: Array.isArray(payload?.line_items)
+      ? payload.line_items
+      : (Array.isArray(payload?.data?.line_items) ? payload.data.line_items : []),
+  };
+}
+
+function escapeODataString(value) {
+  return String(value || '').replace(/'/g, "''");
+}
+
+function pickByPath(input, path) {
+  if (!path) {
+    return null;
+  }
+
+  const segments = String(path)
+    .split('.')
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  if (!segments.length) {
+    return null;
+  }
+
+  let current = input;
+
+  for (const segment of segments) {
+    if (current === null || typeof current === 'undefined') {
+      return null;
+    }
+
+    if (Array.isArray(current)) {
+      current = current[0];
+      if (current === null || typeof current === 'undefined') {
+        return null;
+      }
+    }
+
+    current = current?.[segment];
+  }
+
+  return typeof current === 'undefined' ? null : current;
+}
+
+function normalizeNumber(value, fallback = null) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return parsed;
+}
+
+function toNonEmptyString(value) {
+  const normalized = String(value || '').trim();
+  return normalized || null;
+}
+
+function resolveHubspotPropertyNameBySapField(mappings, sapField, fallback = null) {
+  const match = (Array.isArray(mappings) ? mappings : []).find(
+    (mapping) => String(mapping?.sourceField || '').trim() === sapField
+      && String(mapping?.targetField || '').trim()
+  );
+
+  return match ? String(match.targetField).trim() : fallback;
+}
+
+function mapHubspotToSapFields(source, mappings) {
+  const mapped = {};
+
+  for (const mapping of Array.isArray(mappings) ? mappings : []) {
+    if (mapping?.isActive === false) {
+      continue;
+    }
+
+    const sourceField = String(mapping?.sourceField || '').trim();
+    const targetField = String(mapping?.targetField || '').trim();
+    if (!sourceField || !targetField) {
+      continue;
+    }
+
+    const value = pickByPath(source, targetField);
+    if (value !== null && typeof value !== 'undefined' && value !== '') {
+      mapped[sourceField] = value;
+    }
+  }
+
+  return mapped;
+}
+
+async function serviceLayerRequest(sapConfig, { method, path, data, params }) {
+  const baseUrl = cleanBaseUrl(sapConfig?.serviceLayerBaseUrl);
+
+  if (!baseUrl) {
+    throw new Error('Missing serviceLayerBaseUrl for webhook processing');
+  }
+
+  const url = `${baseUrl}/b1s/v2${path.startsWith('/') ? path : `/${path}`}`;
+
+  const requestWithSession = async () => {
+    const { cookie } = await sapSessionManager.getSessionCookie(sapConfig);
+    const response = await axios({
+      method,
+      url,
+      data,
+      params,
+      headers: {
+        Cookie: cookie,
+      },
+      httpsAgent,
+    });
+    return response.data;
+  };
+
+  try {
+    return await requestWithSession();
+  } catch (error) {
+    if (!isSessionInvalidError(error)) {
+      throw error;
+    }
+
+    const tenantKey = sapSessionManager.resolveTenantKey(sapConfig);
+    await sapSessionManager.invalidateSession(tenantKey);
+    return requestWithSession();
+  }
+}
+
+async function resolveWebhookRuntimeContext({ tenantModels, payload, tenantId, tenantKey, portalId }) {
+  const { ClientConfig, HubspotCredentials, SapCredentials } = tenantModels;
+  const resolvedPortalId = toNonEmptyString(payload?.portalId || portalId);
+  const credentialQuery = resolvedPortalId ? { portalId: resolvedPortalId } : {};
+  let hubspotCredentials = await HubspotCredentials.findOne(credentialQuery).lean();
+
+  if (!hubspotCredentials) {
+    hubspotCredentials = await HubspotCredentials.findOne({}).sort({ _id: 1 }).lean();
+  }
+
+  if (!hubspotCredentials?._id) {
+    throw new Error('HubSpot credentials not found for tenant webhook processing');
+  }
+
+  const sapCredentials = await SapCredentials.findOne().lean();
+
+
+  if (!sapCredentials?.serviceLayerBaseUrl) {
+    throw new Error('SAP Service Layer credentials not configured for webhook processing');
+  }
+
+  const hubspotCredentialId = hubspotCredentials._id;
+  const [
+    companyMappings,
+    contactBusinessPartnerMappings,
+    contactEmployeeMappings,
+    productMappings,
+    dealMappings,
+  ] = await Promise.all([
+    mappingService.getMappingsByObjectType(hubspotCredentialId, 'company', 'businessPartner', tenantModels),
+    mappingService.getMappingsByObjectType(hubspotCredentialId, 'contact', 'businessPartner', tenantModels),
+    mappingService.getMappingsByObjectType(hubspotCredentialId, 'contact', 'contactEmployee', tenantModels),
+    mappingService.getMappingsByObjectType(hubspotCredentialId, 'product', 'product', tenantModels),
+    mappingService.getMappingsByObjectType(hubspotCredentialId, 'deal', 'businessPartner', tenantModels),
+  ]);
+
+  return {
+    hubspotCredentials,
+    sapConfig: {
+      ...sapCredentials,
+      tenantId: tenantId,
+      tenantKey: tenantKey,
+    },
+    mappings: {
+      companyMappings,
+      contactBusinessPartnerMappings,
+      contactEmployeeMappings,
+      productMappings,
+      dealMappings,
+    },
+  };
+}
+
+async function findBusinessPartnerByCardCode(sapConfig, cardCode) {
+  if (!toNonEmptyString(cardCode)) {
+    return null;
+  }
+
+  try {
+    return await serviceLayerRequest(sapConfig, {
+      method: 'get',
+      path: `/BusinessPartners('${encodeURIComponent(String(cardCode))}')`,
+      params: {
+        $select: 'CardCode,CardName,EmailAddress,PriceListNum,ContactEmployees',
+      },
+    });
+  } catch (error) {
+    if (error?.response?.status === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function findBusinessPartnerByEmail(sapConfig, email) {
+  if (!toNonEmptyString(email)) {
+    return null;
+  }
+
+  const response = await serviceLayerRequest(sapConfig, {
+    method: 'get',
+    path: '/BusinessPartners',
+    params: {
+      $top: 1,
+      $select: 'CardCode,CardName,EmailAddress,PriceListNum,ContactEmployees',
+      $filter: `EmailAddress eq '${escapeODataString(email)}'`,
+    },
+  });
+
+  return Array.isArray(response?.value) && response.value.length > 0
+    ? response.value[0]
+    : null;
+}
+
+async function findOrCreateBusinessPartner({
+  sapConfig,
+  company,
+  contact,
+  mappedCompany,
+  mappedContact,
+  companyExists,
+}) {
+  const mappedCardCode = toNonEmptyString(mappedCompany?.CardCode || mappedContact?.CardCode);
+  const mappedEmail = toNonEmptyString(mappedCompany?.EmailAddress || mappedContact?.EmailAddress);
+  const mappedPriceListNum = normalizeNumber(
+    mappedCompany?.PriceListNum ?? mappedContact?.PriceListNum,
+    null
+  );
+
+  if (!Number.isFinite(mappedPriceListNum)) {
+    throw new PermanentWebhookError('PriceListNum is required in mappings to send webhook data to SAP');
+  }
+
+  const byCardCode = await findBusinessPartnerByCardCode(sapConfig, mappedCardCode);
+  if (byCardCode?.CardCode) {
+    return { cardCode: byCardCode.CardCode, created: false, businessPartner: byCardCode };
+  }
+
+  const byEmail = await findBusinessPartnerByEmail(sapConfig, mappedEmail);
+  if (byEmail?.CardCode) {
+    return { cardCode: byEmail.CardCode, created: false, businessPartner: byEmail };
+  }
+
+  const fallbackName = companyExists
+    ? (company?.name || company?.company || company?.hs_name)
+    : (contact?.firstname || contact?.name || contact?.email);
+  const cardName = toNonEmptyString(mappedCompany?.CardName || mappedContact?.CardName || fallbackName);
+
+  if (!cardName) {
+    throw new PermanentWebhookError('CardName is required to create Business Partner');
+  }
+
+  const payload = {
+    CardName: cardName,
+    CardType: 'C',
+    CompanyPrivate: companyExists ? 'C' : 'P',
+    EmailAddress: mappedEmail || undefined,
+    Phone1: toNonEmptyString(mappedCompany?.Phone1 || mappedContact?.Phone1) || undefined,
+    PriceListNum: mappedPriceListNum,
+  };
+
+  if (mappedCardCode) {
+    payload.CardCode = mappedCardCode;
+  }
+
+  const created = await serviceLayerRequest(sapConfig, {
+    method: 'post',
+    path: '/BusinessPartners',
+    data: payload,
+  });
+
+  const cardCode = created?.CardCode || mappedCardCode || null;
+  if (!cardCode) {
+    throw new Error('SAP BusinessPartner creation did not return CardCode');
+  }
+
+  const businessPartner = await findBusinessPartnerByCardCode(sapConfig, cardCode);
+  return {
+    cardCode,
+    created: true,
+    businessPartner,
+  };
+}
+
+function resolveContactEmployeePayload(contact, contactEmployeeMappings) {
+  const mapped = mapHubspotToSapFields(contact || {}, contactEmployeeMappings);
+  const name = toNonEmptyString(mapped?.Name || contact?.firstname || contact?.name || contact?.email);
+  const email = toNonEmptyString(mapped?.E_Mail || mapped?.EmailAddress || contact?.email);
+
+  if (!name && !email) {
+    return null;
+  }
+
+  const payload = {
+    ...mapped,
+  };
+
+  if (name) {
+    payload.Name = name;
+  }
+
+  if (email) {
+    payload.E_Mail = email;
+    if (!payload.EmailAddress) {
+      payload.EmailAddress = email;
+    }
+  }
+
+  return payload;
+}
+
+async function addContactEmployeeIfNeeded({
+  sapConfig,
+  cardCode,
+  businessPartner,
+  contact,
+  contactEmployeeMappings,
+}) {
+  if (!cardCode || !contact) {
+    return { created: false, internalCode: null };
+  }
+
+  const nextEmployee = resolveContactEmployeePayload(contact, contactEmployeeMappings);
+  if (!nextEmployee) {
+    return { created: false, internalCode: null };
+  }
+
+  const currentEmployees = Array.isArray(businessPartner?.ContactEmployees)
+    ? businessPartner.ContactEmployees
+    : [];
+
+  const email = toNonEmptyString(nextEmployee.E_Mail || nextEmployee.EmailAddress);
+  const name = toNonEmptyString(nextEmployee.Name);
+  const existing = currentEmployees.find((employee) => {
+    const sameEmail = email
+      && toNonEmptyString(employee?.E_Mail || employee?.EmailAddress)?.toLowerCase() === email.toLowerCase();
+    const sameName = name
+      && toNonEmptyString(employee?.Name)?.toLowerCase() === name.toLowerCase();
+    return sameEmail || sameName;
+  });
+
+  if (existing) {
+    return { created: false, internalCode: existing.InternalCode || null };
+  }
+
+  await serviceLayerRequest(sapConfig, {
+    method: 'patch',
+    path: `/BusinessPartners('${encodeURIComponent(String(cardCode))}')`,
+    data: {
+      ContactEmployees: [...currentEmployees, nextEmployee],
+    },
+  });
+
+  const refreshedBusinessPartner = await findBusinessPartnerByCardCode(sapConfig, cardCode);
+  const refreshedEmployees = Array.isArray(refreshedBusinessPartner?.ContactEmployees)
+    ? refreshedBusinessPartner.ContactEmployees
+    : [];
+  const refreshed = refreshedEmployees.find((employee) => {
+    const sameEmail = email
+      && toNonEmptyString(employee?.E_Mail || employee?.EmailAddress)?.toLowerCase() === email.toLowerCase();
+    const sameName = name
+      && toNonEmptyString(employee?.Name)?.toLowerCase() === name.toLowerCase();
+    return sameEmail || sameName;
+  });
+
+  return {
+    created: true,
+    internalCode: refreshed?.InternalCode || null,
+  };
+}
+
+async function validateStockForItem(sapConfig, itemCode, quantity) {
+  const item = await serviceLayerRequest(sapConfig, {
+    method: 'get',
+    path: `/Items('${encodeURIComponent(String(itemCode))}')`,
+    params: {
+      $select: 'ItemCode,ItemWarehouseInfoCollection',
+    },
+  });
+
+  // TODO: number 100
+  const available = Number(item?.OnHand || 0) - Number(item?.Committed || 0) + Number(item?.OnOrder || 0);
+  if (available < quantity) {
+    throw new PermanentWebhookError(
+      `Insufficient stock for item ${itemCode}. Available: ${available}, required: ${quantity}`
+    );
+  }
+}
+
+function mapDocumentLines({ lineItems, productMappings }) {
+  const lines = [];
+
+  for (const lineItem of lineItems) {
+    const mapped = mapHubspotToSapFields(lineItem, productMappings);
+    const itemCode = toNonEmptyString(mapped?.ItemCode || lineItem?.hs_sku || lineItem?.itemCode);
+    const quantity = normalizeNumber(mapped?.Quantity ?? lineItem?.quantity, 1);
+    const unitPrice = normalizeNumber(
+      mapped?.UnitPrice ?? mapped?.Price ?? lineItem?.price ?? lineItem?.amount,
+      0
+    );
+
+    if (!itemCode) {
+      throw new PermanentWebhookError('ItemCode/hs_sku is required in line_items mapping');
+    }
+
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw new PermanentWebhookError(`Invalid quantity for item ${itemCode}`);
+    }
+
+    lines.push({
+      ItemCode: itemCode,
+      Quantity: quantity,
+      UnitPrice: Number.isFinite(unitPrice) ? unitPrice : 0,
+    });
+  }
+
+  return lines;
+}
+
+async function createOrder({ sapConfig, cardCode, documentLines }) {
+  if (!documentLines.length) {
+    throw new PermanentWebhookError('At least one line_item is required to create SAP Order');
+  }
+
+  return serviceLayerRequest(sapConfig, {
+    method: 'post',
+    path: '/Orders',
+    data: {
+      CardCode: cardCode,
+      DocDate: new Date().toISOString().slice(0, 10),
+      DocumentLines: documentLines,
+    },
+  });
+}
+
+async function updateHubspotAfterSap({
+  tenantModels,
+  hubspotCredentials,
+  payload,
+  dealMappings,
+  orderResponse,
+  cardCode,
+  companyCreated,
+  contactCreated,
+  contactEmployeeCode,
+}) {
+  const token = await hubspotAuthService.getAccessToken(
+    hubspotCredentials.clientConfigId,
+    hubspotCredentials,
+    tenantModels
+  );
+
+  const dealObjectId = toNonEmptyString(payload?.deal?.hs_object_id);
+  const companyObjectId = toNonEmptyString(payload?.company?.hs_object_id);
+  const contactObjectId = toNonEmptyString(payload?.contact?.hs_object_id);
+
+  if (dealObjectId) {
+    const docEntryProperty = resolveHubspotPropertyNameBySapField(dealMappings, 'DocEntry');
+    const docNumProperty = resolveHubspotPropertyNameBySapField(dealMappings, 'DocNum');
+    const dealProperties = {};
+
+    if (docEntryProperty && orderResponse?.DocEntry !== undefined) {
+      dealProperties[docEntryProperty] = String(orderResponse.DocEntry);
+    }
+
+    if (docNumProperty && orderResponse?.DocNum !== undefined) {
+      dealProperties[docNumProperty] = String(orderResponse.DocNum);
+    }
+
+    if (Object.keys(dealProperties).length > 0) {
+      await hubspotClient.updateDeal(token, dealObjectId, { properties: dealProperties });
+    }
+  }
+
+  if (companyCreated && companyObjectId) {
+    await hubspotClient.updateCompany(token, companyObjectId, {
+      properties: {
+        idsap: cardCode,
+      },
+    });
+  }
+
+  if (contactCreated && contactObjectId) {
+    const contactProperties = {
+      idsap: cardCode,
+    };
+
+    if (contactEmployeeCode) {
+      contactProperties.internalcode = String(contactEmployeeCode);
+    }
+
+    await hubspotClient.updateContact(token, contactObjectId, {
+      properties: contactProperties,
+    });
+  }
+}
+
+async function processSingleEvent({ event, tenantModels, tenantId, tenantKey, portalId }) {
+  const { payload, deal, company, contact, lineItems } = resolveEventPayload(event);
+  const companyExists = Boolean(company);
+  const contactExists = Boolean(contact);
+
+  const context = await resolveWebhookRuntimeContext({
+    tenantModels,
+    payload,
+    tenantId,
+    tenantKey,
+    portalId,
+  });
+
+  const { mappings, sapConfig, hubspotCredentials } = context;
+  const mappedCompany = mapHubspotToSapFields(company || {}, mappings.companyMappings);
+  const mappedContact = mapHubspotToSapFields(contact || {}, mappings.contactBusinessPartnerMappings);
+
+  const businessPartnerResult = await findOrCreateBusinessPartner({
+    sapConfig,
+    company,
+    contact,
+    mappedCompany,
+    mappedContact,
+    companyExists: companyExists || !contactExists,
+  });
+
+  const cardCode = businessPartnerResult.cardCode;
+  let contactEmployeeResult = {
+    created: false,
+    internalCode: null,
+  };
+
+  if (companyExists && contactExists) {
+    contactEmployeeResult = await addContactEmployeeIfNeeded({
+      sapConfig,
+      cardCode,
+      businessPartner: businessPartnerResult.businessPartner,
+      contact,
+      contactEmployeeMappings: mappings.contactEmployeeMappings,
+    });
+  }
+
+  const documentLines = mapDocumentLines({
+    lineItems,
+    productMappings: mappings.productMappings,
+  });
+
+  for (const line of documentLines) {
+    // eslint-disable-next-line no-await-in-loop
+    await validateStockForItem(sapConfig, line.ItemCode, line.Quantity);
+  }
+
+  const orderResponse = await createOrder({
+    sapConfig,
+    cardCode,
+    documentLines,
+  });
+
+  await updateHubspotAfterSap({
+    tenantModels,
+    hubspotCredentials,
+    payload,
+    dealMappings: mappings.dealMappings,
+    orderResponse,
+    cardCode,
+    companyCreated: companyExists && businessPartnerResult.created,
+    contactCreated: (!companyExists && contactExists && businessPartnerResult.created)
+      || (companyExists && contactExists && contactEmployeeResult.created),
+    contactEmployeeCode: contactEmployeeResult.internalCode,
+  });
+
+  return {
+    cardCode,
+    docEntry: orderResponse?.DocEntry ?? null,
+    docNum: orderResponse?.DocNum ?? null,
+    dealId: toNonEmptyString(deal?.hs_object_id),
+  };
+}
+
+async function claimEventsToProcess(WebhookEvent, batchSize) {
+  const claimed = [];
+  const limit = Math.max(1, Number(batchSize || DEFAULT_BATCH_SIZE));
+
+  for (let index = 0; index < limit; index += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    const event = await WebhookEvent.findOneAndUpdate(
+      { status: 'waiting' },
+      { $set: { status: 'waiting' } },
+      { sort: { createdAt: 1, _id: 1 }, new: true }
+    ).lean();
+
+    if (!event) {
+      break;
+    }
+
+    claimed.push(event);
+  }
+
+  return claimed;
+}
 
 const webhookProcessor = {
-  async processPendingEvents({ tenantModels, batchSize = DEFAULT_BATCH_SIZE, retryOptions } = {}) {
+  async processPendingEvents({ tenantModels, tenantId, tenantKey, portalId, batchSize = DEFAULT_BATCH_SIZE } = {}) {
     if (!tenantModels) {
       throw new Error('Tenant models are required to process webhook events');
     }
 
     const { WebhookEvent } = tenantModels;
-    const pendingEvents = await WebhookEvent.find({ status: 'pending' }).sort({ createdAt: 1 });
+    const maxRetriesByEnv = Math.max(1, Number(process.env.WEBHOOK_EVENT_MAX_RETRIES || DEFAULT_MAX_RETRIES));
+    const events = await claimEventsToProcess(WebhookEvent, batchSize);
 
-    if (!pendingEvents.length) {
-      return { processed: 0 };
+    if (!events.length) {
+      return {
+        processed: 0,
+        completed: 0,
+        retried: 0,
+        errored: 0,
+        skipped: 0,
+      };
     }
 
-    const resolvedRetryOptions = retryOptions || DEFAULT_RETRY_OPTIONS;
-    const maxAttempts = (resolvedRetryOptions.retries ?? 0) + 1;
-
-    await processInBatches(pendingEvents, {
-      batchSize,
-      retryOptions: resolvedRetryOptions,
-      handler: async (event, attempt) => {
-        const eventRecord = await WebhookEvent.findById(event._id).lean();
-
-        if (!eventRecord) {
-          return;
-        }
-
-        if (eventRecord.status === 'done' || eventRecord.status === 'failed') {
-          return;
-        }
-
-        if (eventRecord.attempts >= maxAttempts) {
-          await WebhookEvent.updateOne(
-            { _id: event._id },
-            { $set: { status: 'failed' } }
-          );
-          return;
-        }
-
-        if (attempt === 0) {
-          const locked = await WebhookEvent.findOneAndUpdate(
-            { _id: event._id, status: 'pending' },
-            { $set: { status: 'processing' } },
-            { new: true }
-          );
-
-          if (!locked) {
-            return;
-          }
-        }
-
-        try {
-          const isDealWebhook =
-            eventRecord.objectType === 'deal' &&
-            eventRecord.payload?.data?.deal;
-          const mappedPayload = isDealWebhook
-            ? await mappingService.applyDealWebhookMapping(
-              eventRecord.payload.data,
-              eventRecord.hubspotCredentialId,
-              tenantModels
-            )
-            : await mappingService.applyMapping(
-              eventRecord.payload.data,
-              eventRecord.hubspotCredentialId,
-              eventRecord.objectType,
-              tenantModels
-            );
-
-          await sapWebhookService.sendToSap({
-            payload: mappedPayload,
-            objectType: eventRecord.objectType,
-            hubspotCredentialId: eventRecord.hubspotCredentialId,
-            tenantModels,
-          });
-
-          await WebhookEvent.updateOne(
-            { _id: event._id },
-            {
-              $set: {
-                status: 'done',
-                processedAt: new Date(),
-                errorMessage: null,
-              },
-            }
-          );
-        } catch (error) {
-          await WebhookEvent.updateOne(
-            { _id: event._id },
-            { $inc: { attempts: 1 }, $set: { errorMessage: error.message } }
-          );
-
-          if (eventRecord.attempts + 1 >= maxAttempts) {
-            await WebhookEvent.updateOne(
-              { _id: event._id },
-              { $set: { status: 'failed' } }
-            );
-          }
-
-          throw error;
-        }
-      },
+    logger.info({
+      msg: 'Webhook batch processing started',
+      tenantId: tenantId || null,
+      tenantKey: tenantKey || null,
+      portalId: portalId || null,
+      batchSize: events.length,
     });
 
-    return { processed: pendingEvents.length };
+    const summary = {
+      processed: events.length,
+      completed: 0,
+      retried: 0,
+      errored: 0,
+      skipped: 0,
+    };
+
+    for (const event of events) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const result = await processSingleEvent({
+          event,
+          tenantModels,
+          tenantId,
+          tenantKey,
+          portalId,
+        });
+
+        // eslint-disable-next-line no-await-in-loop
+        await WebhookEvent.updateOne(
+          { _id: event._id },
+          {
+            $set: {
+              status: 'completed',
+              lastError: null,
+              'payload.sapResult': {
+                docEntry: result.docEntry,
+                docNum: result.docNum,
+                cardCode: result.cardCode,
+              },
+              'payload.processedAt': new Date().toISOString(),
+            },
+          }
+        );
+
+        summary.completed += 1;
+        logger.info({
+          msg: 'Webhook event processed',
+          tenantId: tenantId || null,
+          tenantKey: tenantKey || null,
+          eventId: String(event._id),
+          status: 'completed',
+          docEntry: result.docEntry,
+          docNum: result.docNum,
+        });
+      } catch (error) {
+        const currentRetries = Number(event?.retries || 0);
+        const configuredMaxRetries = Math.max(
+          1,
+          Number(event?.maxRetries || 0) || maxRetriesByEnv
+        );
+        const isPermanent = Boolean(error?.permanent);
+        const nextRetries = isPermanent ? configuredMaxRetries : currentRetries + 1;
+        const shouldRetry = !isPermanent && nextRetries < configuredMaxRetries;
+        const nextStatus = shouldRetry ? 'waiting' : 'errored';
+
+        // eslint-disable-next-line no-await-in-loop
+        await WebhookEvent.updateOne(
+          { _id: event._id },
+          {
+            $set: {
+              status: nextStatus,
+              retries: nextRetries,
+              lastError: error.message,
+            },
+          }
+        );
+
+        if (shouldRetry) {
+          summary.retried += 1;
+        } else {
+          summary.errored += 1;
+        }
+
+        logger.error({
+          msg: 'Webhook event processing failed',
+          tenantId: tenantId || null,
+          tenantKey: tenantKey || null,
+          eventId: String(event._id),
+          retries: nextRetries,
+          maxRetries: configuredMaxRetries,
+          nextStatus,
+          error: error.message,
+        });
+      }
+    }
+
+    return summary;
   },
 };
 

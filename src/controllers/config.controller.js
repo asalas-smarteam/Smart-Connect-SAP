@@ -5,7 +5,9 @@ import {
   sanitizeIncomingCustomFilters,
 } from '../services/tenant/clientConfigFilters.service.js';
 import {
+  ensureDefaultCompanyEmployeeMappings,
   ensureDefaultContactEmployeeMappings,
+  ensureDefaultDealMappings,
   ensureDefaultProductMappings,
 } from '../services/tenant/defaultClientConfigMappings.service.js';
 import { syncScheduledJob } from '../services/scheduler/sapSyncScheduler.service.js';
@@ -69,7 +71,15 @@ export const createClientConfig = async (req, reply) => {
     });
 
     const data = await ClientConfig.create(payload);
+    await ensureDefaultCompanyEmployeeMappings({
+      FieldMapping,
+      clientConfig: data,
+    });
     await ensureDefaultContactEmployeeMappings({
+      FieldMapping,
+      clientConfig: data,
+    });
+    await ensureDefaultDealMappings({
       FieldMapping,
       clientConfig: data,
     });

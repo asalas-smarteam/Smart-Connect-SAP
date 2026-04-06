@@ -1,23 +1,16 @@
 import cron from 'node-cron';
-import { getTenantModels } from '../config/tenantDatabase.js';
-import webhookProcessor from '../services/webhookProcessor.js';
-import { listActiveTenants } from '../utils/tenantSubscriptions.js';
+import { enqueueWebhookJobsForActiveTenants } from '../services/scheduler/webhookDispatcher.service.js';
+import { processWebhookForActiveTenants } from '../services/webhookProcessorRunner.service.js';
 
 export async function runWebhookProcessorOnce() {
-  const activeTenants = await listActiveTenants();
+  return enqueueWebhookJobsForActiveTenants({ triggerType: 'scheduled' });
+}
 
-  for (const { client } of activeTenants) {
-    const tenantModels = await getTenantModels(client.tenantKey);
-    await webhookProcessor.processPendingEvents({ tenantModels });
-  }
+export async function runWebhookProcessorManualOnce() {
+  return processWebhookForActiveTenants({ triggerType: 'manual' });
 }
 
 export default function startWebhookProcessor() {
   const webhookJob = cron.schedule('*/1 * * * *', runWebhookProcessorOnce, { scheduled: false });
   return webhookJob;
 }
-
-/*
-function test() {
-  console.log("Running webhook processor test...");
-}*/

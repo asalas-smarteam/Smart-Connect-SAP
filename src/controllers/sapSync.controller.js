@@ -1,5 +1,5 @@
 import { runSapSyncOnce } from '../tasks/sapSyncTask.js';
-import { runWebhookProcessorOnce } from '../tasks/webhookProcessorTask.js';
+import { runWebhookProcessorManualOnce } from '../tasks/webhookProcessorTask.js';
 import {
   getQueueDashboardSnapshot,
   purgeTenantJobs,
@@ -21,11 +21,11 @@ export const triggerSapSync = async (req, reply) =>  {
 
 export const triggerWebHook = async (req, reply) => {
   try {
-    await runWebhookProcessorOnce();
-    reply.code(200).send({ message: 'SAP sync jobs executed successfully' });
+    const data = await runWebhookProcessorManualOnce();
+    reply.code(200).send({ message: 'Webhook processing executed successfully', data });
   } catch (error) {
-    req.log.error({ msg: 'Error executing SAP sync jobs manually', error });
-    reply.code(500).send({ message: 'Failed to execute SAP sync jobs', error: error.message });
+    req.log.error({ msg: 'Error executing webhook processing manually', error });
+    reply.code(500).send({ message: 'Failed to execute webhook processing', error: error.message });
   }
 }
 

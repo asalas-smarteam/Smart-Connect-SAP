@@ -35,6 +35,10 @@ export const fieldMappingSchema = new Schema(
       type: Boolean,
       default: true,
     },
+    includeInServiceLayerSelect: {
+      type: Boolean,
+      default: true,
+    },
   },
   {
     timestamps: false,

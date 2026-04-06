@@ -25,7 +25,10 @@ function sanitizeSelectFields(mappings) {
 
   const unique = new Set();
 
-  mappings.filter((mapping) => mapping.sourceContext !== "contactEmployee")
+  mappings.filter(
+    (mapping) => mapping.sourceContext !== 'contactEmployee'
+      && mapping.includeInServiceLayerSelect !== false
+  )
     .forEach((mapping) => {
       const field = cleanValue(mapping.sourceField);
 

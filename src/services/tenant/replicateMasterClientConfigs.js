@@ -3,6 +3,7 @@ import { createMasterClientConfigModel } from '../../../models/master/ClientConf
 import { buildMergedFilters } from './clientConfigFilters.service.js';
 import {
   ensureDefaultContactEmployeeMappings,
+  ensureDefaultDealMappings,
   ensureDefaultProductMappings,
   ensureDefaultCompanyEmployeeMappings,
 } from './defaultClientConfigMappings.service.js';
@@ -98,6 +99,11 @@ export async function replicateMasterClientConfigs({
       });
 
       await ensureDefaultContactEmployeeMappings({
+        FieldMapping,
+        clientConfig: createdConfig,
+      });
+
+      await ensureDefaultDealMappings({
         FieldMapping,
         clientConfig: createdConfig,
       });

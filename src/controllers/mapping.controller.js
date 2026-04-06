@@ -18,6 +18,7 @@ export const createMapping = async (req, reply) => {
       objectType,
       clientConfigId,
       sourceContext,
+      includeInServiceLayerSelect,
     } = req.body;
     const resolvedSourceContext = sourceContext || (objectType === 'product' ? 'product' : 'businessPartner');
 
@@ -60,6 +61,7 @@ export const createMapping = async (req, reply) => {
       clientConfigId,
       hubspotCredentialId,
       sourceContext: resolvedSourceContext,
+      includeInServiceLayerSelect,
     });
 
     return reply.send({ ok: true, data });
@@ -79,6 +81,7 @@ export const createAdminMapping = async (req, reply) => {
       sourceContext,
       clientConfigId,
       hubspotCredentialId,
+      includeInServiceLayerSelect,
     } = req.body;
 
     if (!sourceContext) {
@@ -95,6 +98,7 @@ export const createAdminMapping = async (req, reply) => {
       sourceContext,
       clientConfigId,
       hubspotCredentialId,
+      includeInServiceLayerSelect,
     });
 
     return reply.send({ ok: true, data });
