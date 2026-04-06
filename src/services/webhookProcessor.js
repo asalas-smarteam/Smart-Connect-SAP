@@ -5,6 +5,7 @@ import mappingService from './mapping.service.js';
 import hubspotAuthService from './hubspotAuthService.js';
 import * as hubspotClient from './hubspotClient.js';
 import sapSessionManager, { isSessionInvalidError } from './sapSessionManager.js';
+import { getWarehouseStockTotals } from '../utils/warehouseStock.js';
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 const DEFAULT_BATCH_SIZE = Number(process.env.WEBHOOK_EVENT_BATCH_SIZE || 10);
@@ -415,8 +416,8 @@ async function validateStockForItem(sapConfig, itemCode, quantity) {
     },
   });
 
-  // TODO: number 100
-  const available = Number(item?.OnHand || 0) - Number(item?.Committed || 0) + Number(item?.OnOrder || 0);
+  const totals = getWarehouseStockTotals(item?.ItemWarehouseInfoCollection);
+  const available = totals.instock - totals.committed + totals.ordered;
   if (available < quantity) {
     throw new PermanentWebhookError(
       `Insufficient stock for item ${itemCode}. Available: ${available}, required: ${quantity}`
@@ -579,10 +580,9 @@ async function processSingleEvent({ event, tenantModels, tenantId, tenantKey, po
     productMappings: mappings.productMappings,
   });
 
-  for (const line of documentLines) {
-    // eslint-disable-next-line no-await-in-loop
+  /*for (const line of documentLines) 
     await validateStockForItem(sapConfig, line.ItemCode, line.Quantity);
-  }
+  */
 
   const orderResponse = await createOrder({
     sapConfig,

@@ -9,6 +9,7 @@ import associationService from "./associationService.js";
 import mappingService from "./mapping.service.js";
 import axios from "axios";
 import { getConnection } from "../utils/externalDb.js";
+import { getWarehouseStockTotals } from "../utils/warehouseStock.js";
 
 function slugCompanyName(companyName) {
   return String(companyName || '')
@@ -126,21 +127,8 @@ const hubspotService = {
           update: (id) => this.updateProduct(token, id, item),
           create: () => this.createProduct(token, item),
           preprocess: async () => {
-            const warehouseItems =
-              item?.rawSapData?.ItemWarehouseInfoCollection ?? [];
-            const filteredItems = warehouseItems.filter(
-              (warehouse) =>
-                String(warehouse?.WarehouseCode || "").toUpperCase() !== "B13" // TODO: Crear una configuración para que este valor "b13" venga de un filtro elegido por le usuario y que se guarde en clientCOnfig de product puede ser 1 o varios
-            );
-
-            const totals = filteredItems.reduce(
-              (acc, warehouse) => {
-                acc.ordered += Number(warehouse?.Ordered || 0);
-                acc.committed += Number(warehouse?.Committed || 0);
-                acc.instock += Number(warehouse?.InStock || 0);
-                return acc;
-              },
-              { ordered: 0, committed: 0, instock: 0 }
+            const totals = getWarehouseStockTotals(
+              item?.rawSapData?.ItemWarehouseInfoCollection
             );
 
             item.properties.ordered = totals.ordered;
