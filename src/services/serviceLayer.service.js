@@ -62,13 +62,6 @@ const serviceLayerService = {
       throw new Error('serviceLayerBaseUrl is required for SERVICE_LAYER mode');
     }
 
-    /*if (!options?.controlledFilter && config?.intervalMinutes && config.intervalMinutes > 0) {
-      const now = new Date();
-      const past = new Date(now.getTime() - config.intervalMinutes * 60000);
-      const formatted = past.toISOString().split('.')[0];
-      options.controlledFilter = `UpdateDate ge 2026-01-01`; // ${formatted}
-    }*/
-
     const requestOptions = {
       ...options,
       top: options?.top || config?.serviceLayerTopFilter || 20,
@@ -78,7 +71,7 @@ const serviceLayerService = {
 
     const requestWithSession = async () => {
       const { cookie } = await sapSessionManager.getSessionCookie(config);
-      return fetchAllPages(baseUrl, dataUrl, { Cookie: cookie });
+      return fetchAllPages(baseUrl, dataUrl, { Cookie: cookie, Prefer: "odata.maxpagesize=100" });
     };
 
     try {
