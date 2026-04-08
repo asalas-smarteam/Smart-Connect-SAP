@@ -14,6 +14,7 @@ import associationTestRoutes from './associationTest.routes.js';
 import internalRoutes from './internal.routes.js';
 import webhookRoutes from './webhook.routes.js';
 import sapCredentialsRoutes from './sapCredentials.routes.js';
+import lineItemPriceRoutes from './lineItemPrice.routes.js';
 
 export default async function routes(app) {
   app.register(echoRoutes, { prefix: '/echo_test' });
@@ -28,6 +29,7 @@ export default async function routes(app) {
   app.register(dealMappingRoutes);
   app.register(ownerMappingRoutes);
   app.register(sapCredentialsRoutes);
+  app.register(lineItemPriceRoutes);
   app.register(associationTestRoutes);
   app.register(internalRoutes);
   app.register(webhookRoutes);

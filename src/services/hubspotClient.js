@@ -21,6 +21,7 @@ async function hubspotRequest(method, endpoint, token, data) {
       url: `${HUBSPOT_BASE_URL}${endpoint}`,
       data,
       params: method.toLowerCase() === 'get' ? data : undefined,
+      timeout: 15000,
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -202,6 +203,7 @@ export async function createLineItem(token, properties) {
     'https://api.hubapi.com/crm/v3/objects/line_items',
     properties,
     {
+      timeout: 15000,
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -209,6 +211,15 @@ export async function createLineItem(token, properties) {
   );
 
   return response.data;
+}
+
+export async function batchUpdateLineItems(token, data) {
+  return hubspotRequest(
+    'post',
+    '/crm/v3/objects/line_items/batch/update',
+    token,
+    data,
+  );
 }
 
 export async function fetchDealPipelines(token) {
