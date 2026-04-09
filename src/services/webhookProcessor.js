@@ -465,7 +465,7 @@ async function createOrder({ sapConfig, cardCode, documentLines }) {
     path: '/Orders',
     data: {
       CardCode: cardCode,
-      DocDate: new Date().toISOString().slice(0, 10),
+      DocDueDate: new Date().toISOString().slice(0, 10),
       DocumentLines: documentLines,
     },
   });

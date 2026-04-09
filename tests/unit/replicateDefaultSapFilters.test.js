@@ -32,18 +32,18 @@ describe('replicateDefaultSapFilters', () => {
     const SapFilter = createSapFilterModel(tenantConnection);
 
     await DefaultSapFilter.insertMany([
-      { objectType: 'Invoice', property: 'DocDate', operator: 'ge', value: '2025-01-01', active: true },
+      { objectType: 'Invoice', property: 'DocDueDate', operator: 'ge', value: '2025-01-01', active: true },
       { objectType: 'Invoice', property: 'CardCode', operator: 'eq', value: 'C001', active: true },
       { objectType: 'Invoice', property: 'Canceled', operator: 'eq', value: 'Y', active: false },
     ]);
 
-    await SapFilter.create({ objectType: 'Invoice', property: 'DocDate', operator: 'ge', value: '2025-01-01', active: true });
+    await SapFilter.create({ objectType: 'Invoice', property: 'DocDueDate', operator: 'ge', value: '2025-01-01', active: true });
 
     await replicateDefaultSapFilters({ masterConnection, tenantConnection });
     await replicateDefaultSapFilters({ masterConnection, tenantConnection });
 
     const filters = await SapFilter.find({}).lean();
     expect(filters).toHaveLength(2);
-    expect(filters.map((f) => f.property).sort()).toEqual(['CardCode', 'DocDate']);
+    expect(filters.map((f) => f.property).sort()).toEqual(['CardCode', 'DocDueDate']);
   });
 });
