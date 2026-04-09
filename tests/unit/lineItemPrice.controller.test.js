@@ -1,10 +1,21 @@
 import { jest } from '@jest/globals';
 
 const mockSyncPrices = jest.fn();
+const mockPreparePayload = jest.fn();
+const mockMarkAsSent = jest.fn();
+const mockMarkAsError = jest.fn();
 
 jest.unstable_mockModule('../../src/services/lineItemPrice.service.js', () => ({
   default: {
     syncPrices: mockSyncPrices,
+  },
+}));
+
+jest.unstable_mockModule('../../src/services/lineItemPriceWebhook.service.js', () => ({
+  default: {
+    preparePayload: mockPreparePayload,
+    markAsSent: mockMarkAsSent,
+    markAsError: mockMarkAsError,
   },
 }));
 
@@ -20,6 +31,11 @@ function buildReply() {
 describe('lineItemPrice.controller syncPrices', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockPreparePayload.mockImplementation(async (payload) => ({
+      skip: false,
+      payload,
+      executionId: null,
+    }));
   });
 
   it('returns the enriched payload and update summary', async () => {
@@ -56,6 +72,10 @@ describe('lineItemPrice.controller syncPrices', () => {
 
     await lineItemPriceController.syncPrices(req, reply);
 
+    expect(mockPreparePayload).toHaveBeenCalledWith(req.body, {
+      tenantModels: req.tenantModels,
+      tenant: req.tenant,
+    });
     expect(reply.send).toHaveBeenCalledWith({
       ok: true,
       data: {
@@ -75,6 +95,7 @@ describe('lineItemPrice.controller syncPrices', () => {
         updatedCount: 1,
       },
     });
+    expect(mockMarkAsSent).not.toHaveBeenCalled();
   });
 
   it('returns 400 for expected payload errors', async () => {
@@ -92,9 +113,102 @@ describe('lineItemPrice.controller syncPrices', () => {
     await lineItemPriceController.syncPrices(req, reply);
 
     expect(reply.code).toHaveBeenCalledWith(400);
+    expect(mockMarkAsError).not.toHaveBeenCalled();
     expect(reply.send).toHaveBeenCalledWith({
       ok: false,
       message: 'cardCode is required',
     });
+  });
+
+  it('skips duplicate webhook executions without calling the sync service', async () => {
+    const reply = buildReply();
+    const req = {
+      body: {
+        associationType: 'DEAL_TO_LINE_ITEM',
+        portalId: 50564010,
+      },
+      tenantModels: {
+        LineItemPriceWebhookEvent: {},
+      },
+      tenant: { client: { hubspot: { portalId: '50564010' } } },
+      tenantKey: 'tenant_1',
+      log: { error: jest.fn() },
+    };
+
+    mockPreparePayload.mockResolvedValue({
+      skip: true,
+      payload: null,
+      executionId: 'event-1',
+      meta: {
+        skipped: true,
+        reason: 'duplicate_event',
+      },
+    });
+
+    await lineItemPriceController.syncPrices(req, reply);
+
+    expect(mockSyncPrices).not.toHaveBeenCalled();
+    expect(reply.send).toHaveBeenCalledWith({
+      ok: true,
+      data: null,
+      meta: {
+        skipped: true,
+        reason: 'duplicate_event',
+      },
+    });
+  });
+
+  it('marks webhook execution as sent after processing the new payload format', async () => {
+    const reply = buildReply();
+    const req = {
+      body: {
+        associationType: 'DEAL_TO_LINE_ITEM',
+        portalId: 50564010,
+        fromObjectId: 58986911596,
+      },
+      tenantModels: {
+        LineItemPriceWebhookEvent: { name: 'LineItemPriceWebhookEvent' },
+      },
+      tenant: { client: { hubspot: { portalId: '50564010' } } },
+      tenantKey: 'tenant_1',
+      log: { error: jest.fn() },
+    };
+
+    mockPreparePayload.mockResolvedValue({
+      skip: false,
+      payload: {
+        cardCode: 'CL00129',
+        lineItems: [{ itemCode: 'A01050211', id: '54118822955' }],
+      },
+      executionId: 'event-1',
+    });
+    mockSyncPrices.mockResolvedValue({
+      data: {
+        cardCode: 'CL00129',
+        lineItems: [{ itemCode: 'A01050211', id: '54118822955', Price: 10 }],
+      },
+      meta: {
+        requestedCount: 1,
+        updatedCount: 1,
+      },
+    });
+
+    await lineItemPriceController.syncPrices(req, reply);
+
+    expect(mockSyncPrices).toHaveBeenCalledWith(
+      {
+        cardCode: 'CL00129',
+        lineItems: [{ itemCode: 'A01050211', id: '54118822955' }],
+      },
+      {
+        tenantModels: req.tenantModels,
+        tenant: req.tenant,
+        tenantKey: req.tenantKey,
+      }
+    );
+    expect(mockMarkAsSent).toHaveBeenCalledWith(
+      req.tenantModels.LineItemPriceWebhookEvent,
+      'event-1'
+    );
   });
 });

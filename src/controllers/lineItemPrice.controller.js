@@ -1,20 +1,48 @@
 import lineItemPriceService from '../services/lineItemPrice.service.js';
+import lineItemPriceWebhookService from '../services/lineItemPriceWebhook.service.js';
 import { requireTenantModels } from '../utils/tenantModels.js';
 
 function resolveStatusCode(error) {
-  return /cardCode is required|lineItems must be a non-empty array|itemCode is required|\.id is required/.test(error.message)
+  return /cardCode is required|lineItems must be a non-empty array|itemCode is required|\.id is required|portalId is required|eventId is required|subscriptionId is required|appId is required|occurredAt is required|fromObjectId is required/.test(error.message)
     ? 400
     : 500;
 }
 
 const lineItemPriceController = {
   async syncPrices(req, reply) {
+    let tenantModels = null;
+    let executionId = null;
+
     try {
-      const result = await lineItemPriceService.syncPrices(req.body, {
-        tenantModels: requireTenantModels(req),
+      tenantModels = requireTenantModels(req);
+
+      const preparedPayload = await lineItemPriceWebhookService.preparePayload(req.body, {
+        tenantModels,
+        tenant: req.tenant,
+      });
+
+      if (preparedPayload.skip) {
+        return reply.send({
+          ok: true,
+          data: null,
+          meta: preparedPayload.meta,
+        });
+      }
+
+      executionId = preparedPayload.executionId;
+
+      const result = await lineItemPriceService.syncPrices(preparedPayload.payload, {
+        tenantModels,
         tenant: req.tenant,
         tenantKey: req.tenantKey,
       });
+
+      if (executionId) {
+        await lineItemPriceWebhookService.markAsSent(
+          tenantModels.LineItemPriceWebhookEvent,
+          executionId
+        );
+      }
 
       return reply.send({
         ok: true,
@@ -27,6 +55,14 @@ const lineItemPriceController = {
         tenantKey: req.tenantKey,
         error: error.message,
       });
+
+      if (executionId) {
+        await lineItemPriceWebhookService.markAsError(
+          tenantModels.LineItemPriceWebhookEvent,
+          executionId,
+          error
+        );
+      }
 
       return reply.code(resolveStatusCode(error)).send({
         ok: false,

@@ -6,6 +6,7 @@ import { createDealStageMappingModel } from './DealStageMapping.js';
 import { createFieldMappingModel } from './FieldMapping.js';
 import { createHubspotCredentialsModel } from './HubspotCredentials.js';
 import { createIntegrationModeModel } from './IntegrationMode.js';
+import { createLineItemPriceWebhookEventModel } from './LineItemPriceWebhookEvent.js';
 import { createLogEntryModel } from './LogEntry.js';
 import { createSyncLogModel } from './SyncLog.js';
 import { createWebhookConfigModel } from './WebhookConfig.js';
@@ -27,6 +28,7 @@ export function registerTenantModels(connection) {
     FieldMapping: createFieldMappingModel(connection),
     HubspotCredentials: createHubspotCredentialsModel(connection),
     IntegrationMode: createIntegrationModeModel(connection),
+    LineItemPriceWebhookEvent: createLineItemPriceWebhookEventModel(connection),
     LogEntry: createLogEntryModel(connection),
     SapCredentials: createSapCredentialsModel(connection),
     SapFilter: createSapFilterModel(connection),

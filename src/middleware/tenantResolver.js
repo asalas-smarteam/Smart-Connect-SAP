@@ -68,6 +68,12 @@ function extractTenantId(req) {
   return null;
 }
 
+function extractPortalId(req) {
+  const portalId = req.body?.portalId ?? req.query?.portalId;
+  const normalized = String(portalId ?? '').trim();
+  return normalized || null;
+}
+
 async function resolveTenantByToken(token) {
   if (!token) {
     return null;
@@ -100,6 +106,11 @@ export async function tenantResolver(req, reply) {
       const tenantId = extractTenantId(req);
       if (tenantId) {
         client = await SaaSClient.findOne({ _id: tenantId });
+      } else {
+        const portalId = extractPortalId(req);
+        if (portalId) {
+          client = await SaaSClient.findOne({ 'hubspot.portalId': portalId });
+        }
       }
     }
 
