@@ -43,14 +43,17 @@ function buildTenantModels() {
 describe('lineItemPriceWebhook.service', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGetAccessToken.mockReset();
+    mockHubspotGet.mockReset();
   });
 
-  it('skips unsupported association types', async () => {
+  it('skips events that are not DEAL_TO_LINE_ITEM from USER', async () => {
     const tenantModels = buildTenantModels();
 
     const result = await lineItemPriceWebhookService.preparePayload(
       {
         associationType: 'DEAL_TO_CONTACT',
+        changeSource: 'USER',
       },
       {
         tenantModels,
@@ -64,7 +67,33 @@ describe('lineItemPriceWebhook.service', () => {
       executionId: null,
       meta: {
         skipped: true,
-        reason: 'unsupported_association_type',
+        reason: 'unsupported_event',
+      },
+    });
+    expect(tenantModels.LineItemPriceWebhookEvent.findOne).not.toHaveBeenCalled();
+  });
+
+  it('skips events when changeSource is not USER', async () => {
+    const tenantModels = buildTenantModels();
+
+    const result = await lineItemPriceWebhookService.preparePayload(
+      {
+        associationType: 'DEAL_TO_LINE_ITEM',
+        changeSource: 'INTEGRATION',
+      },
+      {
+        tenantModels,
+        tenant: { client: { hubspot: { portalId: '50564010' } } },
+      }
+    );
+
+    expect(result).toEqual({
+      skip: true,
+      payload: null,
+      executionId: null,
+      meta: {
+        skipped: true,
+        reason: 'unsupported_event',
       },
     });
     expect(tenantModels.LineItemPriceWebhookEvent.findOne).not.toHaveBeenCalled();
@@ -86,6 +115,7 @@ describe('lineItemPriceWebhook.service', () => {
         appId: 31481725,
         occurredAt: 1775764313528,
         associationType: 'DEAL_TO_LINE_ITEM',
+        changeSource: 'USER',
         fromObjectId: 58986911596,
       },
       {
@@ -110,39 +140,53 @@ describe('lineItemPriceWebhook.service', () => {
     const tenantModels = buildTenantModels();
 
     mockGetAccessToken.mockResolvedValue('hubspot-token');
-    mockHubspotGet
-      .mockResolvedValueOnce({
-        id: '58986911596',
-        associations: {
-          companies: {
-            results: [{ id: '201' }],
+    mockHubspotGet.mockImplementation(async (_token, path) => {
+      if (path === '/crm/v3/objects/deals/58986911596') {
+        return {
+          id: '58986911596',
+          associations: {
+            companies: {
+              results: [{ id: '201' }],
+            },
+            contacts: {
+              results: [{ id: '301' }],
+            },
+            line_items: {
+              results: [{ id: '54118822955' }, { id: '54118822956' }],
+            },
           },
-          contacts: {
-            results: [{ id: '301' }],
+        };
+      }
+
+      if (path === '/crm/v3/objects/companies/201') {
+        return {
+          id: '201',
+          properties: {
+            idsap: 'CL00129',
           },
-          line_items: {
-            results: [{ id: '54118822955' }, { id: '54118822956' }],
+        };
+      }
+
+      if (path === '/crm/v3/objects/line_items/54118822955') {
+        return {
+          id: '54118822955',
+          properties: {
+            hs_sku: 'A01050211',
           },
-        },
-      })
-      .mockResolvedValueOnce({
-        id: '201',
-        properties: {
-          idsap: 'CL00129',
-        },
-      })
-      .mockResolvedValueOnce({
-        id: '54118822955',
-        properties: {
-          hs_sku: 'A01050211',
-        },
-      })
-      .mockResolvedValueOnce({
-        id: '54118822956',
-        properties: {
-          hs_sku: 'A01050007',
-        },
-      });
+        };
+      }
+
+      if (path === '/crm/v3/objects/line_items/54118822956') {
+        return {
+          id: '54118822956',
+          properties: {
+            hs_sku: 'A01050007',
+          },
+        };
+      }
+
+      return null;
+    });
 
     const result = await lineItemPriceWebhookService.preparePayload(
       {
@@ -152,6 +196,7 @@ describe('lineItemPriceWebhook.service', () => {
         appId: 31481725,
         occurredAt: 1775764313528,
         associationType: 'DEAL_TO_LINE_ITEM',
+        changeSource: 'USER',
         fromObjectId: 58986911596,
       },
       {
@@ -180,6 +225,7 @@ describe('lineItemPriceWebhook.service', () => {
         appId: 31481725,
         occurredAt: 1775764313528,
         associationType: 'DEAL_TO_LINE_ITEM',
+        changeSource: 'USER',
         fromObjectId: 58986911596,
       },
       isSend: false,
@@ -212,12 +258,13 @@ describe('lineItemPriceWebhook.service', () => {
         {
           eventId: 797713315,
           subscriptionId: 6174090,
-          portalId: 50564010,
-          appId: 31481725,
-          occurredAt: 1775764313528,
-          associationType: 'DEAL_TO_LINE_ITEM',
-          fromObjectId: 58986911596,
-        },
+        portalId: 50564010,
+        appId: 31481725,
+        occurredAt: 1775764313528,
+        associationType: 'DEAL_TO_LINE_ITEM',
+        changeSource: 'USER',
+        fromObjectId: 58986911596,
+      },
         {
           tenantModels,
           tenant: { client: { hubspot: { portalId: '50564010' } } },

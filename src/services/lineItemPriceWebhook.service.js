@@ -2,6 +2,7 @@ import hubspotAuthService from './hubspotAuthService.js';
 import * as hubspotClient from './hubspotClient.js';
 
 const SUPPORTED_ASSOCIATION_TYPE = 'DEAL_TO_LINE_ITEM';
+const SUPPORTED_CHANGE_SOURCE = 'USER';
 
 function toNonEmptyString(value) {
   const normalized = String(value ?? '').trim();
@@ -117,12 +118,17 @@ async function resolveCardCode(token, deal) {
 }
 
 async function resolveLineItems(token, deal) {
-  const lineItemIds = extractAssociationIds(deal, 'line items');
+  const lineItemIds = [
+    ...extractAssociationIds(deal, 'line_items'),
+    ...extractAssociationIds(deal, 'lineItems'),
+    ...extractAssociationIds(deal, 'line items'),
+    ...extractAssociationIds(deal, 'products'),
+  ].filter((value, index, items) => items.indexOf(value) === index);
 
   if (lineItemIds.length === 0) {
     throw new Error('Deal has no associated line items');
   }
- 
+
   const lineItems = await Promise.all(
     lineItemIds.map(async (lineItemId, index) => {
       const lineItem = await fetchHubspotObject(token, 'line_items', lineItemId, {
@@ -173,14 +179,17 @@ const lineItemPriceWebhookService = {
       };
     }
 
-    if (payload?.associationType !== SUPPORTED_ASSOCIATION_TYPE) {
+    if (
+      payload?.associationType !== SUPPORTED_ASSOCIATION_TYPE
+      || payload?.changeSource !== SUPPORTED_CHANGE_SOURCE
+    ) {
       return {
         skip: true,
         payload: null,
         executionId: null,
         meta: {
           skipped: true,
-          reason: 'unsupported_association_type',
+          reason: 'unsupported_event',
         },
       };
     }

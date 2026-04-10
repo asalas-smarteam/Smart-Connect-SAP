@@ -69,7 +69,7 @@ function extractTenantId(req) {
 }
 
 function extractPortalId(req) {
-  const portalId = req.body?.portalId ?? req.query?.portalId;
+  const portalId = req.body[0].portalId ?? req.query?.portalId;
   const normalized = String(portalId ?? '').trim();
   return normalized || null;
 }
@@ -100,6 +100,7 @@ function respond(reply, statusCode, payload) {
 
 export async function tenantResolver(req, reply) {
   try {
+
     const token = extractBearerToken(req);
     let client = await resolveTenantByToken(token);
     if (!token) {
@@ -113,7 +114,7 @@ export async function tenantResolver(req, reply) {
         }
       }
     }
-
+    
     if (!client) {
       return respond(reply, 403, { error: 'Tenant not found' });
     }

@@ -5,6 +5,7 @@ const { Schema } = mongoose;
 const hubspotMetadataSchema = new Schema(
   {
     portalId: { type: String },
+    appID: { type: String },
     accessToken: { type: String },
     refreshToken: { type: String },
     expiresAt: { type: Date },

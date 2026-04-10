@@ -449,6 +449,7 @@ function mapDocumentLines({ lineItems, productMappings }) {
       ItemCode: itemCode,
       Quantity: quantity,
       UnitPrice: Number.isFinite(unitPrice) ? unitPrice : 0,
+      WarehouseCode: "B04"
     });
   }
 

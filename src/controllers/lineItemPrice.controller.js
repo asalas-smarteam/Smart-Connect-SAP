@@ -1,9 +1,12 @@
-import lineItemPriceService from '../services/lineItemPrice.service.js';
-import lineItemPriceWebhookService from '../services/lineItemPriceWebhook.service.js';
-import { requireTenantModels } from '../utils/tenantModels.js';
+import lineItemPriceService from "../services/lineItemPrice.service.js";
+import lineItemPriceWebhookService from "../services/lineItemPriceWebhook.service.js";
+import { requireTenantModels } from "../utils/tenantModels.js";
+const SUPPORTED_ASSOCIATION_TYPE = "DEAL_TO_LINE_ITEM";
 
 function resolveStatusCode(error) {
-  return /cardCode is required|lineItems must be a non-empty array|itemCode is required|\.id is required|portalId is required|eventId is required|subscriptionId is required|appId is required|occurredAt is required|fromObjectId is required/.test(error.message)
+  return /cardCode is required|lineItems must be a non-empty array|itemCode is required|\.id is required|portalId is required|eventId is required|subscriptionId is required|appId is required|occurredAt is required|fromObjectId is required/.test(
+    error.message,
+  )
     ? 400
     : 500;
 }
@@ -14,12 +17,16 @@ const lineItemPriceController = {
     let executionId = null;
 
     try {
+
       tenantModels = requireTenantModels(req);
 
-      const preparedPayload = await lineItemPriceWebhookService.preparePayload(req.body, {
-        tenantModels,
-        tenant: req.tenant,
-      });
+      const preparedPayload = await lineItemPriceWebhookService.preparePayload(
+        req.body[0],
+        {
+          tenantModels,
+          tenant: req.tenant,
+        },
+      );
 
       if (preparedPayload.skip) {
         return reply.send({
@@ -31,16 +38,19 @@ const lineItemPriceController = {
 
       executionId = preparedPayload.executionId;
 
-      const result = await lineItemPriceService.syncPrices(preparedPayload.payload, {
-        tenantModels,
-        tenant: req.tenant,
-        tenantKey: req.tenantKey,
-      });
+      const result = await lineItemPriceService.syncPrices(
+        preparedPayload.payload,
+        {
+          tenantModels,
+          tenant: req.tenant,
+          tenantKey: req.tenantKey,
+        },
+      );
 
       if (executionId) {
         await lineItemPriceWebhookService.markAsSent(
           tenantModels.LineItemPriceWebhookEvent,
-          executionId
+          executionId,
         );
       }
 
@@ -51,7 +61,7 @@ const lineItemPriceController = {
       });
     } catch (error) {
       req.log?.error?.({
-        msg: 'Failed to sync HubSpot line item prices',
+        msg: "Failed to sync HubSpot line item prices",
         tenantKey: req.tenantKey,
         error: error.message,
       });
@@ -60,7 +70,7 @@ const lineItemPriceController = {
         await lineItemPriceWebhookService.markAsError(
           tenantModels.LineItemPriceWebhookEvent,
           executionId,
-          error
+          error,
         );
       }
 

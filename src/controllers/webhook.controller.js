@@ -4,9 +4,6 @@ import { queueCreateDealEvent } from '../services/webhookEvent.service.js';
 import { resolveActiveTenant } from '../utils/tenantSubscriptions.js';
 
 function validatePayload(body) {
-  if (!body?.tenantId) {
-    return 'tenantId is required';
-  }
 
   if (!body?.portalId) {
     return 'portalId is required';
@@ -39,7 +36,7 @@ export const receiveHubspotWebhook = async (req, reply) => {
       return reply.code(400).send({ success: false, message: validationError });
     }
 
-    const tenantContext = await resolveActiveTenant({ tenantId: body.tenantId });
+    const tenantContext = await resolveActiveTenant({ tenantId: req.headers['x-tenant-id'] });
 
     if (!tenantContext) {
       return reply.code(404).send({ success: false, message: 'Tenant not found or inactive' });
