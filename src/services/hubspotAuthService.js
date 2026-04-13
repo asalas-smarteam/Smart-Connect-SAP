@@ -74,17 +74,17 @@ const hubspotAuthService = {
     });
   },
 
-  async refreshAccessToken(clientConfigId, tenantModels) {
+  async refreshAccessToken(clientConfigId, tenantModels, existingCredentials = null) {
     const { HUBSPOT_CLIENT_ID, HUBSPOT_CLIENT_SECRET, HUBSPOT_REDIRECT_URI } = process.env;
     const HubspotCredentials = getTenantHubspotCredentials(tenantModels);
-    const existingCredentials = await HubspotCredentials.findOne({
+    const credentials = existingCredentials ?? await HubspotCredentials.findOne({
       $or: [
         { clientConfigId },
         { _id: clientConfigId },
       ],
     });
 
-    if (!existingCredentials || !existingCredentials.refreshToken) {
+    if (!credentials || !credentials.refreshToken) {
       throw new Error('Refresh token not found for client configuration');
     }
 
@@ -93,7 +93,7 @@ const hubspotAuthService = {
       client_id: HUBSPOT_CLIENT_ID,
       client_secret: HUBSPOT_CLIENT_SECRET,
       redirect_uri: HUBSPOT_REDIRECT_URI,
-      refresh_token: existingCredentials.refreshToken,
+      refresh_token: credentials.refreshToken,
     });
 
     try {
@@ -104,13 +104,13 @@ const hubspotAuthService = {
       const { access_token, expires_in, refresh_token } = response.data;
       const expiresAt = new Date(Date.now() + expires_in * 1000);
 
-      existingCredentials.accessToken = access_token;
-      existingCredentials.expiresAt = expiresAt;
+      credentials.accessToken = access_token;
+      credentials.expiresAt = expiresAt;
       if (refresh_token) {
-        existingCredentials.refreshToken = refresh_token;
+        credentials.refreshToken = refresh_token;
       }
 
-      await existingCredentials.save();
+      await credentials.save();
       return access_token;
     } catch (error) {
       console.log(error.response?.data || error.message);
@@ -128,7 +128,7 @@ const hubspotAuthService = {
       return credentials.accessToken;
     }
 
-    return this.refreshAccessToken(clientConfigId, tenantModels);
+    return this.refreshAccessToken(clientConfigId, tenantModels, credentials);
   },
 };
 

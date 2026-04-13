@@ -102,6 +102,10 @@ export const clientConfigSchema = new Schema(
       ref: 'HubspotCredentials',
       default: null,
     },
+    hubspotBatchSize: {
+      type: Number,
+      default: 1,
+    },
     objectType: {
       type: String,
       default: null,

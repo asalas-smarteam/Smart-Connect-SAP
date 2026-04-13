@@ -8,6 +8,7 @@ const EDITABLE_FIELDS = [
   'executionTime',
   'serviceLayerPath',
   'syncInTenant',
+  'hubspotBatchSize',
 ];
 
 const ALLOWED_MODES = new Set(['FULL', 'INCREMENTAL']);
@@ -69,6 +70,13 @@ function sanitizeMasterPayload(payload = {}) {
 
   if (Object.prototype.hasOwnProperty.call(sanitized, 'syncInTenant')) {
     sanitized.syncInTenant = Boolean(sanitized.syncInTenant);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'hubspotBatchSize')) {
+    const batchSize = Number(sanitized.hubspotBatchSize);
+    sanitized.hubspotBatchSize = Number.isFinite(batchSize) && batchSize > 1
+      ? Math.floor(batchSize)
+      : 1;
   }
 
   sanitized.active = false;

@@ -28,6 +28,7 @@ function buildClientConfigPayload({
     serviceLayerPath: masterConfig.serviceLayerPath,
     integrationModeId,
     hubspotCredentialId: hubspotCredentialId || null,
+    hubspotBatchSize: masterConfig.hubspotBatchSize ?? 1,
     active: false,
     filters: merged.filters,
   };

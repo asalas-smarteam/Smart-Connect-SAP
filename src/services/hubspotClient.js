@@ -169,6 +169,28 @@ export async function updateProduct(token, id, data) {
   return hubspotRequest('patch', `/crm/v3/objects/products/${id}`, token, data);
 }
 
+export async function batchCreateProducts(token, data) {
+  return hubspotRequest(
+    'post',
+    '/crm/v3/objects/products/batch/create',
+    token,
+    data,
+  );
+}
+
+export async function batchUpdateProducts(token, data) {
+  data?.inputs?.forEach((item) => {
+    delete item?.properties?.hs_object_id;
+  });
+
+  return hubspotRequest(
+    'post',
+    '/crm/v3/objects/products/batch/update',
+    token,
+    data,
+  );
+}
+
 export async function batchCreate(token, dataArray) {
   return hubspotRequest(
     'post',
