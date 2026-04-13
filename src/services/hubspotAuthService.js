@@ -74,10 +74,17 @@ const hubspotAuthService = {
     });
   },
 
-  async refreshAccessToken(credentials) {
+  async refreshAccessToken(clientConfigId, tenantModels) {
     const { HUBSPOT_CLIENT_ID, HUBSPOT_CLIENT_SECRET, HUBSPOT_REDIRECT_URI } = process.env;
+    const HubspotCredentials = getTenantHubspotCredentials(tenantModels);
+    const existingCredentials = await HubspotCredentials.findOne({
+      $or: [
+        { clientConfigId },
+        { _id: clientConfigId },
+      ],
+    });
 
-    if (!credentials || !credentials.refreshToken) {
+    if (!existingCredentials || !existingCredentials.refreshToken) {
       throw new Error('Refresh token not found for client configuration');
     }
 
@@ -86,7 +93,7 @@ const hubspotAuthService = {
       client_id: HUBSPOT_CLIENT_ID,
       client_secret: HUBSPOT_CLIENT_SECRET,
       redirect_uri: HUBSPOT_REDIRECT_URI,
-      refresh_token: credentials.refreshToken,
+      refresh_token: existingCredentials.refreshToken,
     });
 
     try {
@@ -97,32 +104,31 @@ const hubspotAuthService = {
       const { access_token, expires_in, refresh_token } = response.data;
       const expiresAt = new Date(Date.now() + expires_in * 1000);
 
-      credentials.accessToken = access_token;
-      credentials.expiresAt = expiresAt;
+      existingCredentials.accessToken = access_token;
+      existingCredentials.expiresAt = expiresAt;
       if (refresh_token) {
-        credentials.refreshToken = refresh_token;
+        existingCredentials.refreshToken = refresh_token;
       }
 
-      const test = await credentials.save();
-
-      console.log(test)
-
+      await existingCredentials.save();
+      return access_token;
     } catch (error) {
-      console.log(error.response.data)
+      console.log(error.response?.data || error.message);
+      throw error;
     }
-
-   
-
-    return access_token;
   },
 
   async getAccessToken(clientConfigId, credentials, tenantModels) {
+    if (!tenantModels) {
+      tenantModels = credentials;
+      credentials = null;
+    }
 
-    if (credentials.expiresAt && credentials.expiresAt > new Date()) {
+    if (credentials?.expiresAt && credentials.expiresAt > new Date()) {
       return credentials.accessToken;
     }
 
-    return this.refreshAccessToken(credentials);
+    return this.refreshAccessToken(clientConfigId, tenantModels);
   },
 };
 
