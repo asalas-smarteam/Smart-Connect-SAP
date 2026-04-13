@@ -8,11 +8,6 @@ services:
       - "${PORT:-3000}:3000"
     env_file:
       - .env
-    environment:
-      REDIS_HOST: ${REDIS_HOST:-host.docker.internal}
-      BULLMQ_REDIS_HOST: ${BULLMQ_REDIS_HOST:-host.docker.internal}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
   worker:
@@ -22,9 +17,4 @@ services:
     command: npm run start:worker
     env_file:
       - .env
-    environment:
-      REDIS_HOST: ${REDIS_HOST:-host.docker.internal}
-      BULLMQ_REDIS_HOST: ${BULLMQ_REDIS_HOST:-host.docker.internal}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     restart: unless-stopped
