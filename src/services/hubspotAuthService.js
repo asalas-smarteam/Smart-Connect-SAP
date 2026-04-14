@@ -77,7 +77,7 @@ const hubspotAuthService = {
   async refreshAccessToken(clientConfigId, tenantModels, existingCredentials = null) {
     const { HUBSPOT_CLIENT_ID, HUBSPOT_CLIENT_SECRET, HUBSPOT_REDIRECT_URI } = process.env;
     const HubspotCredentials = getTenantHubspotCredentials(tenantModels);
-    const credentials = existingCredentials ?? await HubspotCredentials.findOne({
+    const credentials =  await HubspotCredentials.findOne({
       $or: [
         { clientConfigId },
         { _id: clientConfigId },

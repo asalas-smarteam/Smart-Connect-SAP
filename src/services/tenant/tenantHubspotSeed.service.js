@@ -162,6 +162,8 @@ export async function seedCreateFieldsHubspot({ hubspotCredential }) {
         { label: '5', value: '5' },
       ],
     },
+    { objectType: 'deal', label: 'Doc Entry SAP', name: 'sap_docentry' },
+    { objectType: 'deal', label: 'Doc Num SAP', name: 'sap_docnum' },
     { objectType: 'products', label: 'Código de producto', name: 'itemCode' },
     { objectType: 'products', label: 'Stock En Orden', name: 'ordered' },
     { objectType: 'products', label: 'Stock comprometido', name: 'committed' },

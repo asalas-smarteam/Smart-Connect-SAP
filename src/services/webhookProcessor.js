@@ -612,37 +612,30 @@ async function processSingleEvent({ event, tenantModels, tenantId, tenantKey, po
   };
 }
 
-async function claimEventsToProcess(WebhookEvent, batchSize) {
+async function claimEventsToProcess(WebhookEvent) {
   const claimed = [];
-  const limit = Math.max(1, Number(batchSize || DEFAULT_BATCH_SIZE));
 
-  for (let index = 0; index < limit; index += 1) {
-    // eslint-disable-next-line no-await-in-loop
-    const event = await WebhookEvent.findOneAndUpdate(
-      { status: 'waiting' },
-      { $set: { status: 'waiting' } },
-      { sort: { createdAt: 1, _id: 1 }, new: true }
-    ).lean();
+  const event = await WebhookEvent.findOneAndUpdate(
+    { status: 'waiting' },
+    { $set: { status: 'waiting' } }, // ## replace for processing
+    { sort: { createdAt: 1, _id: 1 }, new: true }
+  ).lean();
 
-    if (!event) {
-      break;
-    }
-
-    claimed.push(event);
-  }
+  claimed.push(event);
+ 
 
   return claimed;
 }
 
 const webhookProcessor = {
-  async processPendingEvents({ tenantModels, tenantId, tenantKey, portalId, batchSize = DEFAULT_BATCH_SIZE } = {}) {
+  async processPendingEvents({ tenantModels, tenantId, tenantKey, portalId } = {}) {
     if (!tenantModels) {
       throw new Error('Tenant models are required to process webhook events');
     }
 
     const { WebhookEvent } = tenantModels;
     const maxRetriesByEnv = Math.max(1, Number(process.env.WEBHOOK_EVENT_MAX_RETRIES || DEFAULT_MAX_RETRIES));
-    const events = await claimEventsToProcess(WebhookEvent, batchSize);
+    const events = await claimEventsToProcess(WebhookEvent);
 
     if (!events.length) {
       return {
