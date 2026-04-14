@@ -15,6 +15,7 @@ export const health = async (req, reply) => {
       ok: readyState === 1,
       database: stateLabels[readyState] || 'unknown',
       timestamp: new Date().toISOString(),
+      version: "1.1.0" 
     });
   } catch (error) {
     return reply.send({
