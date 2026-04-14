@@ -1,6 +1,7 @@
 import sapService from '../integrations/sap/sapService.js';
 import mappingService from './mapping.service.js';
 import hubspotService from '../services/hubspotService.js';
+import { finishSyncLog, startSyncLog } from './syncLog.service.js';
 
 function normalizeMode(mode) {
   const value = String(mode || 'INCREMENTAL').trim().toUpperCase();
@@ -51,13 +52,19 @@ const syncService = {
   async run(config, tenantModels) {
     const startedAt = new Date();
     const clientConfigId = config?.id;
+    let syncLog = null;
 
     try {
+      const { HubspotCredentials, SyncLog } = tenantModels;
+      syncLog = await startSyncLog({
+        tenantModels: { SyncLog },
+        clientConfigId,
+        startedAt,
+      });
+
       if (!config) {
         throw new Error('Client configuration not found');
       }
-
-      const { HubspotCredentials, SyncLog } = tenantModels;
 
       const credentials = await HubspotCredentials.findById(
         config.hubspotCredentialId
@@ -68,24 +75,23 @@ const syncService = {
       const rawData = await sapService.fetchData(clientConfigId, tenantModels, fetchOptions);
 
       if (!credentials) {
-        await SyncLog.create({
-          clientConfigId,
-          status: 'error',
+        await finishSyncLog(syncLog, {
+          status: 'errored',
+          recordsProcessed: 0,
+          sent: 0,
+          failed: 0,
           errorMessage: 'No HubSpot credentials assigned to this clientConfig',
-          startedAt,
           finishedAt: new Date(),
         });
         return;
       }
 
       if (!rawData || rawData.length === 0) {
-        await SyncLog.create({
-          clientConfigId,
-          status: 'success',
+        await finishSyncLog(syncLog, {
+          status: 'completed',
           recordsProcessed: 0,
           sent: 0,
           failed: 0,
-          startedAt,
           finishedAt: new Date(),
         });
 
@@ -125,24 +131,23 @@ const syncService = {
 
       const recordsProcessed = mappedRecordsWithRawSap.length;
 
-      await SyncLog.create({
-        clientConfigId,
-        status: 'success',
+      await finishSyncLog(syncLog, {
+        status: 'completed',
         recordsProcessed,
         sent: hubspotResult.sent,
         failed: hubspotResult.failed,
-        startedAt,
         finishedAt: new Date(),
       });
 
       config.lastRun = new Date();
       await config.save();
     } catch (error) {
-      await SyncLog.create({
-        clientConfigId,
-        status: 'error',
+      await finishSyncLog(syncLog, {
+        status: 'errored',
+        recordsProcessed: 0,
+        sent: 0,
+        failed: 0,
         errorMessage: error.message,
-        startedAt,
         finishedAt: new Date(),
       });
 

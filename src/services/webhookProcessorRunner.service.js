@@ -1,6 +1,12 @@
 import logger from '../core/logger.js';
 import { getTenantModels } from '../config/tenantDatabase.js';
 import webhookProcessor from './webhookProcessor.js';
+import {
+  buildErrorResponseSnapshot,
+  buildWebhookSyncErrorEntry,
+  finishSyncLog,
+  startSyncLog,
+} from './syncLog.service.js';
 import { listActiveTenants, resolveActiveTenant } from '../utils/tenantSubscriptions.js';
 
 async function resolveTenantContext({ tenantId, tenantKey, portalId }) {
@@ -31,6 +37,7 @@ async function resolveTenantContext({ tenantId, tenantKey, portalId }) {
 export async function processWebhookTenant({ tenantId, tenantKey, portalId, triggerType = 'worker' }) {
   const context = await resolveTenantContext({ tenantId, tenantKey, portalId });
   const tenantModels = await getTenantModels(context.tenantKey);
+  const syncLog = await startSyncLog({ tenantModels });
 
   logger.info({
     msg: 'Starting webhook tenant processing',
@@ -40,28 +47,61 @@ export async function processWebhookTenant({ tenantId, tenantKey, portalId, trig
     portalId: context.portalId || null,
   });
 
-  const result = await webhookProcessor.processPendingEvents({
-    tenantModels,
-    tenantId: context.tenantId,
-    tenantKey: context.tenantKey,
-    portalId: context.portalId,
-  });
+  try {
+    const result = await webhookProcessor.processPendingEvents({
+      tenantModels,
+      tenantId: context.tenantId,
+      tenantKey: context.tenantKey,
+      portalId: context.portalId,
+    });
 
-  logger.info({
-    msg: 'Webhook tenant processing finished',
-    triggerType,
-    tenantId: context.tenantId,
-    tenantKey: context.tenantKey,
-    portalId: context.portalId || null,
-    ...result,
-  });
+    await finishSyncLog(syncLog, {
+      status: result.errored > 0 ? 'errored' : 'completed',
+      recordsProcessed: result.processed || 0,
+      sent: result.completed || 0,
+      failed: result.errored || 0,
+      errorMessage: Array.isArray(result.errorDetails) && result.errorDetails.length > 0
+        ? result.errorDetails
+        : null,
+    });
 
-  return {
-    ...result,
-    tenantId: context.tenantId,
-    tenantKey: context.tenantKey,
-    portalId: context.portalId || null,
-  };
+    logger.info({
+      msg: 'Webhook tenant processing finished',
+      triggerType,
+      tenantId: context.tenantId,
+      tenantKey: context.tenantKey,
+      portalId: context.portalId || null,
+      ...result,
+    });
+
+    return {
+      ...result,
+      tenantId: context.tenantId,
+      tenantKey: context.tenantKey,
+      portalId: context.portalId || null,
+    };
+  } catch (error) {
+    await finishSyncLog(syncLog, {
+      status: 'errored',
+      recordsProcessed: 0,
+      sent: 0,
+      failed: 1,
+      errorMessage: error.syncLogWebhookErrors || [
+        buildWebhookSyncErrorEntry({
+          payloadHubspot: {
+            tenantId: context.tenantId,
+            tenantKey: context.tenantKey,
+            portalId: context.portalId || null,
+            triggerType,
+          },
+          payloadSap: null,
+          responseHubspot: null,
+          responseSap: buildErrorResponseSnapshot(error),
+        }),
+      ],
+    });
+    throw error;
+  }
 }
 
 export async function processWebhookForActiveTenants({ triggerType = 'manual' } = {}) {

@@ -1,5 +1,11 @@
 import lineItemPriceService from "../services/lineItemPrice.service.js";
 import lineItemPriceWebhookService from "../services/lineItemPriceWebhook.service.js";
+import {
+  buildErrorResponseSnapshot,
+  buildWebhookSyncErrorEntry,
+  finishSyncLog,
+  startSyncLog,
+} from "../services/syncLog.service.js";
 import { requireTenantModels } from "../utils/tenantModels.js";
 const SUPPORTED_ASSOCIATION_TYPE = "DEAL_TO_LINE_ITEM";
 
@@ -15,12 +21,15 @@ const lineItemPriceController = {
   async syncPrices(req, reply) {
     let tenantModels = null;
     let executionId = null;
+    let preparedPayload = null;
+    let syncLog = null;
 
     try {
 
       tenantModels = requireTenantModels(req);
+      syncLog = await startSyncLog({ tenantModels });
 
-      const preparedPayload = await lineItemPriceWebhookService.preparePayload(
+      preparedPayload = await lineItemPriceWebhookService.preparePayload(
         req.body[0],
         {
           tenantModels,
@@ -29,6 +38,13 @@ const lineItemPriceController = {
       );
 
       if (preparedPayload.skip) {
+        await finishSyncLog(syncLog, {
+          status: "completed",
+          recordsProcessed: 0,
+          sent: 0,
+          failed: 0,
+        });
+
         return reply.send({
           ok: true,
           data: null,
@@ -54,6 +70,18 @@ const lineItemPriceController = {
         );
       }
 
+      const requestedCount = Number(result?.meta?.requestedCount)
+        || preparedPayload?.payload?.lineItems?.length
+        || 0;
+      const updatedCount = Number(result?.meta?.updatedCount) || 0;
+
+      await finishSyncLog(syncLog, {
+        status: "completed",
+        recordsProcessed: requestedCount,
+        sent: updatedCount,
+        failed: Math.max(requestedCount - updatedCount, 0),
+      });
+
       return reply.send({
         ok: true,
         data: result.data,
@@ -73,6 +101,21 @@ const lineItemPriceController = {
           error,
         );
       }
+
+      await finishSyncLog(syncLog, {
+        status: "errored",
+        recordsProcessed: preparedPayload?.payload?.lineItems?.length || 0,
+        sent: 0,
+        failed: preparedPayload?.payload?.lineItems?.length || 1,
+        errorMessage: error.syncLogWebhookErrors || [
+          buildWebhookSyncErrorEntry({
+            payloadHubspot: preparedPayload?.payload || req.body?.[0] || req.body,
+            payloadSap: null,
+            responseHubspot: null,
+            responseSap: buildErrorResponseSnapshot(error),
+          }),
+        ],
+      });
 
       return reply.code(resolveStatusCode(error)).send({
         ok: false,

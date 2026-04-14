@@ -24,6 +24,7 @@ export const receiveHubspotWebhook = async (req, reply) => {
   try {
     const body = req.body ?? {};
     const validationError = validatePayload(body);
+    const tenantId = req.headers?.['x-tenant-id'] || body.tenantId;
 
     logger.info({
       msg: 'HubSpot createDeal webhook received',
@@ -36,7 +37,13 @@ export const receiveHubspotWebhook = async (req, reply) => {
       return reply.code(400).send({ success: false, message: validationError });
     }
 
-    const tenantContext = await resolveActiveTenant({ tenantId: req.headers['x-tenant-id'] });
+    if (!tenantId) {
+      return reply.code(400).send({ success: false, message: 'tenantId is required' });
+    }
+
+    const tenantContext = await resolveActiveTenant({
+      tenantId,
+    });
 
     if (!tenantContext) {
       return reply.code(404).send({ success: false, message: 'Tenant not found or inactive' });

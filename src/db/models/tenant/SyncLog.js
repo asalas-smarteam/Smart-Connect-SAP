@@ -10,18 +10,24 @@ export const syncLogSchema = new Schema(
     },
     status: {
       type: String,
+      enum: ['completed', 'errored'],
+      default: null,
     },
     recordsProcessed: {
       type: Number,
+      default: 0,
     },
     sent: {
       type: Number,
+      default: 0,
     },
     failed: {
       type: Number,
+      default: 0,
     },
     errorMessage: {
-      type: String,
+      type: Schema.Types.Mixed,
+      default: null,
     },
     startedAt: {
       type: Date,

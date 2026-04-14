@@ -6,6 +6,10 @@ import hubspotAuthService from './hubspotAuthService.js';
 import * as hubspotClient from './hubspotClient.js';
 import sapSessionManager, { isSessionInvalidError } from './sapSessionManager.js';
 import { getWarehouseStockTotals } from '../utils/warehouseStock.js';
+import {
+  buildErrorResponseSnapshot,
+  buildWebhookSyncErrorEntry,
+} from './syncLog.service.js';
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 const DEFAULT_BATCH_SIZE = Number(process.env.WEBHOOK_EVENT_BATCH_SIZE || 10);
@@ -271,12 +275,30 @@ async function findOrCreateBusinessPartner({
 
   const byCardCode = await findBusinessPartnerByCardCode(sapConfig, mappedCardCode);
   if (byCardCode?.CardCode) {
-    return { cardCode: byCardCode.CardCode, created: false, businessPartner: byCardCode };
+    return {
+      cardCode: byCardCode.CardCode,
+      created: false,
+      businessPartner: byCardCode,
+      requestPayload: null,
+      responsePayload: {
+        matchedBy: 'cardCode',
+        businessPartner: byCardCode,
+      },
+    };
   }
 
   const byEmail = await findBusinessPartnerByEmail(sapConfig, mappedEmail);
   if (byEmail?.CardCode) {
-    return { cardCode: byEmail.CardCode, created: false, businessPartner: byEmail };
+    return {
+      cardCode: byEmail.CardCode,
+      created: false,
+      businessPartner: byEmail,
+      requestPayload: null,
+      responsePayload: {
+        matchedBy: 'email',
+        businessPartner: byEmail,
+      },
+    };
   }
 
   const fallbackName = companyExists
@@ -317,6 +339,8 @@ async function findOrCreateBusinessPartner({
     cardCode,
     created: true,
     businessPartner,
+    requestPayload: payload,
+    responsePayload: created,
   };
 }
 
@@ -355,12 +379,12 @@ async function addContactEmployeeIfNeeded({
   contactEmployeeMappings,
 }) {
   if (!cardCode || !contact) {
-    return { created: false, internalCode: null };
+    return { created: false, internalCode: null, requestPayload: null, responsePayload: null };
   }
 
   const nextEmployee = resolveContactEmployeePayload(contact, contactEmployeeMappings);
   if (!nextEmployee) {
-    return { created: false, internalCode: null };
+    return { created: false, internalCode: null, requestPayload: null, responsePayload: null };
   }
 
   const currentEmployees = Array.isArray(businessPartner?.ContactEmployees)
@@ -378,7 +402,15 @@ async function addContactEmployeeIfNeeded({
   });
 
   if (existing) {
-    return { created: false, internalCode: existing.InternalCode || null };
+    return {
+      created: false,
+      internalCode: existing.InternalCode || null,
+      requestPayload: null,
+      responsePayload: {
+        matchedExisting: true,
+        employee: existing,
+      },
+    };
   }
 
   await serviceLayerRequest(sapConfig, {
@@ -404,6 +436,8 @@ async function addContactEmployeeIfNeeded({
   return {
     created: true,
     internalCode: refreshed?.InternalCode || null,
+    requestPayload: nextEmployee,
+    responsePayload: refreshed,
   };
 }
 
@@ -456,19 +490,23 @@ function mapDocumentLines({ lineItems, productMappings }) {
   return lines;
 }
 
-async function createOrder({ sapConfig, cardCode, documentLines }) {
+function buildOrderPayload({ cardCode, documentLines }) {
   if (!documentLines.length) {
     throw new PermanentWebhookError('At least one line_item is required to create SAP Order');
   }
 
+  return {
+    CardCode: cardCode,
+    DocDueDate: new Date().toISOString().slice(0, 10),
+    DocumentLines: documentLines,
+  };
+}
+
+async function createOrder({ sapConfig, orderPayload }) {
   return serviceLayerRequest(sapConfig, {
     method: 'post',
     path: '/Orders',
-    data: {
-      CardCode: cardCode,
-      DocDueDate: new Date().toISOString().slice(0, 10),
-      DocumentLines: documentLines,
-    },
+    data: orderPayload,
   });
 }
 
@@ -488,6 +526,11 @@ async function updateHubspotAfterSap({
     hubspotCredentials,
     tenantModels
   );
+  const hubspotResponses = {
+    deal: null,
+    company: null,
+    contact: null,
+  };
 
   const dealObjectId = toNonEmptyString(payload?.deal?.hs_object_id);
   const companyObjectId = toNonEmptyString(payload?.company?.hs_object_id);
@@ -507,12 +550,14 @@ async function updateHubspotAfterSap({
     }
 
     if (Object.keys(dealProperties).length > 0) {
-      await hubspotClient.updateDeal(token, dealObjectId, { properties: dealProperties });
+      hubspotResponses.deal = await hubspotClient.updateDeal(token, dealObjectId, {
+        properties: dealProperties,
+      });
     }
   }
 
   if (companyCreated && companyObjectId) {
-    await hubspotClient.updateCompany(token, companyObjectId, {
+    hubspotResponses.company = await hubspotClient.updateCompany(token, companyObjectId, {
       properties: {
         idsap: cardCode,
       },
@@ -528,88 +573,134 @@ async function updateHubspotAfterSap({
       contactProperties.internalcode = String(contactEmployeeCode);
     }
 
-    await hubspotClient.updateContact(token, contactObjectId, {
+    hubspotResponses.contact = await hubspotClient.updateContact(token, contactObjectId, {
       properties: contactProperties,
     });
   }
+
+  return hubspotResponses;
 }
 
 async function processSingleEvent({ event, tenantModels, tenantId, tenantKey, portalId }) {
   const { payload, deal, company, contact, lineItems } = resolveEventPayload(event);
   const companyExists = Boolean(company);
   const contactExists = Boolean(contact);
-
-  const context = await resolveWebhookRuntimeContext({
-    tenantModels,
-    payload,
-    tenantId,
-    tenantKey,
-    portalId,
-  });
-
-  const { mappings, sapConfig, hubspotCredentials } = context;
-  const mappedCompany = mapHubspotToSapFields(company || {}, mappings.companyMappings);
-  const mappedContact = mapHubspotToSapFields(contact || {}, mappings.contactBusinessPartnerMappings);
-
-  const businessPartnerResult = await findOrCreateBusinessPartner({
-    sapConfig,
-    company,
-    contact,
-    mappedCompany,
-    mappedContact,
-    companyExists: companyExists || !contactExists,
-  });
-
-  const cardCode = businessPartnerResult.cardCode;
-  let contactEmployeeResult = {
-    created: false,
-    internalCode: null,
+  const auditTrail = {
+    payload_Hubspot: payload,
+    payload_SAP: {
+      businessPartner: null,
+      contactEmployee: null,
+      order: null,
+    },
+    response_hubspot: null,
+    response_SAP: {
+      businessPartner: null,
+      contactEmployee: null,
+      order: null,
+    },
   };
 
-  if (companyExists && contactExists) {
-    contactEmployeeResult = await addContactEmployeeIfNeeded({
-      sapConfig,
-      cardCode,
-      businessPartner: businessPartnerResult.businessPartner,
-      contact,
-      contactEmployeeMappings: mappings.contactEmployeeMappings,
+  try {
+    const context = await resolveWebhookRuntimeContext({
+      tenantModels,
+      payload,
+      tenantId,
+      tenantKey,
+      portalId,
     });
+
+    const { mappings, sapConfig, hubspotCredentials } = context;
+    const mappedCompany = mapHubspotToSapFields(company || {}, mappings.companyMappings);
+    const mappedContact = mapHubspotToSapFields(contact || {}, mappings.contactBusinessPartnerMappings);
+
+    const businessPartnerResult = await findOrCreateBusinessPartner({
+      sapConfig,
+      company,
+      contact,
+      mappedCompany,
+      mappedContact,
+      companyExists: companyExists || !contactExists,
+    });
+
+    auditTrail.payload_SAP.businessPartner = businessPartnerResult.requestPayload;
+    auditTrail.response_SAP.businessPartner = businessPartnerResult.responsePayload;
+
+    const cardCode = businessPartnerResult.cardCode;
+    let contactEmployeeResult = {
+      created: false,
+      internalCode: null,
+      requestPayload: null,
+      responsePayload: null,
+    };
+
+    if (companyExists && contactExists) {
+      contactEmployeeResult = await addContactEmployeeIfNeeded({
+        sapConfig,
+        cardCode,
+        businessPartner: businessPartnerResult.businessPartner,
+        contact,
+        contactEmployeeMappings: mappings.contactEmployeeMappings,
+      });
+    }
+
+    auditTrail.payload_SAP.contactEmployee = contactEmployeeResult.requestPayload;
+    auditTrail.response_SAP.contactEmployee = contactEmployeeResult.responsePayload;
+
+    const documentLines = mapDocumentLines({
+      lineItems,
+      productMappings: mappings.productMappings,
+    });
+
+    /*for (const line of documentLines) 
+      await validateStockForItem(sapConfig, line.ItemCode, line.Quantity);
+    */
+
+    const orderPayload = buildOrderPayload({
+      cardCode,
+      documentLines,
+    });
+    auditTrail.payload_SAP.order = orderPayload;
+
+    const orderResponse = await createOrder({
+      sapConfig,
+      orderPayload,
+    });
+    auditTrail.response_SAP.order = orderResponse;
+
+    auditTrail.response_hubspot = await updateHubspotAfterSap({
+      tenantModels,
+      hubspotCredentials,
+      payload,
+      dealMappings: mappings.dealMappings,
+      orderResponse,
+      cardCode,
+      companyCreated: companyExists && businessPartnerResult.created,
+      contactCreated: (!companyExists && contactExists && businessPartnerResult.created)
+        || (companyExists && contactExists && contactEmployeeResult.created),
+      contactEmployeeCode: contactEmployeeResult.internalCode,
+    });
+
+    return {
+      cardCode,
+      docEntry: orderResponse?.DocEntry ?? null,
+      docNum: orderResponse?.DocNum ?? null,
+      dealId: toNonEmptyString(deal?.hs_object_id),
+    };
+  } catch (error) {
+    error.syncLogWebhookErrors = [
+      buildWebhookSyncErrorEntry({
+        payloadHubspot: auditTrail.payload_Hubspot,
+        payloadSap: auditTrail.payload_SAP,
+        responseHubspot: auditTrail.response_hubspot,
+        responseSap: {
+          ...auditTrail.response_SAP,
+          error: buildErrorResponseSnapshot(error),
+        },
+      }),
+    ];
+
+    throw error;
   }
-
-  const documentLines = mapDocumentLines({
-    lineItems,
-    productMappings: mappings.productMappings,
-  });
-
-  /*for (const line of documentLines) 
-    await validateStockForItem(sapConfig, line.ItemCode, line.Quantity);
-  */
-
-  const orderResponse = await createOrder({
-    sapConfig,
-    cardCode,
-    documentLines,
-  });
-
-  await updateHubspotAfterSap({
-    tenantModels,
-    hubspotCredentials,
-    payload,
-    dealMappings: mappings.dealMappings,
-    orderResponse,
-    cardCode,
-    companyCreated: companyExists && businessPartnerResult.created,
-    contactCreated: (!companyExists && contactExists && businessPartnerResult.created)
-      || (companyExists && contactExists && contactEmployeeResult.created),
-    contactEmployeeCode: contactEmployeeResult.internalCode,
-  });
-
-  return {
-    cardCode,
-    docEntry: orderResponse?.DocEntry ?? null,
-    docNum: orderResponse?.DocNum ?? null,
-    dealId: toNonEmptyString(deal?.hs_object_id),
-  };
 }
 
 async function claimEventsToProcess(WebhookEvent) {
@@ -637,13 +728,14 @@ const webhookProcessor = {
     const maxRetriesByEnv = Math.max(1, Number(process.env.WEBHOOK_EVENT_MAX_RETRIES || DEFAULT_MAX_RETRIES));
     const events = await claimEventsToProcess(WebhookEvent);
 
-    if (!events.length) {
+    if (!events.length || events == null) {
       return {
         processed: 0,
         completed: 0,
         retried: 0,
         errored: 0,
         skipped: 0,
+        errorDetails: [],
       };
     }
 
@@ -661,6 +753,7 @@ const webhookProcessor = {
       retried: 0,
       errored: 0,
       skipped: 0,
+      errorDetails: [],
     };
 
     for (const event of events) {
@@ -728,6 +821,18 @@ const webhookProcessor = {
           summary.retried += 1;
         } else {
           summary.errored += 1;
+          if (Array.isArray(error?.syncLogWebhookErrors) && error.syncLogWebhookErrors.length > 0) {
+            summary.errorDetails.push(...error.syncLogWebhookErrors);
+          } else {
+            summary.errorDetails.push(
+              buildWebhookSyncErrorEntry({
+                payloadHubspot: event?.payload || null,
+                payloadSap: null,
+                responseHubspot: null,
+                responseSap: buildErrorResponseSnapshot(error),
+              })
+            );
+          }
         }
 
         logger.error({

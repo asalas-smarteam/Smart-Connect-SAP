@@ -201,4 +201,60 @@ describe('lineItemPrice.service syncPrices', () => {
     expect(mockInvalidateSession).toHaveBeenCalledWith('tenant_1');
     expect(mockGetSessionCookie).toHaveBeenCalledTimes(2);
   });
+
+  it('attaches webhook audit details when HubSpot update fails', async () => {
+    jest.useRealTimers();
+    const tenantModels = buildTenantModels();
+
+    mockGetSessionCookie.mockResolvedValue({ cookie: 'B1SESSION=abc' });
+    mockAxiosPost.mockResolvedValue({
+      data: { Price: 704.35, Currency: 'C$', Discount: 0.0 },
+    });
+    mockGetAccessToken.mockResolvedValue('hubspot-token');
+
+    const hubspotError = new Error('HubSpot API request failed: 500 Internal Server Error');
+    hubspotError.details = {
+      status: 500,
+      message: 'HubSpot exploded',
+    };
+    mockBatchUpdateLineItems.mockRejectedValue(hubspotError);
+
+    await expect(
+      lineItemPriceService.syncPrices(
+        {
+          cardCode: 'C20000',
+          lineItems: [{ itemCode: 'A0001', id: '53747313682' }],
+        },
+        {
+          tenantModels,
+          tenant: { client: { hubspot: { portalId: '12345' } } },
+          tenantKey: 'tenant_1',
+        }
+      )
+    ).rejects.toMatchObject({
+      syncLogWebhookErrors: [
+        {
+          payload_Hubspot: {
+            cardCode: 'C20000',
+            lineItems: [{ itemCode: 'A0001', id: '53747313682' }],
+          },
+          payload_SAP: [
+            {
+              ItemPriceParams: {
+                ItemCode: 'A0001',
+                CardCode: 'C20000',
+                Date: expect.any(String),
+              },
+            },
+          ],
+          response_hubspot: {
+            message: 'HubSpot API request failed: 500 Internal Server Error',
+          },
+          response_SAP: [
+            { Price: 704.35, Currency: 'C$', Discount: 0.0 },
+          ],
+        },
+      ],
+    });
+  });
 });

@@ -5,6 +5,10 @@ import hubspotAuthService from './hubspotAuthService.js';
 import * as hubspotClient from './hubspotClient.js';
 import sapSessionManager, { isSessionInvalidError } from './sapSessionManager.js';
 import { runWithRetry } from '../utils/retry.js';
+import {
+  buildErrorResponseSnapshot,
+  buildWebhookSyncErrorEntry,
+} from './syncLog.service.js';
 
 const httpsAgent = new https.Agent({
   rejectUnauthorized: false,
@@ -92,7 +96,14 @@ function buildSapPricePayload({ cardCode, itemCode, date }) {
   };
 }
 
-async function requestSapItemPrice({ sapConfig, cardCode, itemCode, date, tenantKey }) {
+async function requestSapItemPrice({
+  sapConfig,
+  cardCode,
+  itemCode,
+  date,
+  tenantKey,
+  requestPayload,
+}) {
   const normalizedBaseUrl = String(sapConfig?.serviceLayerBaseUrl || '').trim().replace(/\/+$/, '');
 
   if (!normalizedBaseUrl) {
@@ -100,7 +111,7 @@ async function requestSapItemPrice({ sapConfig, cardCode, itemCode, date, tenant
   }
 
   const url = `${normalizedBaseUrl}${SAP_ITEM_PRICE_PATH}`;
-  const data = buildSapPricePayload({ cardCode, itemCode, date });
+  const data = requestPayload || buildSapPricePayload({ cardCode, itemCode, date });
 
   const makeRequest = async () => {
     const { cookie } = await sapSessionManager.getSessionCookie(sapConfig);
@@ -214,66 +225,114 @@ async function updateHubspotLineItems({ token, enrichedLineItems, tenantKey }) {
 
 const lineItemPriceService = {
   async syncPrices(payload, { tenantModels, tenant, tenantKey }) {
-    validatePayload(payload);
-
-    const cardCode = toNonEmptyString(payload.cardCode);
-    const currentDate = formatCurrentDate();
-    const hubspotCredentials = await resolveHubspotCredentials(tenantModels, tenant);
-    const sapCredentials = await resolveSapCredentials(tenantModels, hubspotCredentials);
-    const sapCredentialsData = typeof sapCredentials?.toObject === 'function'
-      ? sapCredentials.toObject()
-      : sapCredentials;
-    const sapConfig = {
-      ...sapCredentialsData,
-      tenantKey,
+    const auditTrail = {
+      payload_Hubspot: payload,
+      payload_SAP: [],
+      response_hubspot: null,
+      response_SAP: [],
     };
 
-    const enrichedLineItems = [];
+    try {
+      validatePayload(payload);
 
-    for (const lineItem of payload.lineItems) {
-      const itemCode = toNonEmptyString(lineItem.itemCode);
-      const id = toNonEmptyString(lineItem.id);
-      const priceData = await requestSapItemPrice({
-        sapConfig,
-        cardCode,
-        itemCode,
-        date: currentDate,
+      const cardCode = toNonEmptyString(payload.cardCode);
+      const currentDate = formatCurrentDate();
+      const hubspotCredentials = await resolveHubspotCredentials(tenantModels, tenant);
+      const sapCredentials = await resolveSapCredentials(tenantModels, hubspotCredentials);
+      const sapCredentialsData = typeof sapCredentials?.toObject === 'function'
+        ? sapCredentials.toObject()
+        : sapCredentials;
+      const sapConfig = {
+        ...sapCredentialsData,
+        tenantKey,
+      };
+
+      const enrichedLineItems = [];
+
+      for (const lineItem of payload.lineItems) {
+        const itemCode = toNonEmptyString(lineItem.itemCode);
+        const id = toNonEmptyString(lineItem.id);
+        const sapRequestPayload = buildSapPricePayload({
+          cardCode,
+          itemCode,
+          date: currentDate,
+        });
+
+        auditTrail.payload_SAP.push(sapRequestPayload);
+
+        const priceData = await requestSapItemPrice({
+          sapConfig,
+          cardCode,
+          itemCode,
+          date: currentDate,
+          tenantKey,
+          requestPayload: sapRequestPayload,
+        });
+
+        auditTrail.response_SAP.push(priceData);
+
+        enrichedLineItems.push({
+          itemCode,
+          id,
+          Price: priceData?.Price ?? 0,
+          Currency: priceData?.Currency ?? null,
+          Discount: priceData?.Discount ?? 0,
+        });
+      }
+
+      const token = await hubspotAuthService.getAccessToken(
+        hubspotCredentials.clientConfigId,
+        hubspotCredentials,
+        tenantModels
+      );
+
+      const hubspotUpdate = await updateHubspotLineItems({
+        token,
+        enrichedLineItems,
         tenantKey,
       });
 
-      enrichedLineItems.push({
-        itemCode,
-        id,
-        Price: priceData?.Price ?? 0,
-        Currency: priceData?.Currency ?? null,
-        Discount: priceData?.Discount ?? 0,
-      });
+      auditTrail.response_hubspot = {
+        payload: hubspotUpdate.payload,
+        response: hubspotUpdate.response,
+      };
+
+      return {
+        data: {
+          cardCode,
+          lineItems: enrichedLineItems,
+        },
+        meta: {
+          requestedCount: hubspotUpdate.payload.inputs.length,
+          updatedCount: Array.isArray(hubspotUpdate.response?.results)
+            ? hubspotUpdate.response.results.length
+            : hubspotUpdate.payload.inputs.length,
+        },
+      };
+    } catch (error) {
+      const errorSnapshot = buildErrorResponseSnapshot(error);
+      const message = String(error?.message || '').toLowerCase();
+      const responseHubspot = auditTrail.response_hubspot
+        || (message.includes('hubspot') ? errorSnapshot : null);
+      const responseSap = auditTrail.response_SAP.length > 0
+        ? [...auditTrail.response_SAP]
+        : [];
+
+      if (!responseHubspot && !message.includes('hubspot') && errorSnapshot) {
+        responseSap.push(errorSnapshot);
+      }
+
+      error.syncLogWebhookErrors = [
+        buildWebhookSyncErrorEntry({
+          payloadHubspot: auditTrail.payload_Hubspot,
+          payloadSap: auditTrail.payload_SAP,
+          responseHubspot,
+          responseSap,
+        }),
+      ];
+
+      throw error;
     }
-
-    const token = await hubspotAuthService.getAccessToken(
-      hubspotCredentials.clientConfigId,
-      hubspotCredentials,
-      tenantModels
-    );
-
-    const hubspotUpdate = await updateHubspotLineItems({
-      token,
-      enrichedLineItems,
-      tenantKey,
-    });
-
-    return {
-      data: {
-        cardCode,
-        lineItems: enrichedLineItems,
-      },
-      meta: {
-        requestedCount: hubspotUpdate.payload.inputs.length,
-        updatedCount: Array.isArray(hubspotUpdate.response?.results)
-          ? hubspotUpdate.response.results.length
-          : hubspotUpdate.payload.inputs.length,
-      },
-    };
   },
 };
 

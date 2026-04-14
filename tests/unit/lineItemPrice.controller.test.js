@@ -4,6 +4,8 @@ const mockSyncPrices = jest.fn();
 const mockPreparePayload = jest.fn();
 const mockMarkAsSent = jest.fn();
 const mockMarkAsError = jest.fn();
+const mockStartSyncLog = jest.fn();
+const mockFinishSyncLog = jest.fn();
 
 jest.unstable_mockModule('../../src/services/lineItemPrice.service.js', () => ({
   default: {
@@ -19,6 +21,13 @@ jest.unstable_mockModule('../../src/services/lineItemPriceWebhook.service.js', (
   },
 }));
 
+jest.unstable_mockModule('../../src/services/syncLog.service.js', () => ({
+  buildErrorResponseSnapshot: jest.fn((error) => ({ message: error.message })),
+  buildWebhookSyncErrorEntry: jest.fn((value) => value),
+  finishSyncLog: mockFinishSyncLog,
+  startSyncLog: mockStartSyncLog,
+}));
+
 const lineItemPriceController = (await import('../../src/controllers/lineItemPrice.controller.js')).default;
 
 function buildReply() {
@@ -31,6 +40,7 @@ function buildReply() {
 describe('lineItemPrice.controller syncPrices', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockStartSyncLog.mockResolvedValue({ _id: 'sync-log-1' });
     mockPreparePayload.mockImplementation(async (payload) => ({
       skip: false,
       payload,
@@ -41,10 +51,12 @@ describe('lineItemPrice.controller syncPrices', () => {
   it('returns the enriched payload and update summary', async () => {
     const reply = buildReply();
     const req = {
-      body: {
-        cardCode: 'C20000',
-        lineItems: [{ itemCode: 'A0001', id: '53747313682' }],
-      },
+      body: [
+        {
+          cardCode: 'C20000',
+          lineItems: [{ itemCode: 'A0001', id: '53747313682' }],
+        },
+      ],
       tenantModels: {},
       tenant: { client: { hubspot: { portalId: '12345' } } },
       tenantKey: 'tenant_1',
@@ -72,7 +84,7 @@ describe('lineItemPrice.controller syncPrices', () => {
 
     await lineItemPriceController.syncPrices(req, reply);
 
-    expect(mockPreparePayload).toHaveBeenCalledWith(req.body, {
+    expect(mockPreparePayload).toHaveBeenCalledWith(req.body[0], {
       tenantModels: req.tenantModels,
       tenant: req.tenant,
     });
@@ -96,12 +108,21 @@ describe('lineItemPrice.controller syncPrices', () => {
       },
     });
     expect(mockMarkAsSent).not.toHaveBeenCalled();
+    expect(mockFinishSyncLog).toHaveBeenCalledWith(
+      { _id: 'sync-log-1' },
+      expect.objectContaining({
+        status: 'completed',
+        recordsProcessed: 1,
+        sent: 1,
+        failed: 0,
+      })
+    );
   });
 
   it('returns 400 for expected payload errors', async () => {
     const reply = buildReply();
     const req = {
-      body: {},
+      body: [{}],
       tenantModels: {},
       tenant: {},
       tenantKey: 'tenant_1',
@@ -118,15 +139,23 @@ describe('lineItemPrice.controller syncPrices', () => {
       ok: false,
       message: 'cardCode is required',
     });
+    expect(mockFinishSyncLog).toHaveBeenCalledWith(
+      { _id: 'sync-log-1' },
+      expect.objectContaining({
+        status: 'errored',
+      })
+    );
   });
 
   it('skips duplicate webhook executions without calling the sync service', async () => {
     const reply = buildReply();
     const req = {
-      body: {
-        associationType: 'DEAL_TO_LINE_ITEM',
-        portalId: 50564010,
-      },
+      body: [
+        {
+          associationType: 'DEAL_TO_LINE_ITEM',
+          portalId: 50564010,
+        },
+      ],
       tenantModels: {
         LineItemPriceWebhookEvent: {},
       },
@@ -161,11 +190,13 @@ describe('lineItemPrice.controller syncPrices', () => {
   it('marks webhook execution as sent after processing the new payload format', async () => {
     const reply = buildReply();
     const req = {
-      body: {
-        associationType: 'DEAL_TO_LINE_ITEM',
-        portalId: 50564010,
-        fromObjectId: 58986911596,
-      },
+      body: [
+        {
+          associationType: 'DEAL_TO_LINE_ITEM',
+          portalId: 50564010,
+          fromObjectId: 58986911596,
+        },
+      ],
       tenantModels: {
         LineItemPriceWebhookEvent: { name: 'LineItemPriceWebhookEvent' },
       },
