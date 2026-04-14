@@ -66,19 +66,24 @@ describe('lineItemPrice.controller syncPrices', () => {
     mockSyncPrices.mockResolvedValue({
       data: {
         cardCode: 'C20000',
+        dealId: 'deal-1',
+        totalAmount: 1408.7,
         lineItems: [
           {
             itemCode: 'A0001',
             id: '53747313682',
+            quantity: 2,
             Price: 704.35,
             Currency: 'C$',
             Discount: 0.0,
+            lineTotal: 1408.7,
           },
         ],
       },
       meta: {
         requestedCount: 1,
         updatedCount: 1,
+        dealUpdated: true,
       },
     });
 
@@ -92,19 +97,24 @@ describe('lineItemPrice.controller syncPrices', () => {
       ok: true,
       data: {
         cardCode: 'C20000',
+        dealId: 'deal-1',
+        totalAmount: 1408.7,
         lineItems: [
           {
             itemCode: 'A0001',
             id: '53747313682',
+            quantity: 2,
             Price: 704.35,
             Currency: 'C$',
             Discount: 0.0,
+            lineTotal: 1408.7,
           },
         ],
       },
       meta: {
         requestedCount: 1,
         updatedCount: 1,
+        dealUpdated: true,
       },
     });
     expect(mockMarkAsSent).not.toHaveBeenCalled();
@@ -208,19 +218,29 @@ describe('lineItemPrice.controller syncPrices', () => {
     mockPreparePayload.mockResolvedValue({
       skip: false,
       payload: {
+        dealId: '58986911596',
         cardCode: 'CL00129',
-        lineItems: [{ itemCode: 'A01050211', id: '54118822955' }],
+        lineItems: [{ itemCode: 'A01050211', id: '54118822955', quantity: '0' }],
       },
       executionId: 'event-1',
     });
     mockSyncPrices.mockResolvedValue({
       data: {
         cardCode: 'CL00129',
-        lineItems: [{ itemCode: 'A01050211', id: '54118822955', Price: 10 }],
+        dealId: '58986911596',
+        totalAmount: 10,
+        lineItems: [{
+          itemCode: 'A01050211',
+          id: '54118822955',
+          quantity: 1,
+          Price: 10,
+          lineTotal: 10,
+        }],
       },
       meta: {
         requestedCount: 1,
         updatedCount: 1,
+        dealUpdated: true,
       },
     });
 
@@ -228,8 +248,9 @@ describe('lineItemPrice.controller syncPrices', () => {
 
     expect(mockSyncPrices).toHaveBeenCalledWith(
       {
+        dealId: '58986911596',
         cardCode: 'CL00129',
-        lineItems: [{ itemCode: 'A01050211', id: '54118822955' }],
+        lineItems: [{ itemCode: 'A01050211', id: '54118822955', quantity: '0' }],
       },
       {
         tenantModels: req.tenantModels,

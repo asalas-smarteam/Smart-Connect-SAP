@@ -172,6 +172,7 @@ describe('lineItemPriceWebhook.service', () => {
           id: '54118822955',
           properties: {
             hs_sku: 'A01050211',
+            quantity: '2',
           },
         };
       }
@@ -181,6 +182,7 @@ describe('lineItemPriceWebhook.service', () => {
           id: '54118822956',
           properties: {
             hs_sku: 'A01050007',
+            quantity: '0',
           },
         };
       }
@@ -208,10 +210,11 @@ describe('lineItemPriceWebhook.service', () => {
     expect(result).toEqual({
       skip: false,
       payload: {
+        dealId: '58986911596',
         cardCode: 'CL00129',
         lineItems: [
-          { id: '54118822955', itemCode: 'A01050211' },
-          { id: '54118822956', itemCode: 'A01050007' },
+          { id: '54118822955', itemCode: 'A01050211', quantity: '2' },
+          { id: '54118822956', itemCode: 'A01050007', quantity: '0' },
         ],
       },
       executionId: 'event-1',
@@ -324,6 +327,7 @@ describe('lineItemPriceWebhook.service', () => {
           id: '54118822955',
           properties: {
             hs_sku: 'A01050211',
+            quantity: '0',
           },
         };
       }
@@ -351,9 +355,10 @@ describe('lineItemPriceWebhook.service', () => {
     expect(result).toEqual({
       skip: false,
       payload: {
+        dealId: '58986911596',
         cardCode: null,
         lineItems: [
-          { id: '54118822955', itemCode: 'A01050211' },
+          { id: '54118822955', itemCode: 'A01050211', quantity: '0' },
         ],
       },
       executionId: 'event-1',

@@ -132,7 +132,7 @@ async function resolveLineItems(token, deal) {
   const lineItems = await Promise.all(
     lineItemIds.map(async (lineItemId, index) => {
       const lineItem = await fetchHubspotObject(token, 'line_items', lineItemId, {
-        properties: ['hs_sku'],
+        properties: ['hs_sku', 'quantity'],
       });
       const itemCode = toNonEmptyString(lineItem?.properties?.hs_sku || lineItem?.properties?.itemCode);
 
@@ -143,6 +143,7 @@ async function resolveLineItems(token, deal) {
       return {
         id: toNonEmptyString(lineItem?.id) || lineItemId,
         itemCode,
+        quantity: lineItem?.properties?.quantity ?? null,
       };
     })
   );
@@ -162,6 +163,7 @@ async function buildLegacyPayload(payload, token) {
   });
 
   return {
+    dealId,
     cardCode: await resolveCardCode(token, deal),
     lineItems: await resolveLineItems(token, deal),
   };
@@ -174,7 +176,10 @@ const lineItemPriceWebhookService = {
     if (isLegacyPayload(payload)) {
       return {
         skip: false,
-        payload,
+        payload: {
+          ...payload,
+          dealId: toNonEmptyString(payload?.dealId) || toNonEmptyString(payload?.fromObjectId),
+        },
         executionId: null,
       };
     }

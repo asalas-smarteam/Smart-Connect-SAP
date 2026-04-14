@@ -29,6 +29,20 @@ function formatCurrentDate(date = new Date()) {
   return date.toISOString().slice(0, 10);
 }
 
+function normalizeNumber(value, fallback = 0) {
+  const normalized = Number(String(value ?? '').trim());
+  return Number.isFinite(normalized) ? normalized : fallback;
+}
+
+function normalizeQuantity(value) {
+  const normalized = normalizeNumber(value, 0);
+  return normalized > 0 ? normalized : 1;
+}
+
+function roundCurrency(value) {
+  return Math.round((normalizeNumber(value, 0) + Number.EPSILON) * 100) / 100;
+}
+
 function validatePayload(payload = {}) {
   if (!Array.isArray(payload.lineItems) || payload.lineItems.length === 0) {
     throw new Error('lineItems must be a non-empty array');
@@ -107,7 +121,8 @@ function normalizePriceList(value) {
 async function resolveTenantPriceList(tenantModels) {
   const value = await tenantConfigurationService.getValue(
     tenantModels,
-    'priceList'
+    'priceList',
+    DEFAULT_PRICE_LIST
   );
   const priceList = normalizePriceList(value);
 
@@ -277,9 +292,18 @@ function buildHubspotBatchPayload(enrichedLineItems) {
     inputs: enrichedLineItems.map((lineItem) => ({
       id: String(lineItem.id),
       properties: {
-        price: String(lineItem.Price ?? 0),
+        price: String(roundCurrency(lineItem.Price ?? 0)),
+        quantity: String(normalizeQuantity(lineItem.quantity ?? lineItem.Quantity)),
       },
     })),
+  };
+}
+
+function buildHubspotDealPayload(totalAmount) {
+  return {
+    properties: {
+      amount: String(roundCurrency(totalAmount)),
+    },
   };
 }
 
@@ -325,6 +349,48 @@ async function updateHubspotLineItems({ token, enrichedLineItems, tenantKey }) {
   };
 }
 
+async function updateHubspotDealAmount({ token, dealId, totalAmount, tenantKey }) {
+  const dealPayload = buildHubspotDealPayload(totalAmount);
+
+  logger.info({
+    msg: 'Updating HubSpot deal total from SAP prices',
+    tenantKey,
+    dealId,
+    totalAmount: roundCurrency(totalAmount),
+  });
+
+  const response = await runWithRetry(
+    () => hubspotClient.updateDeal(token, dealId, dealPayload),
+    {
+      retries: 1,
+      delayMs: 500,
+      onError: async (error, attempt) => {
+        logger.warn({
+          msg: 'HubSpot deal total update failed',
+          tenantKey,
+          dealId,
+          totalAmount: roundCurrency(totalAmount),
+          attempt: attempt + 1,
+          error: error.message,
+          status: error?.details?.status ?? error?.response?.status ?? null,
+        });
+      },
+    }
+  );
+
+  logger.info({
+    msg: 'HubSpot deal total updated from SAP prices',
+    tenantKey,
+    dealId,
+    totalAmount: roundCurrency(totalAmount),
+  });
+
+  return {
+    payload: dealPayload,
+    response,
+  };
+}
+
 const lineItemPriceService = {
   async syncPrices(payload, { tenantModels, tenant, tenantKey }) {
     const auditTrail = {
@@ -338,6 +404,7 @@ const lineItemPriceService = {
       validatePayload(payload);
 
       const cardCode = toNonEmptyString(payload.cardCode);
+      const dealId = toNonEmptyString(payload.dealId) || toNonEmptyString(payload.fromObjectId);
       const useBusinessPartnerPrice = Boolean(cardCode);
       const currentDate = formatCurrentDate();
       const hubspotCredentials = await resolveHubspotCredentials(tenantModels, tenant);
@@ -414,12 +481,18 @@ const lineItemPriceService = {
           auditTrail.response_SAP.push(priceData);
         }
 
+        const quantity = normalizeQuantity(lineItem.quantity ?? lineItem.Quantity);
+        const price = roundCurrency(priceData?.Price ?? 0);
+        const lineTotal = roundCurrency(quantity * price);
+
         enrichedLineItems.push({
           itemCode,
           id,
-          Price: priceData?.Price ?? 0,
+          quantity,
+          Price: price,
           Currency: priceData?.Currency ?? null,
           Discount: priceData?.Discount ?? 0,
+          lineTotal,
         });
       }
 
@@ -436,13 +509,36 @@ const lineItemPriceService = {
       });
 
       auditTrail.response_hubspot = {
-        payload: hubspotUpdate.payload,
-        response: hubspotUpdate.response,
+        lineItems: {
+          payload: hubspotUpdate.payload,
+          response: hubspotUpdate.response,
+        },
       };
+
+      let dealUpdate = null;
+      const totalAmount = roundCurrency(
+        enrichedLineItems.reduce((sum, lineItem) => sum + lineItem.lineTotal, 0)
+      );
+
+      if (dealId) {
+        dealUpdate = await updateHubspotDealAmount({
+          token,
+          dealId,
+          totalAmount,
+          tenantKey,
+        });
+
+        auditTrail.response_hubspot.deal = {
+          payload: dealUpdate.payload,
+          response: dealUpdate.response,
+        };
+      }
 
       return {
         data: {
           cardCode,
+          dealId,
+          totalAmount,
           lineItems: enrichedLineItems,
         },
         meta: {
@@ -450,13 +546,18 @@ const lineItemPriceService = {
           updatedCount: Array.isArray(hubspotUpdate.response?.results)
             ? hubspotUpdate.response.results.length
             : hubspotUpdate.payload.inputs.length,
+          dealUpdated: Boolean(dealUpdate),
         },
       };
     } catch (error) {
       const errorSnapshot = buildErrorResponseSnapshot(error);
       const message = String(error?.message || '').toLowerCase();
-      const responseHubspot = auditTrail.response_hubspot
-        || (message.includes('hubspot') ? errorSnapshot : null);
+      const responseHubspot = message.includes('hubspot')
+        ? {
+          ...(auditTrail.response_hubspot || {}),
+          error: errorSnapshot,
+        }
+        : auditTrail.response_hubspot;
       const responseSap = auditTrail.response_SAP.length > 0
         ? [...auditTrail.response_SAP]
         : [];
