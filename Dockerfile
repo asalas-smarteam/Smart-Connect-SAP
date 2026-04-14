@@ -2,6 +2,9 @@ FROM node:20-alpine
 
 WORKDIR /usr/src/app
 
+ARG CACHE_BUST=1
+RUN echo "Build version: $CACHE_BUST"
+
 COPY package*.json ./
 
 RUN npm ci --omit=dev
