@@ -10,7 +10,7 @@ import { requireTenantModels } from "../utils/tenantModels.js";
 const SUPPORTED_ASSOCIATION_TYPE = "DEAL_TO_LINE_ITEM";
 
 function resolveStatusCode(error) {
-  return /cardCode is required|lineItems must be a non-empty array|itemCode is required|\.id is required|portalId is required|eventId is required|subscriptionId is required|appId is required|occurredAt is required|fromObjectId is required/.test(
+  return /lineItems must be a non-empty array|itemCode is required|\.id is required|portalId is required|eventId is required|subscriptionId is required|appId is required|occurredAt is required|fromObjectId is required/.test(
     error.message,
   )
     ? 400
@@ -19,7 +19,7 @@ function resolveStatusCode(error) {
 
 const lineItemPriceController = {
   async syncPrices(req, reply) {
-    let tenantModels = null;
+    let tenantModels =null;
     let executionId = null;
     let preparedPayload = null;
     let syncLog = null;

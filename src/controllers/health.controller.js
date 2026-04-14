@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { connect } from '../config/database.js';
+import { APP_VERSION } from '../config/appMetadata.js';
 
 export const health = async (req, reply) => {
   try {
@@ -15,7 +16,7 @@ export const health = async (req, reply) => {
       ok: readyState === 1,
       database: stateLabels[readyState] || 'unknown',
       timestamp: new Date().toISOString(),
-      version: "1.1.0" 
+      version: APP_VERSION,
     });
   } catch (error) {
     return reply.send({

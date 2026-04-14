@@ -1,6 +1,7 @@
 import { jest } from '@jest/globals';
 
 const mockAxiosPost = jest.fn();
+const mockAxiosGet = jest.fn();
 const mockGetAccessToken = jest.fn();
 const mockBatchUpdateLineItems = jest.fn();
 const mockGetSessionCookie = jest.fn();
@@ -12,6 +13,7 @@ const mockLoggerWarn = jest.fn();
 jest.unstable_mockModule('axios', () => ({
   default: {
     post: mockAxiosPost,
+    get: mockAxiosGet,
   },
 }));
 
@@ -73,6 +75,13 @@ describe('lineItemPrice.service syncPrices', () => {
             serviceLayerPassword: 'secret',
             serviceLayerCompanyDB: 'SBODEMO',
           }),
+      },
+      Configuration: {
+        findOneAndUpdate: jest.fn().mockResolvedValue({
+          key: 'priceList',
+          value: '4',
+          userUpdated: 'admin',
+        }),
       },
     };
   }
@@ -253,6 +262,110 @@ describe('lineItemPrice.service syncPrices', () => {
           response_SAP: [
             { Price: 704.35, Currency: 'C$', Discount: 0.0 },
           ],
+        },
+      ],
+    });
+  });
+
+  it('uses tenant priceList config when cardCode is missing', async () => {
+    const tenantModels = buildTenantModels();
+
+    mockGetSessionCookie.mockResolvedValue({ cookie: 'B1SESSION=abc' });
+    mockAxiosGet
+      .mockResolvedValueOnce({
+        data: {
+          ItemPrices: [
+            { PriceList: 1, Price: 900, Currency: 'C$' },
+            { PriceList: 4, Price: 704.35, Currency: 'C$' },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          ItemPrices: [
+            { PriceList: 4, Price: 825.1, Currency: 'C$' },
+          ],
+        },
+      });
+    mockGetAccessToken.mockResolvedValue('hubspot-token');
+    mockBatchUpdateLineItems.mockResolvedValue({
+      results: [{ id: '53747313682' }, { id: '54118679348' }],
+    });
+
+    const result = await lineItemPriceService.syncPrices(
+      {
+        lineItems: [
+          { itemCode: 'A0001', id: '53747313682' },
+          { itemCode: 'A0002', id: '54118679348' },
+        ],
+      },
+      {
+        tenantModels,
+        tenant: { client: { hubspot: { portalId: '12345' } } },
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    expect(result).toEqual({
+      data: {
+        cardCode: null,
+        lineItems: [
+          {
+            itemCode: 'A0001',
+            id: '53747313682',
+            Price: 704.35,
+            Currency: 'C$',
+            Discount: 0,
+          },
+          {
+            itemCode: 'A0002',
+            id: '54118679348',
+            Price: 825.1,
+            Currency: 'C$',
+            Discount: 0,
+          },
+        ],
+      },
+      meta: {
+        requestedCount: 2,
+        updatedCount: 2,
+      },
+    });
+
+    expect(tenantModels.Configuration.findOneAndUpdate).toHaveBeenCalledWith(
+      { key: 'priceList' },
+      {
+        $setOnInsert: {
+          key: 'priceList',
+          value: '4',
+          userUpdated: 'admin',
+        },
+      },
+      {
+        new: true,
+        upsert: true,
+        setDefaultsOnInsert: true,
+      }
+    );
+
+    expect(mockAxiosPost).not.toHaveBeenCalled();
+    expect(mockAxiosGet).toHaveBeenNthCalledWith(
+      1,
+      "https://sap.example.com:50000/b1s/v2/Items('A0001')?$select=ItemPrices",
+      expect.objectContaining({
+        timeout: 15000,
+        headers: { Cookie: 'B1SESSION=abc' },
+      })
+    );
+    expect(mockBatchUpdateLineItems).toHaveBeenCalledWith('hubspot-token', {
+      inputs: [
+        {
+          id: '53747313682',
+          properties: { price: '704.35' },
+        },
+        {
+          id: '54118679348',
+          properties: { price: '825.1' },
         },
       ],
     });

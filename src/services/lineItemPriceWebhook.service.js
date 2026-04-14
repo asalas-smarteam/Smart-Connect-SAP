@@ -88,17 +88,19 @@ async function resolveCardCode(token, deal) {
   const companyIds = extractAssociationIds(deal, 'companies');
   const contactIds = extractAssociationIds(deal, 'contacts');
 
+  if (companyIds.length === 0 && contactIds.length === 0) {
+    throw new Error('Associated company or contact is required for the deal');
+  }
+
   if (companyIds.length > 0) {
     const company = await fetchHubspotObject(token, 'companies', companyIds[0], {
       properties: ['idsap', 'idSap'],
     });
     const cardCode = resolveObjectIdSap(company);
 
-    if (!cardCode) {
-      throw new Error('Company idSap is required for the associated deal');
+    if (cardCode) {
+      return cardCode;
     }
-
-    return cardCode;
   }
 
   if (contactIds.length > 0) {
@@ -107,14 +109,12 @@ async function resolveCardCode(token, deal) {
     });
     const cardCode = resolveObjectIdSap(contact);
 
-    if (!cardCode) {
-      throw new Error('Contact idSap is required for the associated deal');
+    if (cardCode) {
+      return cardCode;
     }
-
-    return cardCode;
   }
 
-  throw new Error('Associated company or contact is required for the deal');
+  return null;
 }
 
 async function resolveLineItems(token, deal) {

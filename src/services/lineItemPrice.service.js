@@ -4,6 +4,7 @@ import logger from '../core/logger.js';
 import hubspotAuthService from './hubspotAuthService.js';
 import * as hubspotClient from './hubspotClient.js';
 import sapSessionManager, { isSessionInvalidError } from './sapSessionManager.js';
+import tenantConfigurationService from './tenantConfiguration.service.js';
 import { runWithRetry } from '../utils/retry.js';
 import {
   buildErrorResponseSnapshot,
@@ -15,7 +16,9 @@ const httpsAgent = new https.Agent({
 });
 
 const SAP_ITEM_PRICE_PATH = '/b1s/v2/CompanyService_GetItemPrice';
+const SAP_ITEM_PRICES_SELECT_PATH = '/b1s/v2/Items';
 const EXTERNAL_TIMEOUT_MS = 15000;
+const DEFAULT_PRICE_LIST = '4';
 
 function toNonEmptyString(value) {
   const normalized = String(value ?? '').trim();
@@ -27,10 +30,6 @@ function formatCurrentDate(date = new Date()) {
 }
 
 function validatePayload(payload = {}) {
-  if (!toNonEmptyString(payload.cardCode)) {
-    throw new Error('cardCode is required');
-  }
-
   if (!Array.isArray(payload.lineItems) || payload.lineItems.length === 0) {
     throw new Error('lineItems must be a non-empty array');
   }
@@ -94,6 +93,29 @@ function buildSapPricePayload({ cardCode, itemCode, date }) {
       Date: date,
     },
   };
+}
+
+function buildSapItemPricesPath(itemCode) {
+  return `${SAP_ITEM_PRICES_SELECT_PATH}('${encodeURIComponent(String(itemCode))}')?$select=ItemPrices`;
+}
+
+function normalizePriceList(value) {
+  const normalized = Number(String(value ?? '').trim());
+  return Number.isInteger(normalized) && normalized > 0 ? normalized : null;
+}
+
+async function resolveTenantPriceList(tenantModels) {
+  const value = await tenantConfigurationService.getValue(
+    tenantModels,
+    'priceList'
+  );
+  const priceList = normalizePriceList(value);
+
+  if (!priceList) {
+    throw new Error('Configuration priceList must be a positive integer');
+  }
+
+  return priceList;
 }
 
 async function requestSapItemPrice({
@@ -170,6 +192,86 @@ async function requestSapItemPrice({
   });
 }
 
+async function requestSapItemPrices({
+  sapConfig,
+  itemCode,
+  tenantKey,
+}) {
+  const normalizedBaseUrl = String(sapConfig?.serviceLayerBaseUrl || '').trim().replace(/\/+$/, '');
+
+  if (!normalizedBaseUrl) {
+    throw new Error('SAP Service Layer base URL is required');
+  }
+
+  const endpoint = buildSapItemPricesPath(itemCode);
+  const url = `${normalizedBaseUrl}${endpoint}`;
+
+  const makeRequest = async () => {
+    const { cookie } = await sapSessionManager.getSessionCookie(sapConfig);
+
+    logger.info({
+      msg: 'Requesting SAP item prices by price list',
+      tenantKey,
+      endpoint,
+      itemCode,
+    });
+
+    const response = await axios.get(url, {
+      httpsAgent,
+      timeout: EXTERNAL_TIMEOUT_MS,
+      headers: {
+        Cookie: cookie,
+      },
+    });
+
+    logger.info({
+      msg: 'SAP item prices retrieved',
+      tenantKey,
+      endpoint,
+      itemCode,
+      priceListCount: Array.isArray(response?.data?.ItemPrices)
+        ? response.data.ItemPrices.length
+        : 0,
+    });
+
+    return response.data;
+  };
+
+  return runWithRetry(makeRequest, {
+    retries: 1,
+    delayMs: 500,
+    onError: async (error, attempt) => {
+      logger.warn({
+        msg: 'SAP item prices request failed',
+        tenantKey,
+        endpoint,
+        itemCode,
+        attempt: attempt + 1,
+        error: error.message,
+        status: error?.response?.status ?? null,
+      });
+
+      if (isSessionInvalidError(error)) {
+        await sapSessionManager.invalidateSession(
+          sapSessionManager.resolveTenantKey(sapConfig)
+        );
+      }
+    },
+  });
+}
+
+function selectConfiguredItemPrice(itemPrices, priceList, itemCode) {
+  const selectedPrice = Array.isArray(itemPrices)
+    ? itemPrices.find((itemPrice) => Number(itemPrice?.PriceList) === priceList)
+    : null;
+
+  if (!selectedPrice) {
+    throw new Error(`Price list ${priceList} not found for item ${itemCode}`);
+  }
+
+  return selectedPrice;
+}
+
 function buildHubspotBatchPayload(enrichedLineItems) {
   return {
     inputs: enrichedLineItems.map((lineItem) => ({
@@ -236,9 +338,13 @@ const lineItemPriceService = {
       validatePayload(payload);
 
       const cardCode = toNonEmptyString(payload.cardCode);
+      const useBusinessPartnerPrice = Boolean(cardCode);
       const currentDate = formatCurrentDate();
       const hubspotCredentials = await resolveHubspotCredentials(tenantModels, tenant);
       const sapCredentials = await resolveSapCredentials(tenantModels, hubspotCredentials);
+      const fallbackPriceList = useBusinessPartnerPrice
+        ? null
+        : await resolveTenantPriceList(tenantModels);
       const sapCredentialsData = typeof sapCredentials?.toObject === 'function'
         ? sapCredentials.toObject()
         : sapCredentials;
@@ -252,24 +358,61 @@ const lineItemPriceService = {
       for (const lineItem of payload.lineItems) {
         const itemCode = toNonEmptyString(lineItem.itemCode);
         const id = toNonEmptyString(lineItem.id);
-        const sapRequestPayload = buildSapPricePayload({
-          cardCode,
-          itemCode,
-          date: currentDate,
-        });
+        let priceData;
 
-        auditTrail.payload_SAP.push(sapRequestPayload);
+        if (useBusinessPartnerPrice) {
+          const sapRequestPayload = buildSapPricePayload({
+            cardCode,
+            itemCode,
+            date: currentDate,
+          });
 
-        const priceData = await requestSapItemPrice({
-          sapConfig,
-          cardCode,
-          itemCode,
-          date: currentDate,
-          tenantKey,
-          requestPayload: sapRequestPayload,
-        });
+          auditTrail.payload_SAP.push(sapRequestPayload);
 
-        auditTrail.response_SAP.push(priceData);
+          priceData = await requestSapItemPrice({
+            sapConfig,
+            cardCode,
+            itemCode,
+            date: currentDate,
+            tenantKey,
+            requestPayload: sapRequestPayload,
+          });
+        } else {
+          const sapRequestPayload = {
+            method: 'GET',
+            endpoint: buildSapItemPricesPath(itemCode),
+            priceList: fallbackPriceList,
+          };
+
+          auditTrail.payload_SAP.push(sapRequestPayload);
+
+          const sapItemData = await requestSapItemPrices({
+            sapConfig,
+            itemCode,
+            tenantKey,
+          });
+          const selectedPrice = selectConfiguredItemPrice(
+            sapItemData?.ItemPrices,
+            fallbackPriceList,
+            itemCode
+          );
+
+          priceData = {
+            Price: selectedPrice?.Price ?? 0,
+            Currency: selectedPrice?.Currency ?? null,
+            Discount: 0,
+            PriceList: selectedPrice?.PriceList ?? fallbackPriceList,
+          };
+
+          auditTrail.response_SAP.push({
+            ...sapItemData,
+            selectedPrice,
+          });
+        }
+
+        if (useBusinessPartnerPrice) {
+          auditTrail.response_SAP.push(priceData);
+        }
 
         enrichedLineItems.push({
           itemCode,

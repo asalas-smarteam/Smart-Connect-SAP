@@ -283,6 +283,83 @@ describe('lineItemPriceWebhook.service', () => {
     );
   });
 
+  it('returns payload without cardCode when company and contact have no sapId', async () => {
+    const tenantModels = buildTenantModels();
+
+    mockGetAccessToken.mockResolvedValue('hubspot-token');
+    mockHubspotGet.mockImplementation(async (_token, path) => {
+      if (path === '/crm/v3/objects/deals/58986911596') {
+        return {
+          id: '58986911596',
+          associations: {
+            companies: {
+              results: [{ id: '201' }],
+            },
+            contacts: {
+              results: [{ id: '301' }],
+            },
+            line_items: {
+              results: [{ id: '54118822955' }],
+            },
+          },
+        };
+      }
+
+      if (path === '/crm/v3/objects/companies/201') {
+        return {
+          id: '201',
+          properties: {},
+        };
+      }
+
+      if (path === '/crm/v3/objects/contacts/301') {
+        return {
+          id: '301',
+          properties: {},
+        };
+      }
+
+      if (path === '/crm/v3/objects/line_items/54118822955') {
+        return {
+          id: '54118822955',
+          properties: {
+            hs_sku: 'A01050211',
+          },
+        };
+      }
+
+      return null;
+    });
+
+    const result = await lineItemPriceWebhookService.preparePayload(
+      {
+        eventId: 797713315,
+        subscriptionId: 6174090,
+        portalId: 50564010,
+        appId: 31481725,
+        occurredAt: 1775764313528,
+        associationType: 'DEAL_TO_LINE_ITEM',
+        changeSource: 'USER',
+        fromObjectId: 58986911596,
+      },
+      {
+        tenantModels,
+        tenant: { client: { hubspot: { portalId: '50564010' } } },
+      }
+    );
+
+    expect(result).toEqual({
+      skip: false,
+      payload: {
+        cardCode: null,
+        lineItems: [
+          { id: '54118822955', itemCode: 'A01050211' },
+        ],
+      },
+      executionId: 'event-1',
+    });
+  });
+
   it('marks a processed webhook as sent', async () => {
     const LineItemPriceWebhookEvent = {
       updateOne: jest.fn().mockResolvedValue({ acknowledged: true }),

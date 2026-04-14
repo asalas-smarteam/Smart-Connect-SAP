@@ -129,7 +129,7 @@ describe('lineItemPrice.controller syncPrices', () => {
       log: { error: jest.fn() },
     };
 
-    mockSyncPrices.mockRejectedValue(new Error('cardCode is required'));
+    mockSyncPrices.mockRejectedValue(new Error('lineItems must be a non-empty array'));
 
     await lineItemPriceController.syncPrices(req, reply);
 
@@ -137,7 +137,7 @@ describe('lineItemPrice.controller syncPrices', () => {
     expect(mockMarkAsError).not.toHaveBeenCalled();
     expect(reply.send).toHaveBeenCalledWith({
       ok: false,
-      message: 'cardCode is required',
+      message: 'lineItems must be a non-empty array',
     });
     expect(mockFinishSyncLog).toHaveBeenCalledWith(
       { _id: 'sync-log-1' },

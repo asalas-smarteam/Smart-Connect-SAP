@@ -1,5 +1,6 @@
 import { createAssociationRegistryModel } from './AssociationRegistry.js';
 import { createClientConfigModel } from './ClientConfig.js';
+import { createConfigurationModel } from './Configuration.js';
 import { createOwnerMappingModel } from './OwnerMapping.js';
 import { createDealPipelineMappingModel } from './DealPipelineMapping.js';
 import { createDealStageMappingModel } from './DealStageMapping.js';
@@ -22,6 +23,7 @@ export function registerTenantModels(connection) {
   return {
     AssociationRegistry: createAssociationRegistryModel(connection),
     ClientConfig: createClientConfigModel(connection),
+    Configuration: createConfigurationModel(connection),
     OwnerMapping: createOwnerMappingModel(connection),
     DealPipelineMapping: createDealPipelineMappingModel(connection),
     DealStageMapping: createDealStageMappingModel(connection),
