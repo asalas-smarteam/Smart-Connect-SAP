@@ -1,8 +1,9 @@
 import * as hubspotClient from '../../hubspotClient.js';
-import { getWarehouseStockTotals } from '../../../utils/warehouseStock.js';
+import { getWarehouseStockTotalsForTenant } from '../../../utils/warehouseStock.js';
 
-export async function preprocess({ item }) {
-  const totals = getWarehouseStockTotals(
+export async function preprocess({ item, tenantModels }) {
+  const totals = await getWarehouseStockTotalsForTenant(
+    tenantModels,
     item?.rawSapData?.ItemWarehouseInfoCollection
   );
 

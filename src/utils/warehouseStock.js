@@ -1,7 +1,20 @@
-const DEFAULT_EXCLUDED_WAREHOUSES = ['B13'];
+import tenantConfigurationService from '../services/tenantConfiguration.service.js';
+
+const DEFAULT_EXCLUDED_WAREHOUSES = [];
+const EXCLUDED_WAREHOUSES_KEY = 'excludedWarehouses';
 
 function normalizeWarehouseCode(code) {
   return String(code || '').trim().toUpperCase();
+}
+
+export async function resolveExcludedWarehouses(tenantModels) {
+  const value = await tenantConfigurationService.getValue(
+    tenantModels,
+    EXCLUDED_WAREHOUSES_KEY,
+    DEFAULT_EXCLUDED_WAREHOUSES
+  );
+
+  return Array.isArray(value) ? value : DEFAULT_EXCLUDED_WAREHOUSES;
 }
 
 export function getWarehouseStockTotals(warehouseItems, excludedWarehouses = DEFAULT_EXCLUDED_WAREHOUSES) {
@@ -25,3 +38,7 @@ export function getWarehouseStockTotals(warehouseItems, excludedWarehouses = DEF
   );
 }
 
+export async function getWarehouseStockTotalsForTenant(tenantModels, warehouseItems) {
+  const excludedWarehouses = await resolveExcludedWarehouses(tenantModels);
+  return getWarehouseStockTotals(warehouseItems, excludedWarehouses);
+}

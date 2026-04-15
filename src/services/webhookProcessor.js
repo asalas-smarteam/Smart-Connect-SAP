@@ -5,7 +5,7 @@ import mappingService from './mapping.service.js';
 import hubspotAuthService from './hubspotAuthService.js';
 import * as hubspotClient from './hubspotClient.js';
 import sapSessionManager, { isSessionInvalidError } from './sapSessionManager.js';
-import { getWarehouseStockTotals } from '../utils/warehouseStock.js';
+import { getWarehouseStockTotalsForTenant } from '../utils/warehouseStock.js';
 import {
   buildErrorResponseSnapshot,
   buildWebhookSyncErrorEntry,
@@ -441,7 +441,7 @@ async function addContactEmployeeIfNeeded({
   };
 }
 
-async function validateStockForItem(sapConfig, itemCode, quantity) {
+async function validateStockForItem(sapConfig, tenantModels, itemCode, quantity) {
   const item = await serviceLayerRequest(sapConfig, {
     method: 'get',
     path: `/Items('${encodeURIComponent(String(itemCode))}')`,
@@ -450,7 +450,10 @@ async function validateStockForItem(sapConfig, itemCode, quantity) {
     },
   });
 
-  const totals = getWarehouseStockTotals(item?.ItemWarehouseInfoCollection);
+  const totals = await getWarehouseStockTotalsForTenant(
+    tenantModels,
+    item?.ItemWarehouseInfoCollection
+  );
   const available = totals.instock - totals.committed + totals.ordered;
   if (available < quantity) {
     throw new PermanentWebhookError(
@@ -652,7 +655,7 @@ async function processSingleEvent({ event, tenantModels, tenantId, tenantKey, po
     });
 
     /*for (const line of documentLines) 
-      await validateStockForItem(sapConfig, line.ItemCode, line.Quantity);
+      await validateStockForItem(sapConfig, tenantModels, line.ItemCode, line.Quantity);
     */
 
     const orderPayload = buildOrderPayload({

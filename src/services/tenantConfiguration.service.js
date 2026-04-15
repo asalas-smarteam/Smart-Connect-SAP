@@ -1,27 +1,18 @@
-function normalizeKey(key) {
-  return String(key ?? '').trim();
-}
-
-function normalizeValue(value) {
-  return String(value ?? '').trim();
-}
-
 const tenantConfigurationService = {
   async getValue(tenantModels, key, defaultValue, options = {}) {
     const Configuration = tenantModels?.Configuration;
-    const normalizedKey = normalizeKey(key);
-    const normalizedDefaultValue = normalizeValue(defaultValue);
-    const userUpdated = normalizeValue(options.userUpdated || 'admin') || 'admin';
+    const normalizedKey = key;
+    const userUpdated = options.userUpdated || 'admin';
 
     if (!Configuration) {
-      return normalizedDefaultValue;
+      return defaultValue;
     }
 
     const filter = { key: normalizedKey };
     const update = {
       $setOnInsert: {
         key: normalizedKey,
-        value: normalizedDefaultValue,
+        value: defaultValue,
         userUpdated,
       },
     };
@@ -32,7 +23,7 @@ const tenantConfigurationService = {
       setDefaultsOnInsert: true,
     });
 
-    return normalizeValue(configuration?.value) || normalizedDefaultValue;
+    return configuration?.value ?? defaultValue;
   },
 };
 

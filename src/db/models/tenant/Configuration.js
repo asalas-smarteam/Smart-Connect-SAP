@@ -10,9 +10,8 @@ export const configurationSchema = new Schema(
       trim: true,
     },
     value: {
-      type: String,
+      type: Schema.Types.Mixed,
       required: true,
-      trim: true,
     },
     userUpdated: {
       type: String,
