@@ -1,0 +1,7 @@
+Bien ahora vamos a agregar otro ajuste 
+
+Utiliza las skills para conversar conmigo con .agents/skills/caveman de manera stricta 
+
+aplica todas las practicas de las skills que se encuentran en .agents/skills
+
+Objetivo: 
