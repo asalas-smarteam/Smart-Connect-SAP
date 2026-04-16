@@ -231,6 +231,8 @@ export const patchClientConfig = async (req, reply) => {
       ];
     }
 
+    const previousConfig = config.toObject();
+
     delete payload._id;
     delete payload.integrationModeId;
 
@@ -241,6 +243,7 @@ export const patchClientConfig = async (req, reply) => {
       await syncScheduledJob({
         tenantKey: req.tenantKey,
         config,
+        previousConfig,
       });
     } catch (syncError) {
       logger.error({

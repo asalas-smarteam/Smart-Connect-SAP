@@ -1,11 +1,15 @@
 import logger from '../../core/logger.js';
+import crypto from 'crypto';
 import { getTenantModels } from '../../config/tenantDatabase.js';
 import { listActiveTenants } from '../../utils/tenantSubscriptions.js';
 import {
   addScheduledSapSyncJob,
   buildScheduledJobId,
+  SAP_SYNC_JOB_NAME,
   getSapSyncQueue,
 } from '../../queues/sapSync.queue.js';
+
+const SAP_SYNC_SCHEDULER_TIMEZONE = 'America/Costa_Rica';
 
 function normalizeIntervalMinutes(intervalMinutes) {
   const value = Number(intervalMinutes);
@@ -63,6 +67,7 @@ function resolveSchedulePlan(config) {
       executionTime,
       repeatEvery: null,
       repeatPattern: cronPattern,
+      repeatTimezone: SAP_SYNC_SCHEDULER_TIMEZONE,
     };
   }
 
@@ -76,23 +81,87 @@ function resolveSchedulePlan(config) {
     executionTime: null,
     repeatEvery: intervalMinutes * 60 * 1000,
     repeatPattern: null,
+    repeatTimezone: null,
   };
 }
 
 function isRepeatableScheduledJob(repeatJob) {
-  return typeof repeatJob?.id === 'string' && repeatJob.id.startsWith('sap-sync:');
+  return (
+    typeof repeatJob?.key === 'string'
+    && (
+      repeatJob.key.startsWith('sap-sync:')
+      || repeatJob.name === SAP_SYNC_JOB_NAME
+    )
+  );
 }
 
-async function removeScheduledRepeatablesByJobId(jobId) {
+function buildLegacyRepeatableKey({ jobId, repeatEvery, repeatPattern, repeatTimezone = '' }) {
+  const suffix = repeatPattern || String(repeatEvery || '');
+  const repeatConcatOptions = `${SAP_SYNC_JOB_NAME}:${jobId}::${repeatTimezone}:${suffix}`;
+  return crypto.createHash('md5').update(repeatConcatOptions).digest('hex');
+}
+
+function buildRemovalKeyCandidates({ jobId, config }) {
+  const schedulePlan = resolveSchedulePlan(config);
+  const keys = new Set([jobId]);
+
+  if (!schedulePlan) {
+    return Array.from(keys);
+  }
+
+  keys.add(buildLegacyRepeatableKey({
+    jobId,
+    repeatEvery: schedulePlan.repeatEvery,
+    repeatPattern: schedulePlan.repeatPattern,
+  }));
+
+  if (schedulePlan.repeatPattern) {
+    keys.add(buildLegacyRepeatableKey({
+      jobId,
+      repeatEvery: schedulePlan.repeatEvery,
+      repeatPattern: schedulePlan.repeatPattern,
+      repeatTimezone: schedulePlan.repeatTimezone || '',
+    }));
+  }
+
+  return Array.from(keys);
+}
+
+async function removeScheduledRepeatablesByKeys(keys) {
+  if (!Array.isArray(keys) || !keys.length) {
+    return 0;
+  }
+
   const queue = getSapSyncQueue();
   const repeatableJobs = await queue.getRepeatableJobs();
-  const candidates = repeatableJobs.filter((job) => job.id === jobId);
+  const knownKeys = new Set(keys.filter(Boolean));
+  const candidates = repeatableJobs.filter(
+    (job) => knownKeys.has(job.key) || (job.id && knownKeys.has(job.id))
+  );
 
   await Promise.all(candidates.map((job) => queue.removeRepeatableByKey(job.key)));
   return candidates.length;
 }
 
-export async function registerScheduledJob({ tenantKey, config }) {
+async function removeKnownScheduledJobs({ tenantKey, configId, config, previousConfig }) {
+  if (!tenantKey || !configId) {
+    throw new Error('tenantKey and configId are required');
+  }
+
+  const jobId = buildScheduledJobId({ tenantKey, configId });
+  const keys = new Set(buildRemovalKeyCandidates({ jobId, config }));
+
+  if (previousConfig) {
+    for (const key of buildRemovalKeyCandidates({ jobId, config: previousConfig })) {
+      keys.add(key);
+    }
+  }
+
+  const removedCount = await removeScheduledRepeatablesByKeys(Array.from(keys));
+  return { jobId, removedCount };
+}
+
+export async function registerScheduledJob({ tenantKey, config, previousConfig = null }) {
   const configId = String(config?._id || config?.id || '');
   const schedulePlan = resolveSchedulePlan(config);
   const objectType = config?.objectType || null;
@@ -101,8 +170,12 @@ export async function registerScheduledJob({ tenantKey, config }) {
     throw new Error('tenantKey, configId and valid schedule config are required');
   }
 
-  const jobId = buildScheduledJobId({ tenantKey, configId });
-  await removeScheduledRepeatablesByJobId(jobId);
+  const { jobId, removedCount } = await removeKnownScheduledJobs({
+    tenantKey,
+    configId,
+    config,
+    previousConfig,
+  });
   await addScheduledSapSyncJob({
     tenantKey,
     configId,
@@ -112,6 +185,7 @@ export async function registerScheduledJob({ tenantKey, config }) {
     executionTime: schedulePlan.executionTime,
     repeatEvery: schedulePlan.repeatEvery,
     repeatPattern: schedulePlan.repeatPattern,
+    repeatTimezone: schedulePlan.repeatTimezone,
   });
 
   logger.info({
@@ -124,17 +198,23 @@ export async function registerScheduledJob({ tenantKey, config }) {
     executionTime: schedulePlan.executionTime,
     repeatEvery: schedulePlan.repeatEvery,
     repeatPattern: schedulePlan.repeatPattern,
+    repeatTimezone: schedulePlan.repeatTimezone,
     jobId,
+    removedCount,
   });
 }
 
-export async function removeScheduledJob({ tenantKey, configId }) {
+export async function removeScheduledJob({ tenantKey, configId, config = null, previousConfig = null }) {
   if (!tenantKey || !configId) {
     throw new Error('tenantKey and configId are required');
   }
 
-  const jobId = buildScheduledJobId({ tenantKey, configId });
-  const removedCount = await removeScheduledRepeatablesByJobId(jobId);
+  const { jobId, removedCount } = await removeKnownScheduledJobs({
+    tenantKey,
+    configId: String(configId),
+    config,
+    previousConfig,
+  });
 
   logger.info({
     msg: 'Scheduled SAP sync job removed',
@@ -145,7 +225,7 @@ export async function removeScheduledJob({ tenantKey, configId }) {
   });
 }
 
-export async function syncScheduledJob({ tenantKey, config }) {
+export async function syncScheduledJob({ tenantKey, config, previousConfig = null }) {
   const configId = String(config?._id || config?.id || '');
   const schedulePlan = resolveSchedulePlan(config);
   const shouldSchedule = Boolean(config?.active) && Boolean(schedulePlan);
@@ -155,17 +235,17 @@ export async function syncScheduledJob({ tenantKey, config }) {
   }
 
   if (shouldSchedule) {
-    await registerScheduledJob({ tenantKey, config });
+    await registerScheduledJob({ tenantKey, config, previousConfig });
     return { action: 'registered' };
   }
 
-  await removeScheduledJob({ tenantKey, configId });
+  await removeScheduledJob({ tenantKey, configId, config, previousConfig });
   return { action: 'removed' };
 }
 
 export async function bootstrapScheduledJobs() {
   const queue = getSapSyncQueue();
-  const expectedJobIds = new Set();
+  const expectedJobKeys = new Set();
   const activeTenants = await listActiveTenants();
   const summary = {
     tenantsScanned: 0,
@@ -186,15 +266,15 @@ export async function bootstrapScheduledJobs() {
 
       for (const config of configs) {
         const configId = String(config._id);
-        const jobId = buildScheduledJobId({ tenantKey, configId });
+        const jobKey = buildScheduledJobId({ tenantKey, configId });
         const schedulePlan = resolveSchedulePlan(config);
 
         if (config.active && schedulePlan) {
-          expectedJobIds.add(jobId);
+          expectedJobKeys.add(jobKey);
           await registerScheduledJob({ tenantKey, config });
           summary.configsScheduled += 1;
         } else {
-          await removeScheduledJob({ tenantKey, configId });
+          await removeScheduledJob({ tenantKey, configId, config });
           summary.configsRemoved += 1;
         }
       }
@@ -214,7 +294,7 @@ export async function bootstrapScheduledJobs() {
   try {
     const repeatableJobs = await queue.getRepeatableJobs();
     const orphanedJobs = repeatableJobs.filter(
-      (job) => isRepeatableScheduledJob(job) && !expectedJobIds.has(job.id)
+      (job) => isRepeatableScheduledJob(job) && !expectedJobKeys.has(job.key)
     );
 
     for (const job of orphanedJobs) {
@@ -223,7 +303,7 @@ export async function bootstrapScheduledJobs() {
       logger.info({
         msg: 'Removed orphan SAP sync repeatable job',
         repeatJobKey: job.key,
-        jobId: job.id,
+        jobId: job.id || null,
       });
     }
   } catch (error) {
@@ -249,7 +329,7 @@ export async function removeTenantScheduledJobs(tenantKey) {
   const queue = getSapSyncQueue();
   const repeatableJobs = await queue.getRepeatableJobs();
   const tenantPrefix = `sap-sync:${tenantKey}:`;
-  const tenantJobs = repeatableJobs.filter((job) => job?.id?.startsWith(tenantPrefix));
+  const tenantJobs = repeatableJobs.filter((job) => job?.key?.startsWith(tenantPrefix));
 
   await Promise.all(tenantJobs.map((job) => queue.removeRepeatableByKey(job.key)));
   return tenantJobs.length;

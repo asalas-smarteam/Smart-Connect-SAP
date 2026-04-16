@@ -16,7 +16,13 @@ export function registerBullBoard(app) {
   serverAdapter.setBasePath(basePath);
 
   createBullBoard({
-    queues: [new BullMQAdapter(sapSyncQueue), new BullMQAdapter(webhookQueue)],
+    queues: [
+      new BullMQAdapter(sapSyncQueue, {
+        readOnlyMode: true,
+        description: 'Managed by BullMQ schedulers and internal SAP sync admin APIs.',
+      }),
+      new BullMQAdapter(webhookQueue),
+    ],
     serverAdapter,
     options: {
       uiConfig: {

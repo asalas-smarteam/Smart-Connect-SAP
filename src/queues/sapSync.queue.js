@@ -81,6 +81,7 @@ export async function addScheduledSapSyncJob({
   executionTime,
   repeatEvery,
   repeatPattern,
+  repeatTimezone,
 }) {
   const queue = getSapSyncQueue();
   const repeat = {};
@@ -88,9 +89,14 @@ export async function addScheduledSapSyncJob({
     repeat.every = Number(repeatEvery);
   } else if (typeof repeatPattern === 'string' && repeatPattern.trim()) {
     repeat.pattern = repeatPattern.trim();
+    if (typeof repeatTimezone === 'string' && repeatTimezone.trim()) {
+      repeat.tz = repeatTimezone.trim();
+    }
   } else {
     throw new Error('repeatEvery or repeatPattern is required');
   }
+
+  repeat.key = buildScheduledJobId({ tenantKey, configId });
 
   return queue.add(
     SAP_SYNC_JOB_NAME,
