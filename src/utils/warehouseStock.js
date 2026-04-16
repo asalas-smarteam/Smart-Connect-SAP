@@ -1,44 +1,103 @@
 import tenantConfigurationService from '../services/tenantConfiguration.service.js';
 
-const DEFAULT_EXCLUDED_WAREHOUSES = [];
-const EXCLUDED_WAREHOUSES_KEY = 'excludedWarehouses';
+const DEFAULT_WAREHOUSE_FIELDS = [];
+const WAREHOUSE_FIELDS_KEY = 'fieldsWareHouseHS';
 
-function normalizeWarehouseCode(code) {
-  return String(code || '').trim().toUpperCase();
+function resolveWarehouseCodeFromPropertyName(propertyName) {
+  const normalizedPropertyName = propertyName;
+
+  if (!normalizedPropertyName) {
+    return null;
+  }
+
+  const match = normalizedPropertyName.match(/^([A-Za-z0-9]+)_stock$/i);
+  return match?.[1] ?? '';
 }
 
-export async function resolveExcludedWarehouses(tenantModels) {
+export function getWarehouseAvailableStock(warehouse) {
+  return warehouse?.InStock
+    - warehouse?.Committed
+    + warehouse?.Ordered;
+}
+
+export function normalizeHubspotWarehouseFields(value) {
+  if (!Array.isArray(value)) {
+    return DEFAULT_WAREHOUSE_FIELDS;
+  }
+
+  const seen = new Set();
+  const normalizedFields = [];
+
+  value.forEach((field) => {
+    const propertyName = field?.value;
+    const warehouseCode = resolveWarehouseCodeFromPropertyName(propertyName);
+
+    if (!propertyName || !warehouseCode) {
+      return;
+    }
+
+    const dedupeKey = `${warehouseCode}:${propertyName.toLowerCase()}`;
+    if (seen.has(dedupeKey)) {
+      return;
+    }
+
+    seen.add(dedupeKey);
+    normalizedFields.push({
+      warehouseCode,
+      propertyName,
+    });
+  });
+
+  return normalizedFields;
+}
+
+export async function resolveHubspotWarehouseFields(tenantModels) {
   const value = await tenantConfigurationService.getValue(
     tenantModels,
-    EXCLUDED_WAREHOUSES_KEY,
-    DEFAULT_EXCLUDED_WAREHOUSES
+    WAREHOUSE_FIELDS_KEY,
+    DEFAULT_WAREHOUSE_FIELDS
   );
 
-  return Array.isArray(value) ? value : DEFAULT_EXCLUDED_WAREHOUSES;
+  return normalizeHubspotWarehouseFields(value);
 }
 
-export function getWarehouseStockTotals(warehouseItems, excludedWarehouses = DEFAULT_EXCLUDED_WAREHOUSES) {
-  const excludedCodes = new Set((Array.isArray(excludedWarehouses) ? excludedWarehouses : [])
-    .map((code) => normalizeWarehouseCode(code))
-    .filter(Boolean));
+export function buildHubspotWarehouseStockProperties(
+  warehouseItems,
+  warehouseFields = DEFAULT_WAREHOUSE_FIELDS
+) {
+  const warehousesByCode = new Map(
+    (Array.isArray(warehouseItems) ? warehouseItems : [])
+      .map((warehouse) => [warehouse?.WarehouseCode, warehouse])
+      .filter(([warehouseCode]) => warehouseCode)
+  );
 
-  return (Array.isArray(warehouseItems) ? warehouseItems : []).reduce(
-    (acc, warehouse) => {
-      const warehouseCode = normalizeWarehouseCode(warehouse?.WarehouseCode);
-      if (excludedCodes.has(warehouseCode)) {
-        return acc;
-      }
+  return (Array.isArray(warehouseFields) ? warehouseFields : []).reduce((acc, field) => {
+    const propertyName = field?.propertyName;
+    const warehouseCode = field?.warehouseCode.toUpperCase();
 
-      acc.ordered += Number(warehouse?.Ordered || 0);
-      acc.committed += Number(warehouse?.Committed || 0);
-      acc.instock += Number(warehouse?.InStock || 0);
+    if (!propertyName || !warehouseCode) {
       return acc;
-    },
-    { ordered: 0, committed: 0, instock: 0 }
-  );
+    }
+
+    acc[propertyName] = getWarehouseAvailableStock(warehousesByCode.get(warehouseCode));
+    return acc;
+  }, {});
 }
 
-export async function getWarehouseStockTotalsForTenant(tenantModels, warehouseItems) {
-  const excludedWarehouses = await resolveExcludedWarehouses(tenantModels);
-  return getWarehouseStockTotals(warehouseItems, excludedWarehouses);
+export async function getHubspotWarehouseStockPropertiesForTenant(tenantModels, warehouseItems) {
+  const warehouseFields = await resolveHubspotWarehouseFields(tenantModels);
+  return buildHubspotWarehouseStockProperties(warehouseItems, warehouseFields);
+}
+
+export function getAvailableStockForWarehouse(warehouseItems, warehouseCode) {
+  const normalizedWarehouseCode = warehouseCode;
+  if (!normalizedWarehouseCode) {
+    return 0;
+  }
+
+  const warehouse = (Array.isArray(warehouseItems) ? warehouseItems : []).find(
+    (item) => item?.WarehouseCode === normalizedWarehouseCode
+  );
+
+  return getWarehouseAvailableStock(warehouse);
 }

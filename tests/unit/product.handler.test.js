@@ -1,9 +1,9 @@
 import { jest } from '@jest/globals';
 
-const mockGetWarehouseStockTotalsForTenant = jest.fn();
+const mockGetHubspotWarehouseStockPropertiesForTenant = jest.fn();
 
 jest.unstable_mockModule('../../src/utils/warehouseStock.js', () => ({
-  getWarehouseStockTotalsForTenant: mockGetWarehouseStockTotalsForTenant,
+  getHubspotWarehouseStockPropertiesForTenant: mockGetHubspotWarehouseStockPropertiesForTenant,
 }));
 
 const { preprocess, resolveHubspotPriceFields } = await import('../../src/services/hubspot/handlers/product.handler.js');
@@ -11,10 +11,9 @@ const { preprocess, resolveHubspotPriceFields } = await import('../../src/servic
 describe('product.handler preprocess', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockGetWarehouseStockTotalsForTenant.mockResolvedValue({
-      ordered: 3,
-      committed: 2,
-      instock: 10,
+    mockGetHubspotWarehouseStockPropertiesForTenant.mockResolvedValue({
+      A01_stock: 11,
+      B10_stock: 4,
     });
   });
 
@@ -38,10 +37,8 @@ describe('product.handler preprocess', () => {
     await preprocess({ item, tenantModels });
 
     expect(item.properties).toEqual({
-      ordered: 3,
-      committed: 2,
-      instock: 10,
-      available: 8,
+      A01_stock: 11,
+      B10_stock: 4,
       hs_price_usd: 0,
       hs_price_nio: 0,
     });

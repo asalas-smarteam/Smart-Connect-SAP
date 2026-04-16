@@ -5,7 +5,7 @@ import mappingService from './mapping.service.js';
 import hubspotAuthService from './hubspotAuthService.js';
 import * as hubspotClient from './hubspotClient.js';
 import sapSessionManager, { isSessionInvalidError } from './sapSessionManager.js';
-import { getWarehouseStockTotalsForTenant } from '../utils/warehouseStock.js';
+import { getAvailableStockForWarehouse } from '../utils/warehouseStock.js';
 import {
   buildErrorResponseSnapshot,
   buildWebhookSyncErrorEntry,
@@ -14,6 +14,7 @@ import {
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 const DEFAULT_BATCH_SIZE = Number(process.env.WEBHOOK_EVENT_BATCH_SIZE || 10);
 const DEFAULT_MAX_RETRIES = Number(process.env.WEBHOOK_EVENT_MAX_RETRIES || 3);
+const DEFAULT_DOCUMENT_WAREHOUSE_CODE = 'B04';
 
 class PermanentWebhookError extends Error {
   constructor(message) {
@@ -441,7 +442,7 @@ async function addContactEmployeeIfNeeded({
   };
 }
 
-async function validateStockForItem(sapConfig, tenantModels, itemCode, quantity) {
+async function validateStockForItem(sapConfig, itemCode, quantity, warehouseCode = DEFAULT_DOCUMENT_WAREHOUSE_CODE) {
   const item = await serviceLayerRequest(sapConfig, {
     method: 'get',
     path: `/Items('${encodeURIComponent(String(itemCode))}')`,
@@ -450,11 +451,10 @@ async function validateStockForItem(sapConfig, tenantModels, itemCode, quantity)
     },
   });
 
-  const totals = await getWarehouseStockTotalsForTenant(
-    tenantModels,
-    item?.ItemWarehouseInfoCollection
+  const available = getAvailableStockForWarehouse(
+    item?.ItemWarehouseInfoCollection,
+    warehouseCode
   );
-  const available = totals.instock - totals.committed + totals.ordered;
   if (available < quantity) {
     throw new PermanentWebhookError(
       `Insufficient stock for item ${itemCode}. Available: ${available}, required: ${quantity}`
@@ -486,7 +486,7 @@ function mapDocumentLines({ lineItems, productMappings }) {
       ItemCode: itemCode,
       Quantity: quantity,
       UnitPrice: Number.isFinite(unitPrice) ? unitPrice : 0,
-      WarehouseCode: "B04"
+      WarehouseCode: DEFAULT_DOCUMENT_WAREHOUSE_CODE
     });
   }
 

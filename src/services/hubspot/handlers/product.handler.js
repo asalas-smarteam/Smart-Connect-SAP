@@ -1,6 +1,6 @@
 import * as hubspotClient from '../../hubspotClient.js';
 import tenantConfigurationService from '../../tenantConfiguration.service.js';
-import { getWarehouseStockTotalsForTenant } from '../../../utils/warehouseStock.js';
+import { getHubspotWarehouseStockPropertiesForTenant } from '../../../utils/warehouseStock.js';
 
 const DEFAULT_PRICE_FIELDS = ['hs_price_usd'];
 const PRICE_FIELDS_CONFIG_KEY = 'fieldsPricesHS';
@@ -30,16 +30,14 @@ export async function resolveHubspotPriceFields(tenantModels) {
 }
 
 export async function preprocess({ item, tenantModels }) {
-  const totals = await getWarehouseStockTotalsForTenant(
+  const warehouseStockProperties = await getHubspotWarehouseStockPropertiesForTenant(
     tenantModels,
     item?.rawSapData?.ItemWarehouseInfoCollection
   );
   const priceFields = await resolveHubspotPriceFields(tenantModels);
+  item.properties = item.properties || {};
 
-  item.properties.ordered = totals.ordered;
-  item.properties.committed = totals.committed;
-  item.properties.instock = totals.instock;
-  item.properties.available = totals.instock - totals.committed;
+  Object.assign(item.properties, warehouseStockProperties);
 
   priceFields.forEach((field) => {
     item.properties[field] = 0.0;

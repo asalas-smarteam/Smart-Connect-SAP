@@ -23,7 +23,7 @@ function normalizeNextLink(baseUrl, nextLink) {
 
 function withTopParam(url, top) {
   const parsed = new URL(url);
-  /*if (!parsed.searchParams.has('$top')) {
+   /*if (!parsed.searchParams.has('$top')) {
     parsed.searchParams.set('$top', String(top));
   }*/
   return parsed.toString();
@@ -64,7 +64,7 @@ const serviceLayerService = {
 
     const requestOptions = {
       ...options,
-      /*top: options?.top || config?.serviceLayerTopFilter || 20,*/
+      //top: options?.top || config?.serviceLayerTopFilter || 20,
     };
 
     const dataUrl = withTopParam(buildServiceLayerUrl(config, mappings, requestOptions)); //, requestOptions.top

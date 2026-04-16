@@ -25,10 +25,6 @@ const DEFAULT_DEAL_MAPPINGS = [
 ];
 
 const DEFAULT_PRODUCT_MAPPINGS = [
-  { sourceField: 'Calculated', targetField: 'available', sourceContext: 'ItemWarehouseInfoCollection' },
-  { sourceField: 'Ordered', targetField: 'ordered', sourceContext: 'ItemWarehouseInfoCollection' },
-  { sourceField: 'Committed', targetField: 'committed', sourceContext: 'ItemWarehouseInfoCollection' },
-  { sourceField: 'InStock', targetField: 'instock', sourceContext: 'ItemWarehouseInfoCollection' },
   { sourceField: 'ItemCode', targetField: 'hs_sku', sourceContext: 'product' },
   { sourceField: 'ItemName', targetField: 'name', sourceContext: 'product' },
   { sourceField: 'QuantityOnStock', targetField: 'quantity', sourceContext: 'product', includeInServiceLayerSelect: false },

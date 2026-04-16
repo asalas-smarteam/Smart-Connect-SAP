@@ -165,10 +165,6 @@ export async function seedCreateFieldsHubspot({ hubspotCredential }) {
     { objectType: 'deal', label: 'Doc Entry SAP', name: 'sap_docentry' },
     { objectType: 'deal', label: 'Doc Num SAP', name: 'sap_docnum' },
     { objectType: 'products', label: 'Código de producto', name: 'itemCode' },
-    { objectType: 'products', label: 'Stock En Orden', name: 'ordered' },
-    { objectType: 'products', label: 'Stock comprometido', name: 'committed' },
-    { objectType: 'products', label: 'Stock disponible', name: 'available' },
-    { objectType: 'products', label: 'Stock Total', name: 'instock' },
   ];
 
   const results = [];
