@@ -6,6 +6,7 @@ import * as hubspotClient from './hubspotClient.js';
 import sapSessionManager, { isSessionInvalidError } from './sapSessionManager.js';
 import tenantConfigurationService from './tenantConfiguration.service.js';
 import { runWithRetry } from '../utils/retry.js';
+import { getHubspotWarehouseStockPropertiesForTenant } from '../utils/warehouseStock.js';
 import {
   buildErrorResponseSnapshot,
   buildWebhookSyncErrorEntry,
@@ -110,7 +111,7 @@ function buildSapPricePayload({ cardCode, itemCode, date }) {
 }
 
 function buildSapItemPricesPath(itemCode) {
-  return `${SAP_ITEM_PRICES_SELECT_PATH}('${encodeURIComponent(String(itemCode))}')?$select=ItemPrices`;
+  return `${SAP_ITEM_PRICES_SELECT_PATH}('${encodeURIComponent(String(itemCode))}')?$select=ItemPrices,ItemWarehouseInfoCollection`;
 }
 
 function normalizePriceList(value) {
@@ -294,8 +295,30 @@ function buildHubspotBatchPayload(enrichedLineItems) {
       properties: {
         price: String(roundCurrency(lineItem.Price ?? 0)),
         quantity: String(normalizeQuantity(lineItem.quantity ?? lineItem.Quantity)),
+        ...(lineItem.warehouseStockProperties || {}),
       },
     })),
+  };
+}
+
+function buildHubspotProductBatchPayload(enrichedLineItems, productsBySku) {
+  return {
+    inputs: enrichedLineItems
+      .filter((lineItem, index, items) => items.findIndex((item) => item.itemCode === lineItem.itemCode) === index)
+      .map((lineItem) => {
+        const productId = productsBySku.get(lineItem.itemCode);
+        if (!productId) {
+          return null;
+        }
+
+        return {
+          id: String(productId),
+          properties: {
+            ...(lineItem.warehouseStockProperties || {}),
+          },
+        };
+      })
+      .filter(Boolean),
   };
 }
 
@@ -336,6 +359,103 @@ async function updateHubspotLineItems({ token, enrichedLineItems, tenantKey }) {
 
   logger.info({
     msg: 'HubSpot line items updated with SAP prices',
+    tenantKey,
+    count: batchPayload.inputs.length,
+    updatedCount: Array.isArray(response?.results)
+      ? response.results.length
+      : batchPayload.inputs.length,
+  });
+
+  return {
+    payload: batchPayload,
+    response,
+  };
+}
+
+async function findHubspotProductBySku({ token, sku, tenantKey }) {
+  return runWithRetry(
+    () => hubspotClient.findProductBySKU(token, sku),
+    {
+      retries: 1,
+      delayMs: 500,
+      onError: async (error, attempt) => {
+        logger.warn({
+          msg: 'HubSpot product search by SKU failed',
+          tenantKey,
+          sku,
+          attempt: attempt + 1,
+          error: error.message,
+          status: error?.details?.status ?? error?.response?.status ?? null,
+        });
+      },
+    }
+  );
+}
+
+async function updateHubspotProducts({ token, enrichedLineItems, tenantKey }) {
+  const uniqueItemCodes = enrichedLineItems
+    .map((lineItem) => lineItem.itemCode)
+    .filter(Boolean)
+    .filter((itemCode, index, items) => items.indexOf(itemCode) === index);
+
+  const productsBySku = new Map();
+
+  for (const itemCode of uniqueItemCodes) {
+    // Sequential search avoids burst rate-limit against HubSpot search API.
+    // eslint-disable-next-line no-await-in-loop
+    const product = await findHubspotProductBySku({
+      token,
+      sku: itemCode,
+      tenantKey,
+    });
+
+    const productId = toNonEmptyString(product?.id);
+    if (productId) {
+      productsBySku.set(itemCode, productId);
+    }
+  }
+
+  const batchPayload = buildHubspotProductBatchPayload(enrichedLineItems, productsBySku);
+
+  if (batchPayload.inputs.length === 0) {
+    logger.info({
+      msg: 'No HubSpot products found to update stock',
+      tenantKey,
+      requestedCount: uniqueItemCodes.length,
+    });
+
+    return {
+      payload: batchPayload,
+      response: { results: [] },
+    };
+  }
+
+  logger.info({
+    msg: 'Updating HubSpot products with SAP stock',
+    tenantKey,
+    count: batchPayload.inputs.length,
+  });
+
+  const response = await runWithRetry(
+    () => hubspotClient.batchUpdateProducts(token, batchPayload),
+    {
+      retries: 1,
+      delayMs: 500,
+      onError: async (error, attempt) => {
+        logger.warn({
+          msg: 'HubSpot product batch update failed',
+          tenantKey,
+          count: batchPayload.inputs.length,
+          attempt: attempt + 1,
+          error: error.message,
+          status: error?.details?.status ?? error?.response?.status ?? null,
+        });
+      },
+    }
+  );
+
+  logger.info({
+    msg: 'HubSpot products updated with SAP stock',
     tenantKey,
     count: batchPayload.inputs.length,
     updatedCount: Array.isArray(response?.results)
@@ -481,6 +601,19 @@ const lineItemPriceService = {
           auditTrail.response_SAP.push(priceData);
         }
 
+        const sapItemStockData = useBusinessPartnerPrice
+          ? await requestSapItemPrices({
+            sapConfig,
+            itemCode,
+            tenantKey,
+          })
+          : auditTrail.response_SAP[auditTrail.response_SAP.length - 1];
+
+        const warehouseStockProperties = await getHubspotWarehouseStockPropertiesForTenant(
+          tenantModels,
+          sapItemStockData?.ItemWarehouseInfoCollection
+        );
+
         const quantity = normalizeQuantity(lineItem.quantity ?? lineItem.Quantity);
         const price = roundCurrency(priceData?.Price ?? 0);
         const lineTotal = roundCurrency(quantity * price);
@@ -493,6 +626,7 @@ const lineItemPriceService = {
           Currency: priceData?.Currency ?? null,
           Discount: priceData?.Discount ?? 0,
           lineTotal,
+          warehouseStockProperties,
         });
       }
 
@@ -507,11 +641,20 @@ const lineItemPriceService = {
         enrichedLineItems,
         tenantKey,
       });
+      const hubspotProductUpdate = await updateHubspotProducts({
+        token,
+        enrichedLineItems,
+        tenantKey,
+      });
 
       auditTrail.response_hubspot = {
         lineItems: {
           payload: hubspotUpdate.payload,
           response: hubspotUpdate.response,
+        },
+        products: {
+          payload: hubspotProductUpdate.payload,
+          response: hubspotProductUpdate.response,
         },
       };
 
@@ -546,6 +689,10 @@ const lineItemPriceService = {
           updatedCount: Array.isArray(hubspotUpdate.response?.results)
             ? hubspotUpdate.response.results.length
             : hubspotUpdate.payload.inputs.length,
+          productsRequestedCount: hubspotProductUpdate.payload.inputs.length,
+          productsUpdatedCount: Array.isArray(hubspotProductUpdate.response?.results)
+            ? hubspotProductUpdate.response.results.length
+            : hubspotProductUpdate.payload.inputs.length,
           dealUpdated: Boolean(dealUpdate),
         },
       };

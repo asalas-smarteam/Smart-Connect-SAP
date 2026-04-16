@@ -15,9 +15,11 @@ function resolveWarehouseCodeFromPropertyName(propertyName) {
 }
 
 export function getWarehouseAvailableStock(warehouse) {
-  return warehouse?.InStock
-    - warehouse?.Committed
-    + warehouse?.Ordered;
+  const inStock = Number(warehouse?.InStock ?? 0);
+  const committed = Number(warehouse?.Committed ?? 0);
+  const ordered = Number(warehouse?.Ordered ?? 0);
+
+  return inStock - committed + ordered;
 }
 
 export function normalizeHubspotWarehouseFields(value) {

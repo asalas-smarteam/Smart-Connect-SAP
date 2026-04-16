@@ -4,6 +4,8 @@ const mockAxiosPost = jest.fn();
 const mockAxiosGet = jest.fn();
 const mockGetAccessToken = jest.fn();
 const mockBatchUpdateLineItems = jest.fn();
+const mockBatchUpdateProducts = jest.fn();
+const mockFindProductBySKU = jest.fn();
 const mockUpdateDeal = jest.fn();
 const mockGetSessionCookie = jest.fn();
 const mockInvalidateSession = jest.fn();
@@ -26,6 +28,8 @@ jest.unstable_mockModule('../../src/services/hubspotAuthService.js', () => ({
 
 jest.unstable_mockModule('../../src/services/hubspotClient.js', () => ({
   batchUpdateLineItems: mockBatchUpdateLineItems,
+  batchUpdateProducts: mockBatchUpdateProducts,
+  findProductBySKU: mockFindProductBySKU,
   updateDeal: mockUpdateDeal,
 }));
 
@@ -50,6 +54,18 @@ const lineItemPriceService = (await import('../../src/services/lineItemPrice.ser
 describe('lineItemPrice.service syncPrices', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockAxiosPost.mockReset();
+    mockAxiosGet.mockReset();
+    mockGetAccessToken.mockReset();
+    mockBatchUpdateLineItems.mockReset();
+    mockBatchUpdateProducts.mockReset();
+    mockFindProductBySKU.mockReset();
+    mockUpdateDeal.mockReset();
+    mockGetSessionCookie.mockReset();
+    mockInvalidateSession.mockReset();
+    mockResolveTenantKey.mockReset();
+    mockLoggerInfo.mockReset();
+    mockLoggerWarn.mockReset();
     jest.useFakeTimers().setSystemTime(new Date('2026-04-08T12:00:00.000Z'));
     mockResolveTenantKey.mockReturnValue('tenant_1');
   });
@@ -59,6 +75,29 @@ describe('lineItemPrice.service syncPrices', () => {
   });
 
   function buildTenantModels() {
+    const configurationFindOneAndUpdate = jest.fn().mockImplementation(async (filter) => {
+      if (filter?.key === 'priceList') {
+        return {
+          key: 'priceList',
+          value: '4',
+          userUpdated: 'admin',
+        };
+      }
+
+      if (filter?.key === 'fieldsWareHouseHS') {
+        return {
+          key: 'fieldsWareHouseHS',
+          value: [
+            { label: 'Entrepiso-T1', value: 'A01_stock' },
+            { label: 'CEDI 2', value: 'B02_stock' },
+          ],
+          userUpdated: 'admin',
+        };
+      }
+
+      return null;
+    });
+
     return {
       HubspotCredentials: {
         findOne: jest.fn()
@@ -79,11 +118,7 @@ describe('lineItemPrice.service syncPrices', () => {
           }),
       },
       Configuration: {
-        findOneAndUpdate: jest.fn().mockResolvedValue({
-          key: 'priceList',
-          value: '4',
-          userUpdated: 'admin',
-        }),
+        findOneAndUpdate: configurationFindOneAndUpdate,
       },
     };
   }
@@ -99,9 +134,34 @@ describe('lineItemPrice.service syncPrices', () => {
       .mockResolvedValueOnce({
         data: { Price: 825.1, Currency: 'C$', Discount: 5.0 },
       });
+    mockAxiosGet
+      .mockResolvedValueOnce({
+        data: {
+          ItemPrices: [],
+          ItemWarehouseInfoCollection: [
+            { WarehouseCode: 'A01', Ordered: 2, Committed: 1, InStock: 7 },
+            { WarehouseCode: 'B02', Ordered: 1, Committed: 0, InStock: 4 },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          ItemPrices: [],
+          ItemWarehouseInfoCollection: [
+            { WarehouseCode: 'A01', Ordered: 0, Committed: 0, InStock: 2 },
+            { WarehouseCode: 'B02', Ordered: 3, Committed: 1, InStock: 8 },
+          ],
+        },
+      });
     mockGetAccessToken.mockResolvedValue('hubspot-token');
+    mockFindProductBySKU
+      .mockResolvedValueOnce({ id: 'product-1' })
+      .mockResolvedValueOnce({ id: 'product-2' });
     mockBatchUpdateLineItems.mockResolvedValue({
       results: [{ id: '53747313682' }, { id: '54118679348' }],
+    });
+    mockBatchUpdateProducts.mockResolvedValue({
+      results: [{ id: 'product-1' }, { id: 'product-2' }],
     });
     mockUpdateDeal.mockResolvedValue({ id: 'deal-1' });
 
@@ -135,6 +195,10 @@ describe('lineItemPrice.service syncPrices', () => {
             Currency: 'C$',
             Discount: 0.0,
             lineTotal: 1408.7,
+            warehouseStockProperties: {
+              A01_stock: 8,
+              B02_stock: 5,
+            },
           },
           {
             itemCode: 'A0002',
@@ -144,12 +208,18 @@ describe('lineItemPrice.service syncPrices', () => {
             Currency: 'C$',
             Discount: 5.0,
             lineTotal: 825.1,
+            warehouseStockProperties: {
+              A01_stock: 2,
+              B02_stock: 10,
+            },
           },
         ],
       },
       meta: {
         requestedCount: 2,
         updatedCount: 2,
+        productsRequestedCount: 2,
+        productsUpdatedCount: 2,
         dealUpdated: true,
       },
     });
@@ -174,11 +244,23 @@ describe('lineItemPrice.service syncPrices', () => {
       inputs: [
         {
           id: '53747313682',
-          properties: { price: '704.35', quantity: '2' },
+          properties: { price: '704.35', quantity: '2', A01_stock: 8, B02_stock: 5 },
         },
         {
           id: '54118679348',
-          properties: { price: '825.1', quantity: '1' },
+          properties: { price: '825.1', quantity: '1', A01_stock: 2, B02_stock: 10 },
+        },
+      ],
+    });
+    expect(mockBatchUpdateProducts).toHaveBeenCalledWith('hubspot-token', {
+      inputs: [
+        {
+          id: 'product-1',
+          properties: { A01_stock: 8, B02_stock: 5 },
+        },
+        {
+          id: 'product-2',
+          properties: { A01_stock: 2, B02_stock: 10 },
         },
       ],
     });
@@ -188,23 +270,33 @@ describe('lineItemPrice.service syncPrices', () => {
   });
 
   it('invalidates SAP session and retries when SAP returns unauthorized', async () => {
+    jest.useRealTimers();
     const tenantModels = buildTenantModels();
     const unauthorized = new Error('Unauthorized');
     unauthorized.response = { status: 401 };
 
     mockGetSessionCookie
       .mockResolvedValueOnce({ cookie: 'B1SESSION=expired' })
+      .mockResolvedValueOnce({ cookie: 'B1SESSION=fresh' })
       .mockResolvedValueOnce({ cookie: 'B1SESSION=fresh' });
     mockAxiosPost
       .mockRejectedValueOnce(unauthorized)
       .mockResolvedValueOnce({
         data: { Price: 704.35, Currency: 'C$', Discount: 0.0 },
       });
+    mockAxiosGet.mockResolvedValueOnce({
+      data: {
+        ItemPrices: [],
+        ItemWarehouseInfoCollection: [],
+      },
+    });
     mockGetAccessToken.mockResolvedValue('hubspot-token');
+    mockFindProductBySKU.mockResolvedValueOnce({ id: 'product-1' });
     mockBatchUpdateLineItems.mockResolvedValue({ results: [{ id: '53747313682' }] });
+    mockBatchUpdateProducts.mockResolvedValue({ results: [{ id: 'product-1' }] });
     mockUpdateDeal.mockResolvedValue({ id: 'deal-1' });
 
-    const resultPromise = lineItemPriceService.syncPrices(
+    const result = await lineItemPriceService.syncPrices(
       {
         dealId: 'deal-1',
         cardCode: 'C20000',
@@ -216,16 +308,16 @@ describe('lineItemPrice.service syncPrices', () => {
         tenantKey: 'tenant_1',
       }
     );
-    await jest.advanceTimersByTimeAsync(500);
-    const result = await resultPromise;
 
     expect(result.meta).toEqual({
       requestedCount: 1,
       updatedCount: 1,
+      productsRequestedCount: 1,
+      productsUpdatedCount: 1,
       dealUpdated: true,
     });
     expect(mockInvalidateSession).toHaveBeenCalledWith('tenant_1');
-    expect(mockGetSessionCookie).toHaveBeenCalledTimes(2);
+    expect(mockGetSessionCookie).toHaveBeenCalledTimes(3);
   });
 
   it('attaches webhook audit details when HubSpot update fails', async () => {
@@ -236,7 +328,14 @@ describe('lineItemPrice.service syncPrices', () => {
     mockAxiosPost.mockResolvedValue({
       data: { Price: 704.35, Currency: 'C$', Discount: 0.0 },
     });
+    mockAxiosGet.mockResolvedValue({
+      data: {
+        ItemPrices: [],
+        ItemWarehouseInfoCollection: [],
+      },
+    });
     mockGetAccessToken.mockResolvedValue('hubspot-token');
+    mockFindProductBySKU.mockResolvedValueOnce({ id: 'product-1' });
 
     const hubspotError = new Error('HubSpot API request failed: 500 Internal Server Error');
     hubspotError.details = {
@@ -299,6 +398,10 @@ describe('lineItemPrice.service syncPrices', () => {
             { PriceList: 1, Price: 900, Currency: 'C$' },
             { PriceList: 4, Price: 704.35, Currency: 'C$' },
           ],
+          ItemWarehouseInfoCollection: [
+            { WarehouseCode: 'A01', Ordered: 2, Committed: 1, InStock: 7 },
+            { WarehouseCode: 'B02', Ordered: 1, Committed: 0, InStock: 4 },
+          ],
         },
       })
       .mockResolvedValueOnce({
@@ -306,11 +409,21 @@ describe('lineItemPrice.service syncPrices', () => {
           ItemPrices: [
             { PriceList: 4, Price: 825.1, Currency: 'C$' },
           ],
+          ItemWarehouseInfoCollection: [
+            { WarehouseCode: 'A01', Ordered: 0, Committed: 0, InStock: 2 },
+            { WarehouseCode: 'B02', Ordered: 3, Committed: 1, InStock: 8 },
+          ],
         },
       });
     mockGetAccessToken.mockResolvedValue('hubspot-token');
+    mockFindProductBySKU
+      .mockResolvedValueOnce({ id: 'product-1' })
+      .mockResolvedValueOnce({ id: 'product-2' });
     mockBatchUpdateLineItems.mockResolvedValue({
       results: [{ id: '53747313682' }, { id: '54118679348' }],
+    });
+    mockBatchUpdateProducts.mockResolvedValue({
+      results: [{ id: 'product-1' }, { id: 'product-2' }],
     });
     mockUpdateDeal.mockResolvedValue({ id: 'deal-1' });
 
@@ -343,6 +456,10 @@ describe('lineItemPrice.service syncPrices', () => {
             Currency: 'C$',
             Discount: 0,
             lineTotal: 2113.05,
+            warehouseStockProperties: {
+              A01_stock: 8,
+              B02_stock: 5,
+            },
           },
           {
             itemCode: 'A0002',
@@ -352,12 +469,18 @@ describe('lineItemPrice.service syncPrices', () => {
             Currency: 'C$',
             Discount: 0,
             lineTotal: 825.1,
+            warehouseStockProperties: {
+              A01_stock: 2,
+              B02_stock: 10,
+            },
           },
         ],
       },
       meta: {
         requestedCount: 2,
         updatedCount: 2,
+        productsRequestedCount: 2,
+        productsUpdatedCount: 2,
         dealUpdated: true,
       },
     });
@@ -381,7 +504,7 @@ describe('lineItemPrice.service syncPrices', () => {
     expect(mockAxiosPost).not.toHaveBeenCalled();
     expect(mockAxiosGet).toHaveBeenNthCalledWith(
       1,
-      "https://sap.example.com:50000/b1s/v2/Items('A0001')?$select=ItemPrices",
+      "https://sap.example.com:50000/b1s/v2/Items('A0001')?$select=ItemPrices,ItemWarehouseInfoCollection",
       expect.objectContaining({
         timeout: 15000,
         headers: { Cookie: 'B1SESSION=abc' },
@@ -391,11 +514,23 @@ describe('lineItemPrice.service syncPrices', () => {
       inputs: [
         {
           id: '53747313682',
-          properties: { price: '704.35', quantity: '3' },
+          properties: { price: '704.35', quantity: '3', A01_stock: 8, B02_stock: 5 },
         },
         {
           id: '54118679348',
-          properties: { price: '825.1', quantity: '1' },
+          properties: { price: '825.1', quantity: '1', A01_stock: 2, B02_stock: 10 },
+        },
+      ],
+    });
+    expect(mockBatchUpdateProducts).toHaveBeenCalledWith('hubspot-token', {
+      inputs: [
+        {
+          id: 'product-1',
+          properties: { A01_stock: 8, B02_stock: 5 },
+        },
+        {
+          id: 'product-2',
+          properties: { A01_stock: 2, B02_stock: 10 },
         },
       ],
     });
