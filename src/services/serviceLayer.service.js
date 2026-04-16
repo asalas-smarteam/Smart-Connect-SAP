@@ -22,11 +22,11 @@ function normalizeNextLink(baseUrl, nextLink) {
 
 
 function withTopParam(url, top) {
-  const parsed = new URL(url);
+  /*const parsed = new URL(url);
    if (!parsed.searchParams.has('$top')) {
     parsed.searchParams.set('$top', String(top));
   }
-  return parsed.toString();
+  return parsed.toString();*/
 }
 
 async function fetchAllPages(baseUrl, initialUrl, headers) {
@@ -64,10 +64,10 @@ const serviceLayerService = {
 
     const requestOptions = {
       ...options,
-      top: options?.top || config?.serviceLayerTopFilter || 20,
+      /*top: options?.top || config?.serviceLayerTopFilter || 20,*/
     };
 
-    const dataUrl = withTopParam(buildServiceLayerUrl(config, mappings, requestOptions), requestOptions.top); //, requestOptions.top
+    const dataUrl = withTopParam(buildServiceLayerUrl(config, mappings, requestOptions)); //, requestOptions.top
 
     const requestWithSession = async () => {
       const { cookie } = await sapSessionManager.getSessionCookie(config);
