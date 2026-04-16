@@ -152,7 +152,7 @@ export async function syncSingleConfigSchedule({ tenantKey, configId }) {
 }
 
 export async function resyncSchedulerFromDatabase() {
-  return bootstrapScheduledJobs();
+  return bootstrapScheduledJobs({ upsertExisting: true });
 }
 
 export async function purgeTenantJobs(tenantKey) {

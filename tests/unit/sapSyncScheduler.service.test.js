@@ -31,6 +31,7 @@ jest.unstable_mockModule('../../src/core/logger.js', () => ({
 }));
 
 const {
+  bootstrapScheduledJobs,
   syncScheduledJob,
 } = await import('../../src/services/scheduler/sapSyncScheduler.service.js');
 
@@ -145,6 +146,88 @@ describe('sapSyncScheduler.service', () => {
       intervalMinutes: 10,
       repeatEvery: 10 * 60 * 1000,
       repeatTimezone: null,
+    }));
+  });
+
+  it('bootstrap skips creating a job when the tenant config already exists in BullMQ', async () => {
+    const queue = {
+      getRepeatableJobs: jest.fn().mockResolvedValue([
+        { key: 'sap-sync:tenant-c:cfg-3', name: 'sap-sync-job' },
+      ]),
+      removeRepeatableByKey: jest.fn(),
+    };
+    mockGetSapSyncQueue.mockReturnValue(queue);
+    mockListActiveTenants.mockResolvedValue([
+      { client: { tenantKey: 'tenant-c' } },
+    ]);
+    mockGetTenantModels.mockResolvedValue({
+      ClientConfig: {
+        find: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue([
+            {
+              _id: 'cfg-3',
+              active: true,
+              mode: 'INCREMENTAL',
+              intervalMinutes: 10,
+              objectType: 'Items',
+            },
+          ]),
+        }),
+      },
+    });
+
+    const result = await bootstrapScheduledJobs();
+
+    expect(result).toEqual(expect.objectContaining({
+      tenantsScanned: 1,
+      configsScheduled: 0,
+      configsSkippedExisting: 1,
+      configsRemoved: 0,
+      orphanRemoved: 0,
+    }));
+    expect(mockAddScheduledSapSyncJob).not.toHaveBeenCalled();
+    expect(queue.removeRepeatableByKey).not.toHaveBeenCalled();
+  });
+
+  it('bootstrap creates a job when the tenant config does not exist in BullMQ', async () => {
+    const queue = {
+      getRepeatableJobs: jest.fn().mockResolvedValue([]),
+      removeRepeatableByKey: jest.fn(),
+    };
+    mockGetSapSyncQueue.mockReturnValue(queue);
+    mockListActiveTenants.mockResolvedValue([
+      { client: { tenantKey: 'tenant-d' } },
+    ]);
+    mockGetTenantModels.mockResolvedValue({
+      ClientConfig: {
+        find: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue([
+            {
+              _id: 'cfg-4',
+              active: true,
+              mode: 'FULL',
+              executionTime: '05:00',
+              objectType: 'BusinessPartners',
+            },
+          ]),
+        }),
+      },
+    });
+
+    const result = await bootstrapScheduledJobs();
+
+    expect(result).toEqual(expect.objectContaining({
+      tenantsScanned: 1,
+      configsScheduled: 1,
+      configsSkippedExisting: 0,
+      configsRemoved: 0,
+      orphanRemoved: 0,
+    }));
+    expect(mockAddScheduledSapSyncJob).toHaveBeenCalledWith(expect.objectContaining({
+      tenantKey: 'tenant-d',
+      configId: 'cfg-4',
+      repeatPattern: '0 5 * * *',
+      repeatTimezone: 'America/Costa_Rica',
     }));
   });
 });

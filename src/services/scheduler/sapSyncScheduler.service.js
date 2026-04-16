@@ -161,7 +161,7 @@ async function removeKnownScheduledJobs({ tenantKey, configId, config, previousC
   return { jobId, removedCount };
 }
 
-export async function registerScheduledJob({ tenantKey, config, previousConfig = null }) {
+async function createScheduledJob({ tenantKey, config }) {
   const configId = String(config?._id || config?.id || '');
   const schedulePlan = resolveSchedulePlan(config);
   const objectType = config?.objectType || null;
@@ -170,12 +170,6 @@ export async function registerScheduledJob({ tenantKey, config, previousConfig =
     throw new Error('tenantKey, configId and valid schedule config are required');
   }
 
-  const { jobId, removedCount } = await removeKnownScheduledJobs({
-    tenantKey,
-    configId,
-    config,
-    previousConfig,
-  });
   await addScheduledSapSyncJob({
     tenantKey,
     configId,
@@ -187,6 +181,38 @@ export async function registerScheduledJob({ tenantKey, config, previousConfig =
     repeatPattern: schedulePlan.repeatPattern,
     repeatTimezone: schedulePlan.repeatTimezone,
   });
+
+  return {
+    jobId: buildScheduledJobId({ tenantKey, configId }),
+    configId,
+    objectType,
+    schedulePlan,
+  };
+}
+
+function hasScheduledJob({ repeatableJobs, tenantKey, config }) {
+  const configId = String(config?._id || config?.id || '');
+  if (!tenantKey || !configId || !Array.isArray(repeatableJobs)) {
+    return false;
+  }
+
+  const jobId = buildScheduledJobId({ tenantKey, configId });
+  const candidateKeys = new Set(buildRemovalKeyCandidates({ jobId, config }));
+
+  return repeatableJobs.some(
+    (job) => candidateKeys.has(job?.key) || (typeof job?.id === 'string' && candidateKeys.has(job.id))
+  );
+}
+
+export async function registerScheduledJob({ tenantKey, config, previousConfig = null }) {
+  const nextConfigId = String(config?._id || config?.id || '');
+  const { jobId, removedCount } = await removeKnownScheduledJobs({
+    tenantKey,
+    configId: nextConfigId,
+    config,
+    previousConfig,
+  });
+  const { configId, objectType, schedulePlan } = await createScheduledJob({ tenantKey, config });
 
   logger.info({
     msg: 'Scheduled SAP sync job registered',
@@ -243,13 +269,16 @@ export async function syncScheduledJob({ tenantKey, config, previousConfig = nul
   return { action: 'removed' };
 }
 
-export async function bootstrapScheduledJobs() {
+export async function bootstrapScheduledJobs({ upsertExisting = false } = {}) {
   const queue = getSapSyncQueue();
+  const repeatableJobs = await queue.getRepeatableJobs();
   const expectedJobKeys = new Set();
   const activeTenants = await listActiveTenants();
   const summary = {
     tenantsScanned: 0,
     configsScheduled: 0,
+    configsSkippedExisting: 0,
+    configsSkippedInactive: 0,
     configsRemoved: 0,
     tenantErrors: [],
     orphanRemoved: 0,
@@ -270,12 +299,32 @@ export async function bootstrapScheduledJobs() {
         const schedulePlan = resolveSchedulePlan(config);
 
         if (config.active && schedulePlan) {
-          expectedJobKeys.add(jobKey);
-          await registerScheduledJob({ tenantKey, config });
+          if (upsertExisting) {
+            expectedJobKeys.add(jobKey);
+            await registerScheduledJob({ tenantKey, config });
+            summary.configsScheduled += 1;
+            continue;
+          }
+
+          if (hasScheduledJob({ repeatableJobs, tenantKey, config })) {
+            summary.configsSkippedExisting += 1;
+            continue;
+          }
+
+          await createScheduledJob({ tenantKey, config });
+          repeatableJobs.push({
+            key: jobKey,
+            id: jobKey,
+            name: SAP_SYNC_JOB_NAME,
+          });
           summary.configsScheduled += 1;
         } else {
-          await removeScheduledJob({ tenantKey, configId, config });
-          summary.configsRemoved += 1;
+          if (upsertExisting) {
+            await removeScheduledJob({ tenantKey, configId, config });
+            summary.configsRemoved += 1;
+          } else {
+            summary.configsSkippedInactive += 1;
+          }
         }
       }
     } catch (error) {
@@ -291,26 +340,28 @@ export async function bootstrapScheduledJobs() {
     }
   }
 
-  try {
-    const repeatableJobs = await queue.getRepeatableJobs();
-    const orphanedJobs = repeatableJobs.filter(
-      (job) => isRepeatableScheduledJob(job) && !expectedJobKeys.has(job.key)
-    );
+  if (upsertExisting) {
+    try {
+      const latestRepeatableJobs = await queue.getRepeatableJobs();
+      const orphanedJobs = latestRepeatableJobs.filter(
+        (job) => isRepeatableScheduledJob(job) && !expectedJobKeys.has(job.key)
+      );
 
-    for (const job of orphanedJobs) {
-      await queue.removeRepeatableByKey(job.key);
-      summary.orphanRemoved += 1;
-      logger.info({
-        msg: 'Removed orphan SAP sync repeatable job',
-        repeatJobKey: job.key,
-        jobId: job.id || null,
+      for (const job of orphanedJobs) {
+        await queue.removeRepeatableByKey(job.key);
+        summary.orphanRemoved += 1;
+        logger.info({
+          msg: 'Removed orphan SAP sync repeatable job',
+          repeatJobKey: job.key,
+          jobId: job.id || null,
+        });
+      }
+    } catch (error) {
+      logger.error({
+        msg: 'Failed while removing orphan SAP sync repeatable jobs',
+        error: error.message,
       });
     }
-  } catch (error) {
-    logger.error({
-      msg: 'Failed while removing orphan SAP sync repeatable jobs',
-      error: error.message,
-    });
   }
 
   logger.info({
