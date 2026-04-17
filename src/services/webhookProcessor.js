@@ -5,6 +5,7 @@ import mappingService from './mapping.service.js';
 import hubspotAuthService from './hubspotAuthService.js';
 import * as hubspotClient from './hubspotClient.js';
 import sapSessionManager, { isSessionInvalidError } from './sapSessionManager.js';
+import tenantConfigurationService from './tenantConfiguration.service.js';
 import { getAvailableStockForWarehouse } from '../utils/warehouseStock.js';
 import {
   buildErrorResponseSnapshot,
@@ -90,6 +91,67 @@ function normalizeNumber(value, fallback = null) {
 function toNonEmptyString(value) {
   const normalized = String(value || '').trim();
   return normalized || null;
+}
+
+function normalizePositiveInteger(value, fallback = null) {
+  const normalized = Number(String(value ?? '').trim());
+  return Number.isInteger(normalized) && normalized > 0 ? normalized : fallback;
+}
+
+function resolveHubspotSapId(record) {
+  return toNonEmptyString(record?.idsap || record?.idSap);
+}
+
+function buildDefaultBusinessPartnerCardCode({ company, contact, companyExists }) {
+  const sourceObjectId = toNonEmptyString(
+    companyExists ? company?.hs_object_id : contact?.hs_object_id
+  );
+  const normalizedSource = String(sourceObjectId || '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+
+  const dynamicPart = (normalizedSource
+    ? normalizedSource.slice(-12)
+    : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+    .slice(-12);
+
+  return `CL${dynamicPart}`.slice(0, 15);
+}
+
+function resolveContactDisplayName(contact) {
+  const fullName = [
+    toNonEmptyString(contact?.firstname),
+    toNonEmptyString(contact?.lastname),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+
+  return toNonEmptyString(
+    fullName
+    || contact?.name
+    || contact?.email
+    || contact?.hs_object_id
+  );
+}
+
+async function resolveDefaultPriceListNum(tenantModels) {
+  const value = await tenantConfigurationService.getValue(
+    tenantModels,
+    'priceList',
+    null
+  );
+  const priceListNum = normalizePositiveInteger(value);
+
+  if (!priceListNum) {
+    throw new PermanentWebhookError(
+      'PriceListNum is required from HubSpot mapping or tenant configuration priceList'
+    );
+  }
+
+  return priceListNum;
 }
 
 function resolveHubspotPropertyNameBySapField(mappings, sapField, fallback = null) {
@@ -257,6 +319,7 @@ async function findBusinessPartnerByEmail(sapConfig, email) {
 
 async function findOrCreateBusinessPartner({
   sapConfig,
+  tenantModels,
   company,
   contact,
   mappedCompany,
@@ -269,16 +332,21 @@ async function findOrCreateBusinessPartner({
     mappedCompany?.PriceListNum ?? mappedContact?.PriceListNum,
     null
   );
-
-  if (!Number.isFinite(mappedPriceListNum)) {
-    throw new PermanentWebhookError('PriceListNum is required in mappings to send webhook data to SAP');
-  }
+  const resolvedCardCode = mappedCardCode || buildDefaultBusinessPartnerCardCode({
+    company,
+    contact,
+    companyExists,
+  });
+  const resolvedPriceListNum = Number.isFinite(mappedPriceListNum)
+    ? mappedPriceListNum
+    : await resolveDefaultPriceListNum(tenantModels);
 
   const byCardCode = await findBusinessPartnerByCardCode(sapConfig, mappedCardCode);
   if (byCardCode?.CardCode) {
     return {
       cardCode: byCardCode.CardCode,
       created: false,
+      matchedBy: 'cardCode',
       businessPartner: byCardCode,
       requestPayload: null,
       responsePayload: {
@@ -293,6 +361,7 @@ async function findOrCreateBusinessPartner({
     return {
       cardCode: byEmail.CardCode,
       created: false,
+      matchedBy: 'email',
       businessPartner: byEmail,
       requestPayload: null,
       responsePayload: {
@@ -304,7 +373,7 @@ async function findOrCreateBusinessPartner({
 
   const fallbackName = companyExists
     ? (company?.name || company?.company || company?.hs_name)
-    : (contact?.firstname || contact?.name || contact?.email);
+    : resolveContactDisplayName(contact);
   const cardName = toNonEmptyString(mappedCompany?.CardName || mappedContact?.CardName || fallbackName);
 
   if (!cardName) {
@@ -315,14 +384,12 @@ async function findOrCreateBusinessPartner({
     CardName: cardName,
     CardType: 'C',
     CompanyPrivate: companyExists ? 'C' : 'P',
-    EmailAddress: mappedEmail || undefined,
+    EmailAddress: mappedEmail || "",
     Phone1: toNonEmptyString(mappedCompany?.Phone1 || mappedContact?.Phone1) || undefined,
-    PriceListNum: mappedPriceListNum,
+    PriceListNum: resolvedPriceListNum,
+    CardCode: resolvedCardCode,
+    FederalTaxID: mappedCompany?.FederalTaxID 
   };
-
-  if (mappedCardCode) {
-    payload.CardCode = mappedCardCode;
-  }
 
   const created = await serviceLayerRequest(sapConfig, {
     method: 'post',
@@ -330,7 +397,7 @@ async function findOrCreateBusinessPartner({
     data: payload,
   });
 
-  const cardCode = created?.CardCode || mappedCardCode || null;
+  const cardCode = created?.CardCode || resolvedCardCode || null;
   if (!cardCode) {
     throw new Error('SAP BusinessPartner creation did not return CardCode');
   }
@@ -339,6 +406,7 @@ async function findOrCreateBusinessPartner({
   return {
     cardCode,
     created: true,
+    matchedBy: null,
     businessPartner,
     requestPayload: payload,
     responsePayload: created,
@@ -347,7 +415,7 @@ async function findOrCreateBusinessPartner({
 
 function resolveContactEmployeePayload(contact, contactEmployeeMappings) {
   const mapped = mapHubspotToSapFields(contact || {}, contactEmployeeMappings);
-  const name = toNonEmptyString(mapped?.Name || contact?.firstname || contact?.name || contact?.email);
+  const name = toNonEmptyString(mapped?.Name || resolveContactDisplayName(contact));
   const email = toNonEmptyString(mapped?.E_Mail || mapped?.EmailAddress || contact?.email);
 
   if (!name && !email) {
@@ -513,22 +581,73 @@ async function createOrder({ sapConfig, orderPayload }) {
   });
 }
 
-async function updateHubspotAfterSap({
-  tenantModels,
-  hubspotCredentials,
-  payload,
-  dealMappings,
-  orderResponse,
-  cardCode,
-  companyCreated,
-  contactCreated,
-  contactEmployeeCode,
-}) {
-  const token = await hubspotAuthService.getAccessToken(
+async function getHubspotWebhookAccessToken({ tenantModels, hubspotCredentials }) {
+  return hubspotAuthService.getAccessToken(
     hubspotCredentials.clientConfigId,
     hubspotCredentials,
     tenantModels
   );
+}
+
+async function updateHubspotBusinessPartnerIds({
+  token,
+  payload,
+  cardCode,
+  syncCompany,
+  syncContact,
+}) {
+  const hubspotResponses = {
+    deal: null,
+    company: null,
+    contact: null,
+  };
+
+  const companyObjectId = toNonEmptyString(payload?.company?.hs_object_id);
+  const contactObjectId = toNonEmptyString(payload?.contact?.hs_object_id);
+
+  if (syncCompany && companyObjectId) {
+    hubspotResponses.company = await hubspotClient.updateCompany(token, companyObjectId, {
+      properties: {
+        idsap: cardCode,
+      },
+    });
+  }
+
+  if (syncContact && contactObjectId) {
+    hubspotResponses.contact = await hubspotClient.updateContact(token, contactObjectId, {
+      properties: {
+        idsap: cardCode,
+      },
+    });
+  }
+
+  return hubspotResponses;
+}
+
+function mergeHubspotResponses(current, next) {
+  return {
+    deal: next?.deal ?? current?.deal ?? null,
+    company: next?.company ?? current?.company ?? null,
+    contact: next?.contact ?? current?.contact ?? null,
+  };
+}
+
+async function updateHubspotAfterSap({
+  tenantModels,
+  hubspotCredentials,
+  token,
+  payload,
+  dealMappings,
+  orderResponse,
+  cardCode,
+  syncCompany,
+  syncContact,
+  contactEmployeeCode,
+}) {
+  const resolvedToken = token || await getHubspotWebhookAccessToken({
+    tenantModels,
+    hubspotCredentials,
+  });
   const hubspotResponses = {
     deal: null,
     company: null,
@@ -553,21 +672,21 @@ async function updateHubspotAfterSap({
     }
 
     if (Object.keys(dealProperties).length > 0) {
-      hubspotResponses.deal = await hubspotClient.updateDeal(token, dealObjectId, {
+      hubspotResponses.deal = await hubspotClient.updateDeal(resolvedToken, dealObjectId, {
         properties: dealProperties,
       });
     }
   }
 
-  if (companyCreated && companyObjectId) {
-    hubspotResponses.company = await hubspotClient.updateCompany(token, companyObjectId, {
+  if (syncCompany && companyObjectId) {
+    hubspotResponses.company = await hubspotClient.updateCompany(resolvedToken, companyObjectId, {
       properties: {
         idsap: cardCode,
       },
     });
   }
 
-  if (contactCreated && contactObjectId) {
+  if (syncContact && contactObjectId) {
     const contactProperties = {
       idsap: cardCode,
     };
@@ -576,7 +695,7 @@ async function updateHubspotAfterSap({
       contactProperties.internalcode = String(contactEmployeeCode);
     }
 
-    hubspotResponses.contact = await hubspotClient.updateContact(token, contactObjectId, {
+    hubspotResponses.contact = await hubspotClient.updateContact(resolvedToken, contactObjectId, {
       properties: contactProperties,
     });
   }
@@ -615,9 +734,9 @@ async function processSingleEvent({ event, tenantModels, tenantId, tenantKey, po
     const { mappings, sapConfig, hubspotCredentials } = context;
     const mappedCompany = mapHubspotToSapFields(company || {}, mappings.companyMappings);
     const mappedContact = mapHubspotToSapFields(contact || {}, mappings.contactBusinessPartnerMappings);
-
     const businessPartnerResult = await findOrCreateBusinessPartner({
       sapConfig,
+      tenantModels,
       company,
       contact,
       mappedCompany,
@@ -629,12 +748,39 @@ async function processSingleEvent({ event, tenantModels, tenantId, tenantKey, po
     auditTrail.response_SAP.businessPartner = businessPartnerResult.responsePayload;
 
     const cardCode = businessPartnerResult.cardCode;
+    const companyHasSapId = Boolean(resolveHubspotSapId(company));
+    const contactHasSapId = Boolean(resolveHubspotSapId(contact));
+    const matchedByEmail = businessPartnerResult.matchedBy === 'email';
+    const shouldSyncCompanySapId = companyExists && (
+      businessPartnerResult.created
+      || (matchedByEmail && !companyHasSapId)
+    );
+    const shouldSyncContactSapId = contactExists && (
+      businessPartnerResult.created
+      || (matchedByEmail && !contactHasSapId)
+    );
+    const shouldSyncBusinessPartnerIds = shouldSyncCompanySapId || shouldSyncContactSapId;
+    let hubspotToken = null;
     let contactEmployeeResult = {
       created: false,
       internalCode: null,
       requestPayload: null,
       responsePayload: null,
     };
+
+    if (shouldSyncBusinessPartnerIds) {
+      hubspotToken = await getHubspotWebhookAccessToken({
+        tenantModels,
+        hubspotCredentials,
+      });
+      auditTrail.response_hubspot = await updateHubspotBusinessPartnerIds({
+        token: hubspotToken,
+        payload,
+        cardCode,
+        syncCompany: shouldSyncCompanySapId,
+        syncContact: shouldSyncContactSapId,
+      });
+    }
 
     if (companyExists && contactExists) {
       contactEmployeeResult = await addContactEmployeeIfNeeded({
@@ -670,18 +816,22 @@ async function processSingleEvent({ event, tenantModels, tenantId, tenantKey, po
     });
     auditTrail.response_SAP.order = orderResponse;
 
-    auditTrail.response_hubspot = await updateHubspotAfterSap({
+    const hubspotFinalResponses = await updateHubspotAfterSap({
       tenantModels,
       hubspotCredentials,
+      token: hubspotToken,
       payload,
       dealMappings: mappings.dealMappings,
       orderResponse,
       cardCode,
-      companyCreated: companyExists && businessPartnerResult.created,
-      contactCreated: (!companyExists && contactExists && businessPartnerResult.created)
-        || (companyExists && contactExists && contactEmployeeResult.created),
+      syncCompany: false,
+      syncContact: contactExists && contactEmployeeResult.created,
       contactEmployeeCode: contactEmployeeResult.internalCode,
     });
+    auditTrail.response_hubspot = mergeHubspotResponses(
+      auditTrail.response_hubspot,
+      hubspotFinalResponses
+    );
 
     return {
       cardCode,
@@ -712,10 +862,10 @@ export async function claimEventsToProcess(WebhookEvent, batchSize = DEFAULT_BAT
 
   while (claimed.length < safeBatchSize) {
     // Claim oldest waiting events first so parallel workers do not process same document twice.
-    // eslint-disable-next-line no-await-in-loop
+    // eslint-disable-next-line no-await-in-loop #$$$$$
     const event = await WebhookEvent.findOneAndUpdate(
       { status: 'waiting' },
-      { $set: { status: 'inprocess' } },
+      { $set: { status: 'waiting' } },
       { sort: { createdAt: 1, _id: 1 }, new: true }
     ).lean();
 
@@ -823,7 +973,7 @@ const webhookProcessor = {
             $set: {
               status: nextStatus,
               retries: nextRetries,
-              lastError: error.message,
+              lastError: error?.response?.data?.error?.message || error.message,
             },
           }
         );

@@ -11,8 +11,12 @@ const DEFAULT_REMOVE_ON_FAIL = Number(process.env.WEBHOOK_REMOVE_ON_FAIL || 500)
 
 let webhookQueue = null;
 
+function encodeJobIdPart(value) {
+  return encodeURIComponent(String(value));
+}
+
 export function buildWebhookTenantJobId(tenantId) {
-  return `webhook:${String(tenantId)}`;
+  return `webhook-${encodeJobIdPart(tenantId)}`;
 }
 
 export function getWebhookQueue() {
