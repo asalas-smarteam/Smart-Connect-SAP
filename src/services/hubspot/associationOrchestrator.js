@@ -222,6 +222,7 @@ async function syncCompanyContacts({
         await contactHandler.update({
           token,
           id: existingContact.id,
+          existing: existingContact,
           item: contactPayload,
           clientConfig,
           tenantModels,

@@ -10,6 +10,12 @@ const mockProductFind = jest.fn();
 const mockProductCreate = jest.fn();
 const mockProductUpdate = jest.fn();
 const mockProductPreprocess = jest.fn();
+const mockContactFind = jest.fn();
+const mockContactCreate = jest.fn();
+const mockContactUpdate = jest.fn();
+const mockCompanyFind = jest.fn();
+const mockCompanyCreate = jest.fn();
+const mockCompanyUpdate = jest.fn();
 
 jest.unstable_mockModule('../../src/services/hubspotAuthService.js', () => ({
   default: {
@@ -41,11 +47,19 @@ jest.unstable_mockModule('../../src/services/hubspot/sapSyncAdapter.js', () => (
 }));
 
 jest.unstable_mockModule('../../src/services/hubspot/handlers/contact.handler.js', () => ({
-  default: {},
+  default: {
+    find: mockContactFind,
+    create: mockContactCreate,
+    update: mockContactUpdate,
+  },
 }));
 
 jest.unstable_mockModule('../../src/services/hubspot/handlers/company.handler.js', () => ({
-  default: {},
+  default: {
+    find: mockCompanyFind,
+    create: mockCompanyCreate,
+    update: mockCompanyUpdate,
+  },
 }));
 
 jest.unstable_mockModule('../../src/services/hubspot/handlers/deal.handler.js', () => ({
@@ -149,5 +163,63 @@ describe('sendToHubSpot', () => {
     expect(mockProductCreate).not.toHaveBeenCalled();
     expect(mockProductUpdate).not.toHaveBeenCalled();
     expect(mockHandleAssociations).not.toHaveBeenCalled();
+  });
+
+  it('passes existing HubSpot record into contact updates', async () => {
+    const clientConfig = {
+      hubspotCredentialId: 'cred-1',
+    };
+
+    const credentials = {
+      _id: 'cred-1',
+      accessToken: 'stale-token',
+      expiresAt: new Date('2026-01-01T00:00:00.000Z'),
+    };
+
+    const item = {
+      properties: {
+        email: 'contact@example.com',
+        firstname: 'Contact Name',
+        idsap: 'BP-01',
+      },
+    };
+
+    const existing = {
+      id: 'hs-contact-1',
+      properties: {
+        firstname: 'Old Contact',
+        idsap: 'BP-00',
+      },
+    };
+
+    mockContactFind.mockResolvedValue(existing);
+    mockContactUpdate.mockResolvedValue(existing);
+
+    const result = await sendToHubSpot(
+      [item],
+      clientConfig,
+      'contact',
+      {},
+      credentials
+    );
+
+    expect(result).toEqual({ ok: true, sent: 1, failed: 0 });
+    expect(mockContactUpdate).toHaveBeenCalledWith({
+      token: 'hubspot-token',
+      id: 'hs-contact-1',
+      existing,
+      item,
+      clientConfig,
+      tenantModels: {},
+    });
+    expect(mockHandleAssociations).toHaveBeenCalledWith({
+      objectType: 'contact',
+      token: 'hubspot-token',
+      item,
+      clientConfig,
+      tenantModels: {},
+      hubspotId: 'hs-contact-1',
+    });
+    expect(mockContactCreate).not.toHaveBeenCalled();
   });
 });

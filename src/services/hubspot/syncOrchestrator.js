@@ -95,6 +95,7 @@ async function processSingleItem({
       await handler.update({
         token,
         id: existing.id,
+        existing,
         item,
         clientConfig,
         tenantModels,

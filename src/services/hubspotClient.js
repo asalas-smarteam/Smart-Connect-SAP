@@ -76,31 +76,37 @@ export async function hubspotPost(token, path, data) {
   return hubspotRequest('post', path, token, data);
 }
 
-async function searchObject(token, objectType, filters) {
+async function searchObject(token, objectType, filters, properties = []) {
+  const payload = {
+    filterGroups: [
+      {
+        filters,
+      },
+    ],
+  };
+
+  if (Array.isArray(properties) && properties.length > 0) {
+    payload.properties = properties;
+  }
+
   const response = await hubspotRequest(
     'post',
     `/crm/v3/objects/${objectType}/search`,
     token,
-    {
-      filterGroups: [
-        {
-          filters,
-        },
-      ],
-    },
+    payload,
   );
 
   return response?.results?.[0] ?? null;
 }
 
-export async function findContactByEmail(token, email) {
+export async function findContactByEmail(token, email, options = {}) {
   return searchObject(token, 'contacts', [
     {
       propertyName: 'email',
       operator: 'EQ',
       value: email,
     },
-  ]);
+  ], options?.properties);
 }
 
 export async function createContact(token, data) {
@@ -112,14 +118,14 @@ export async function updateContact(token, id, data) {
   return hubspotRequest('patch', `/crm/v3/objects/contacts/${id}`, token, data);
 }
 
-export async function findCompanyByEmail(token, email) {
+export async function findCompanyByEmail(token, email, options = {}) {
   return searchObject(token, 'companies', [
     {
       propertyName: 'email',
       operator: 'EQ',
       value: email,
     },
-  ]);
+  ], options?.properties);
 }
 
 export async function createCompany(token, data) {
