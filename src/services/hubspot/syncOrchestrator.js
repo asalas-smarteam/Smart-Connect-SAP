@@ -1,3 +1,5 @@
+import { appendFile, mkdir } from 'node:fs/promises';
+import path from 'node:path';
 import hubspotAuthService from '../hubspotAuthService.js';
 import * as hubspotClient from '../hubspotClient.js';
 import associationRegistryService from '../associationRegistryService.js';
@@ -15,6 +17,12 @@ const HANDLERS = {
   product: productHandler,
 };
 
+const VALIDATION_FAILURES_FILE = path.resolve(
+  process.cwd(),
+  'logs',
+  'hubspot-validation-failures.txt'
+);
+
 function getHandler(objectType) {
   return HANDLERS[objectType] ?? null;
 }
@@ -29,6 +37,33 @@ function getSapIdForRegistry(objectType, item) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getValidationFailureIdentifier(objectType, item) {
+  if (objectType === 'product') {
+    return item?.properties?.idsap ?? item?.properties?.hs_sku ?? '';
+  }
+
+  return item?.properties?.idsap ?? '';
+}
+
+async function appendValidationFailureLine(objectType, item) {
+  const identifier = String(getValidationFailureIdentifier(objectType, item) ?? '').trim();
+  const email = String(item?.properties?.email ?? '').trim();
+  const line = objectType === 'product'
+    ? `${identifier}\n`
+    : `${identifier}, ${email}\n`;
+
+  if (!identifier) {
+    return;
+  }
+
+  try {
+    await mkdir(path.dirname(VALIDATION_FAILURES_FILE), { recursive: true });
+    await appendFile(VALIDATION_FAILURES_FILE, line, 'utf8');
+  } catch (error) {
+    console.error('appendValidationFailureLine error:', error);
+  }
 }
 
 async function retryRequest(fn, retries = 5) {
@@ -77,6 +112,8 @@ async function processSingleItem({
     const token = await getToken();
 
     if (!item?.properties?.email && objectType !== 'product') {
+      await appendValidationFailureLine(objectType, item);
+
       await registerBaseMapping(
         clientConfig,
         objectType,
