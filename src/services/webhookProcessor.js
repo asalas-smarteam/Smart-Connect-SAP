@@ -706,17 +706,25 @@ async function processSingleEvent({ event, tenantModels, tenantId, tenantKey, po
   }
 }
 
-async function claimEventsToProcess(WebhookEvent) {
+export async function claimEventsToProcess(WebhookEvent, batchSize = DEFAULT_BATCH_SIZE) {
   const claimed = [];
+  const safeBatchSize = Math.max(1, Number(batchSize || DEFAULT_BATCH_SIZE));
 
-  const event = await WebhookEvent.findOneAndUpdate(
-    { status: 'waiting' },
-    { $set: { status: 'waiting' } }, // ## replace for processing
-    { sort: { createdAt: 1, _id: 1 }, new: true }
-  ).lean();
+  while (claimed.length < safeBatchSize) {
+    // Claim oldest waiting events first so parallel workers do not process same document twice.
+    // eslint-disable-next-line no-await-in-loop
+    const event = await WebhookEvent.findOneAndUpdate(
+      { status: 'waiting' },
+      { $set: { status: 'inprocess' } },
+      { sort: { createdAt: 1, _id: 1 }, new: true }
+    ).lean();
 
-  claimed.push(event);
- 
+    if (!event) {
+      break;
+    }
+
+    claimed.push(event);
+  }
 
   return claimed;
 }
@@ -731,7 +739,7 @@ const webhookProcessor = {
     const maxRetriesByEnv = Math.max(1, Number(process.env.WEBHOOK_EVENT_MAX_RETRIES || DEFAULT_MAX_RETRIES));
     const events = await claimEventsToProcess(WebhookEvent);
 
-    if (!events.length || events == null) {
+    if (!events?.length) {
       return {
         processed: 0,
         completed: 0,

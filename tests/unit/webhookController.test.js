@@ -3,6 +3,7 @@ import { jest } from '@jest/globals';
 const mockGetTenantModels = jest.fn();
 const mockResolveActiveTenant = jest.fn();
 const mockQueueCreateDealEvent = jest.fn();
+const mockAddWebhookTenantJob = jest.fn();
 const mockLoggerInfo = jest.fn();
 const mockLoggerError = jest.fn();
 
@@ -16,6 +17,10 @@ jest.unstable_mockModule('../../src/utils/tenantSubscriptions.js', () => ({
 
 jest.unstable_mockModule('../../src/services/webhookEvent.service.js', () => ({
   queueCreateDealEvent: mockQueueCreateDealEvent,
+}));
+
+jest.unstable_mockModule('../../src/queues/webhook.queue.js', () => ({
+  addWebhookTenantJob: mockAddWebhookTenantJob,
 }));
 
 jest.unstable_mockModule('../../src/core/logger.js', () => ({
@@ -84,6 +89,7 @@ describe('webhook.controller receiveHubspotWebhook', () => {
     const reply = buildReply();
     mockResolveActiveTenant.mockResolvedValue({
       client: {
+        _id: 'tenant-1',
         tenantKey: 'tenant_key_1',
         hubspot: { portalId: '123' },
       },
@@ -98,6 +104,12 @@ describe('webhook.controller receiveHubspotWebhook', () => {
     expect(mockResolveActiveTenant).toHaveBeenCalledWith({ tenantId: 'tenant-1' });
     expect(mockGetTenantModels).toHaveBeenCalledWith('tenant_key_1');
     expect(mockQueueCreateDealEvent).toHaveBeenCalledWith({ WebhookEvent, payload: req.body });
+    expect(mockAddWebhookTenantJob).toHaveBeenCalledWith({
+      tenantId: 'tenant-1',
+      tenantKey: 'tenant_key_1',
+      portalId: '123',
+      triggerType: 'webhook',
+    });
     expect(reply.code).toHaveBeenCalledWith(200);
     expect(reply.send).toHaveBeenCalledWith({ success: true, message: 'Event queued' });
   });
@@ -114,6 +126,7 @@ describe('webhook.controller receiveHubspotWebhook', () => {
     const reply = buildReply();
     mockResolveActiveTenant.mockResolvedValue({
       client: {
+        _id: 'tenant-1',
         tenantKey: 'tenant_key_1',
         hubspot: { portalId: '123' },
       },
@@ -126,5 +139,6 @@ describe('webhook.controller receiveHubspotWebhook', () => {
 
     expect(reply.code).toHaveBeenCalledWith(200);
     expect(reply.send).toHaveBeenCalledWith({ success: true, message: 'Duplicate event ignored' });
+    expect(mockAddWebhookTenantJob).not.toHaveBeenCalled();
   });
 });

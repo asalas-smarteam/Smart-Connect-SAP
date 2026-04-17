@@ -1,5 +1,6 @@
 import { getTenantModels } from '../config/tenantDatabase.js';
 import logger from '../core/logger.js';
+import { addWebhookTenantJob } from '../queues/webhook.queue.js';
 import { queueCreateDealEvent } from '../services/webhookEvent.service.js';
 import { resolveActiveTenant } from '../utils/tenantSubscriptions.js';
 
@@ -73,9 +74,16 @@ export const receiveHubspotWebhook = async (req, reply) => {
       });
     }
 
+    await addWebhookTenantJob({
+      tenantId: tenantContext.client._id,
+      tenantKey: tenantContext.client.tenantKey,
+      portalId: tenantPortalId || body.portalId,
+      triggerType: 'webhook',
+    });
+
     logger.info({
       msg: 'HubSpot createDeal webhook event queued',
-      tenantId: body.tenantId,
+      tenantId,
       portalId: body.portalId,
       dealId: body.deal.hs_object_id,
       webhookEventId: queueResult.eventId,
