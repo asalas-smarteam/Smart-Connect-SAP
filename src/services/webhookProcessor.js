@@ -6,7 +6,7 @@ import hubspotAuthService from './hubspotAuthService.js';
 import * as hubspotClient from './hubspotClient.js';
 import sapSessionManager, { isSessionInvalidError } from './sapSessionManager.js';
 import tenantConfigurationService from './tenantConfiguration.service.js';
-import { getAvailableStockForWarehouse } from '../utils/warehouseStock.js';
+
 import {
   buildErrorResponseSnapshot,
   buildWebhookSyncErrorEntry,
@@ -15,7 +15,6 @@ import {
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 const DEFAULT_BATCH_SIZE = Number(process.env.WEBHOOK_EVENT_BATCH_SIZE || 10);
 const DEFAULT_MAX_RETRIES = Number(process.env.WEBHOOK_EVENT_MAX_RETRIES || 3);
-const DEFAULT_DOCUMENT_WAREHOUSE_CODE = 'B04';
 
 class PermanentWebhookError extends Error {
   constructor(message) {
@@ -100,6 +99,104 @@ function normalizePositiveInteger(value, fallback = null) {
 
 function resolveHubspotSapId(record) {
   return toNonEmptyString(record?.idsap || record?.idSap);
+}
+
+function resolvePayloadEntityTarget(payload, entityKey) {
+  if (payload?.[entityKey] && typeof payload[entityKey] === 'object') {
+    return {
+      container: payload,
+      key: entityKey,
+      path: `payload.${entityKey}`,
+    };
+  }
+
+  if (payload?.data?.[entityKey] && typeof payload.data[entityKey] === 'object') {
+    return {
+      container: payload.data,
+      key: entityKey,
+      path: `payload.data.${entityKey}`,
+    };
+  }
+
+  return {
+    container: payload,
+    key: entityKey,
+    path: `payload.${entityKey}`,
+  };
+}
+
+function buildWebhookEventReferenceUpdates({
+  payload,
+  companyExists,
+  contactExists,
+  cardCode,
+  contactEmployeeCode,
+}) {
+  const nextUpdates = {};
+  const normalizedCardCode = toNonEmptyString(cardCode);
+  const normalizedContactEmployeeCode = toNonEmptyString(contactEmployeeCode);
+
+  if (normalizedCardCode) {
+    if (companyExists) {
+      const companyTarget = resolvePayloadEntityTarget(payload, 'company');
+      companyTarget.container[companyTarget.key] = {
+        ...(companyTarget.container[companyTarget.key] || {}),
+        idsap: normalizedCardCode,
+      };
+      nextUpdates[`${companyTarget.path}.idsap`] = normalizedCardCode;
+    } else if (contactExists) {
+      const contactTarget = resolvePayloadEntityTarget(payload, 'contact');
+      contactTarget.container[contactTarget.key] = {
+        ...(contactTarget.container[contactTarget.key] || {}),
+        idsap: normalizedCardCode,
+      };
+      nextUpdates[`${contactTarget.path}.idsap`] = normalizedCardCode;
+    }
+  }
+
+  if (companyExists && contactExists && normalizedContactEmployeeCode) {
+    const contactTarget = resolvePayloadEntityTarget(payload, 'contact');
+    contactTarget.container[contactTarget.key] = {
+      ...(contactTarget.container[contactTarget.key] || {}),
+      internalCode: normalizedContactEmployeeCode,
+    };
+    nextUpdates[`${contactTarget.path}.internalCode`] = normalizedContactEmployeeCode;
+  }
+
+  return nextUpdates;
+}
+
+async function persistWebhookEventReferences({
+  WebhookEvent,
+  eventId,
+  payload,
+  companyExists,
+  contactExists,
+  cardCode = null,
+  contactEmployeeCode = null,
+}) {
+  if (!WebhookEvent || !eventId || !payload) {
+    return;
+  }
+
+  const updates = buildWebhookEventReferenceUpdates({
+    payload,
+    companyExists,
+    contactExists,
+    cardCode,
+    contactEmployeeCode,
+  });
+
+  if (!Object.keys(updates).length) {
+    return;
+  }
+
+  await WebhookEvent.updateOne(
+    { _id: eventId },
+    {
+      $set: updates,
+    }
+  );
 }
 
 function buildDefaultBusinessPartnerCardCode({ company, contact, companyExists }) {
@@ -510,26 +607,6 @@ async function addContactEmployeeIfNeeded({
   };
 }
 
-async function validateStockForItem(sapConfig, itemCode, quantity, warehouseCode = DEFAULT_DOCUMENT_WAREHOUSE_CODE) {
-  const item = await serviceLayerRequest(sapConfig, {
-    method: 'get',
-    path: `/Items('${encodeURIComponent(String(itemCode))}')`,
-    params: {
-      $select: 'ItemCode,ItemWarehouseInfoCollection',
-    },
-  });
-
-  const available = getAvailableStockForWarehouse(
-    item?.ItemWarehouseInfoCollection,
-    warehouseCode
-  );
-  if (available < quantity) {
-    throw new PermanentWebhookError(
-      `Insufficient stock for item ${itemCode}. Available: ${available}, required: ${quantity}`
-    );
-  }
-}
-
 function mapDocumentLines({ lineItems, productMappings }) {
   const lines = [];
 
@@ -554,7 +631,7 @@ function mapDocumentLines({ lineItems, productMappings }) {
       ItemCode: itemCode,
       Quantity: quantity,
       UnitPrice: Number.isFinite(unitPrice) ? unitPrice : 0,
-      WarehouseCode: DEFAULT_DOCUMENT_WAREHOUSE_CODE
+      WarehouseCode: lineItem.warehouses
     });
   }
 
@@ -705,6 +782,7 @@ async function updateHubspotAfterSap({
 
 async function processSingleEvent({ event, tenantModels, tenantId, tenantKey, portalId }) {
   const { payload, deal, company, contact, lineItems } = resolveEventPayload(event);
+  const WebhookEvent = tenantModels?.WebhookEvent;
   const companyExists = Boolean(company);
   const contactExists = Boolean(contact);
   const auditTrail = {
@@ -782,6 +860,17 @@ async function processSingleEvent({ event, tenantModels, tenantId, tenantKey, po
       });
     }
 
+    if (businessPartnerResult.created) {
+      await persistWebhookEventReferences({
+        WebhookEvent,
+        eventId: event?._id,
+        payload,
+        companyExists,
+        contactExists,
+        cardCode,
+      });
+    }
+
     if (companyExists && contactExists) {
       contactEmployeeResult = await addContactEmployeeIfNeeded({
         sapConfig,
@@ -789,6 +878,17 @@ async function processSingleEvent({ event, tenantModels, tenantId, tenantKey, po
         businessPartner: businessPartnerResult.businessPartner,
         contact,
         contactEmployeeMappings: mappings.contactEmployeeMappings,
+      });
+    }
+
+    if (contactEmployeeResult.internalCode) {
+      await persistWebhookEventReferences({
+        WebhookEvent,
+        eventId: event?._id,
+        payload,
+        companyExists,
+        contactExists,
+        contactEmployeeCode: contactEmployeeResult.internalCode,
       });
     }
 
@@ -865,7 +965,7 @@ export async function claimEventsToProcess(WebhookEvent, batchSize = DEFAULT_BAT
     // eslint-disable-next-line no-await-in-loop #$$$$$
     const event = await WebhookEvent.findOneAndUpdate(
       { status: 'waiting' },
-      { $set: { status: 'waiting' } },
+      { $set: { status: 'Inprocess' } },
       { sort: { createdAt: 1, _id: 1 }, new: true }
     ).lean();
 
