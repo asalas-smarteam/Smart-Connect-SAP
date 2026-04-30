@@ -480,7 +480,7 @@ async function findOrCreateBusinessPartner({
   const payload = {
     CardName: cardName,
     CardType: 'C',
-    CompanyPrivate: companyExists ? 'C' : 'P',
+    CompanyPrivate: companyExists ? 'C' : 'I',
     EmailAddress: mappedEmail || "",
     Phone1: toNonEmptyString(mappedCompany?.Phone1 || mappedContact?.Phone1) || undefined,
     PriceListNum: resolvedPriceListNum,
@@ -910,6 +910,7 @@ async function processSingleEvent({ event, tenantModels, tenantId, tenantKey, po
     });
     auditTrail.payload_SAP.order = orderPayload;
 
+    console.log(JSON.stringify(orderPayload))
     const orderResponse = await createOrder({
       sapConfig,
       orderPayload,
@@ -965,7 +966,7 @@ export async function claimEventsToProcess(WebhookEvent, batchSize = DEFAULT_BAT
     // eslint-disable-next-line no-await-in-loop #$$$$$
     const event = await WebhookEvent.findOneAndUpdate(
       { status: 'waiting' },
-      { $set: { status: 'Inprocess' } },
+      { $set: { status: 'inprocess' } },
       { sort: { createdAt: 1, _id: 1 }, new: true }
     ).lean();
 
