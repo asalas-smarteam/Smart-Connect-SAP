@@ -472,6 +472,9 @@ async function findOrCreateBusinessPartner({
     ? (company?.name || company?.company || company?.hs_name)
     : resolveContactDisplayName(contact);
   const cardName = toNonEmptyString(mappedCompany?.CardName || mappedContact?.CardName || fallbackName);
+  const federalTaxId = companyExists
+    ? mappedCompany?.FederalTaxID
+    : mappedContact?.FederalTaxID;
 
   if (!cardName) {
     throw new PermanentWebhookError('CardName is required to create Business Partner');
@@ -485,7 +488,7 @@ async function findOrCreateBusinessPartner({
     Phone1: toNonEmptyString(mappedCompany?.Phone1 || mappedContact?.Phone1) || undefined,
     PriceListNum: resolvedPriceListNum,
     CardCode: resolvedCardCode,
-    FederalTaxID: mappedCompany?.FederalTaxID 
+    FederalTaxID: toNonEmptyString(federalTaxId) || undefined,
   };
 
   const created = await serviceLayerRequest(sapConfig, {

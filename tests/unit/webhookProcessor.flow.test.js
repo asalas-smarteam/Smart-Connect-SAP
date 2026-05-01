@@ -129,6 +129,7 @@ function setupMappings() {
       { sourceField: 'Phone1', targetField: 'phone' },
       { sourceField: 'PriceListNum', targetField: 'priceListNum' },
       { sourceField: 'CardCode', targetField: 'idsap' },
+      { sourceField: 'FederalTaxID', targetField: 'ruc' },
     ])
     .mockResolvedValueOnce([
       { sourceField: 'CardName', targetField: 'firstname' },
@@ -136,6 +137,7 @@ function setupMappings() {
       { sourceField: 'Phone1', targetField: 'phone' },
       { sourceField: 'PriceListNum', targetField: 'priceListNum' },
       { sourceField: 'CardCode', targetField: 'idsap' },
+      { sourceField: 'FederalTaxID', targetField: 'dni' },
     ])
     .mockResolvedValueOnce([
       { sourceField: 'Name', targetField: 'firstname' },
@@ -396,6 +398,79 @@ describe('webhookProcessor flow', () => {
         idsap: expect.stringMatching(/^CL/),
       },
     });
+  });
+
+  it('uses contact dni as FederalTaxID when the Business Partner is created from contact only', async () => {
+    setupMappings();
+    const tenantModels = buildTenantModels({
+      contact: {
+        hs_object_id: 'contact-1',
+        firstname: 'Linda',
+        lastname: 'Gutierrez',
+        email: 'mercadeo@ferreterianoelito.com',
+        phone: '+50587365564',
+        dni: '161-190300-1004C',
+      },
+    });
+
+    mockAxios.mockImplementation(async (config) => {
+      if (config.method === 'get' && config.url.endsWith('/b1s/v2/BusinessPartners')) {
+        return { data: { value: [] } };
+      }
+
+      if (config.method === 'post' && config.url.endsWith('/b1s/v2/BusinessPartners')) {
+        return { data: { CardCode: config.data.CardCode } };
+      }
+
+      if (config.method === 'get' && config.url.includes("/b1s/v2/BusinessPartners('")) {
+        const cardCode = decodeURIComponent(
+          config.url.split("/b1s/v2/BusinessPartners('")[1].split("')")[0]
+        );
+
+        return {
+          data: {
+            CardCode: cardCode,
+            CardName: 'Linda',
+            EmailAddress: 'mercadeo@ferreterianoelito.com',
+            PriceListNum: 4,
+            ContactEmployees: [],
+          },
+        };
+      }
+
+      if (config.method === 'post' && config.url.endsWith('/b1s/v2/Orders')) {
+        return {
+          data: {
+            DocEntry: 13,
+            DocNum: 23,
+          },
+        };
+      }
+
+      throw new Error(`Unexpected axios call: ${config.method} ${config.url}`);
+    });
+
+    const result = await webhookProcessor.processPendingEvents({
+      tenantModels,
+      tenantId: 'tenant-1',
+      tenantKey: 'tenant_1',
+      portalId: '12345',
+    });
+
+    expect(result.completed).toBe(1);
+    expect(mockAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'post',
+        url: 'https://sap.example.com:50000/b1s/v2/BusinessPartners',
+        data: expect.objectContaining({
+          CardName: 'Linda',
+          CompanyPrivate: 'I',
+          EmailAddress: 'mercadeo@ferreterianoelito.com',
+          Phone1: '+50587365564',
+          FederalTaxID: '161-190300-1004C',
+        }),
+      })
+    );
   });
 
   it('writes idsap back to HubSpot before order creation completes', async () => {
