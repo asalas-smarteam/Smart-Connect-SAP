@@ -38,12 +38,24 @@ describe('sapService.fetchData', () => {
       integrationModeId: { name: 'SERVICE_LAYER' },
       hubspotCredentialId: 'cred-1',
       objectType: 'company',
+      toObject() {
+        return {
+          integrationModeId: { name: 'SERVICE_LAYER' },
+          hubspotCredentialId: 'cred-1',
+          objectType: 'company',
+        };
+      },
     };
 
     const tenantModels = {
       ClientConfig: {
         findById: jest.fn().mockReturnValue({
           populate: jest.fn().mockResolvedValue(config),
+        }),
+      },
+      SapCredentials: {
+        find: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue([{ serviceLayerBaseUrl: 'https://sap.example.com' }]),
         }),
       },
     };
@@ -59,9 +71,15 @@ describe('sapService.fetchData', () => {
       'businessPartner',
       tenantModels
     );
-    expect(mockServiceLayerExecute).toHaveBeenCalledWith(config, [
-      { sourceField: 'CardName', targetField: 'name' },
-    ]);
+    expect(mockServiceLayerExecute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serviceLayerBaseUrl: 'https://sap.example.com',
+        hubspotCredentialId: 'cred-1',
+        objectType: 'company',
+      }),
+      [{ sourceField: 'CardName', targetField: 'name' }],
+      {}
+    );
     expect(result).toEqual([{ CardName: 'Acme' }]);
   });
 });

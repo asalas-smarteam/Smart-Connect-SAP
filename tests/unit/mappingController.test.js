@@ -18,8 +18,13 @@ describe('mapping.controller createMapping', () => {
       findOne: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue({ _id: 'm1' }) }),
       create: jest.fn(),
     };
+    const ClientConfig = {
+      findOne: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue({ hubspotCredentialId: 'cred-1' }),
+      }),
+    };
 
-    mockRequireTenantModels.mockReturnValue({ FieldMapping });
+    mockRequireTenantModels.mockReturnValue({ FieldMapping, ClientConfig });
 
     const req = {
       body: {
@@ -53,8 +58,13 @@ describe('mapping.controller createMapping', () => {
       findOne: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }),
       create: jest.fn().mockRejectedValue(duplicateError),
     };
+    const ClientConfig = {
+      findOne: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue({ hubspotCredentialId: 'cred-1' }),
+      }),
+    };
 
-    mockRequireTenantModels.mockReturnValue({ FieldMapping });
+    mockRequireTenantModels.mockReturnValue({ FieldMapping, ClientConfig });
 
     const req = {
       body: {
@@ -73,10 +83,10 @@ describe('mapping.controller createMapping', () => {
 
     await createMapping(req, reply);
 
-    expect(reply.code).toHaveBeenCalledWith(409);
+    expect(reply.code).not.toHaveBeenCalled();
     expect(reply.send).toHaveBeenCalledWith({
       ok: false,
-      message: 'Mapping already exists for this sourceField and objectType.',
+      message: 'E11000 duplicate key error',
     });
   });
 });

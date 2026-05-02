@@ -230,6 +230,7 @@ describe('provisionTenant', () => {
         updateOne: jest.fn().mockResolvedValue(),
       },
       HubspotCredentials: {
+        collection: { name: 'hubspotcredentials' },
         create: mockCreateHubspotCredentials,
       },
     });

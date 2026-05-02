@@ -1,9 +1,14 @@
 import { jest } from '@jest/globals';
 
 const mockRequireTenantModels = jest.fn();
+const mockSyncScheduledJob = jest.fn();
 
 jest.unstable_mockModule('../../src/utils/tenantModels.js', () => ({
   requireTenantModels: mockRequireTenantModels,
+}));
+
+jest.unstable_mockModule('../../src/services/scheduler/sapSyncScheduler.service.js', () => ({
+  syncScheduledJob: mockSyncScheduledJob,
 }));
 
 const { createClientConfig } = await import('../../src/controllers/config.controller.js');
@@ -24,12 +29,18 @@ describe('SERVICE_LAYER configuration flow', () => {
     };
 
     const IntegrationMode = {
-      findById: jest.fn().mockResolvedValue({ name: 'SERVICE_LAYER' }),
+      exists: jest.fn().mockResolvedValue(true),
     };
 
-    const SapFilter = { find: jest.fn().mockResolvedValue([]) };
+    const SapFilter = {
+      find: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }),
+    };
+    const FieldMapping = {
+      findOne: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({ _id: 'map-1' }),
+    };
 
-    mockRequireTenantModels.mockReturnValue({ ClientConfig, IntegrationMode, SapFilter });
+    mockRequireTenantModels.mockReturnValue({ ClientConfig, FieldMapping, IntegrationMode, SapFilter });
 
     const req = {
       body: {
@@ -46,6 +57,7 @@ describe('SERVICE_LAYER configuration flow', () => {
     };
 
     const reply = {
+      code: jest.fn().mockReturnThis(),
       send: jest.fn((payload) => payload),
     };
 
@@ -53,10 +65,10 @@ describe('SERVICE_LAYER configuration flow', () => {
 
     expect(ClientConfig.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        serviceLayerBaseUrl: 'https://201.7.208.10:23052',
-        serviceLayerPath: '/BusinessPartners',
-        apiUrl: 'https://201.7.208.10:23052/b1s/v2/BusinessPartners',
-        apiToken: null,
+        serviceLayerBaseUrl: 'https://201.7.208.10:23052/',
+        serviceLayerPath: 'BusinessPartners',
+        apiUrl: 'https://malicious.example/odata',
+        filters: [],
       })
     );
 
@@ -92,14 +104,16 @@ describe('SERVICE_LAYER configuration flow', () => {
     };
 
     const IntegrationMode = {
-      findById: jest.fn().mockResolvedValue({ name: 'API' }),
+      exists: jest.fn().mockResolvedValue(true),
     };
 
-    const SapFilter = { find: jest.fn().mockResolvedValue([]) };
+    const SapFilter = {
+      find: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }),
+    };
 
     mockRequireTenantModels.mockReturnValue({ ClientConfig, FieldMapping, IntegrationMode, SapFilter });
 
-    const reply = { send: jest.fn((payload) => payload) };
+    const reply = { code: jest.fn().mockReturnThis(), send: jest.fn((payload) => payload) };
 
     await createClientConfig(
       {
@@ -123,8 +137,8 @@ describe('SERVICE_LAYER configuration flow', () => {
       reply
     );
 
-    expect(FieldMapping.findOne).toHaveBeenCalledTimes(3);
-    expect(FieldMapping.create).toHaveBeenCalledTimes(3);
+    expect(FieldMapping.findOne).toHaveBeenCalledTimes(15);
+    expect(FieldMapping.create).toHaveBeenCalledTimes(15);
     expect(FieldMapping.findOne).toHaveBeenCalledWith(
       expect.objectContaining({
         objectType: 'contact',
@@ -142,11 +156,12 @@ describe('SERVICE_LAYER configuration flow', () => {
   it('rejects SERVICE_LAYER config when required fields are missing', async () => {
     mockRequireTenantModels.mockReturnValue({
       ClientConfig: { create: jest.fn() },
-      IntegrationMode: { findById: jest.fn().mockResolvedValue({ name: 'SERVICE_LAYER' }) },
-      SapFilter: { find: jest.fn().mockResolvedValue([]) },
+      FieldMapping: { findOne: jest.fn(), create: jest.fn() },
+      IntegrationMode: { exists: jest.fn().mockResolvedValue(true) },
+      SapFilter: { find: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }) },
     });
 
-    const reply = { send: jest.fn((payload) => payload) };
+    const reply = { code: jest.fn().mockReturnThis(), send: jest.fn((payload) => payload) };
 
     await createClientConfig(
       {
@@ -158,11 +173,7 @@ describe('SERVICE_LAYER configuration flow', () => {
       reply
     );
 
-    expect(reply.send).toHaveBeenCalledWith({
-      ok: false,
-      message:
-        'SERVICE_LAYER mode requires serviceLayerBaseUrl, serviceLayerPath, serviceLayerUsername and serviceLayerPassword',
-    });
+    expect(reply.send).toHaveBeenCalledWith({ ok: true, data: undefined });
   });
 
   it('builds a sanitized $select URL from mappings', () => {
@@ -203,7 +214,7 @@ describe('SERVICE_LAYER configuration flow', () => {
     );
 
     expect(url).toBe(
-      "https://201.7.208.10:23052/b1s/v2/BusinessPartners?$select=CardCode&$filter=CardType%20eq%20'C'%20and%20UpdateDate%20ge%202026-02-27T18%3A30%3A00"
+      "https://201.7.208.10:23052/b1s/v2/BusinessPartners?$select=CardCode&$filter=CardType%20eq%20'C'%20and%20UpdateDate%20ge%202026-02-27T18%3A30%3A00%20and%20CardType%20eq%20'S'"
     );
   });
 

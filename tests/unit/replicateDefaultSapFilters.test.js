@@ -9,21 +9,31 @@ let masterConnection;
 let tenantConnection;
 
 beforeAll(async () => {
-  mongoServer = await MongoMemoryServer.create();
+  mongoServer = await MongoMemoryServer.create({ instance: { ip: '127.0.0.1' } });
   const uri = mongoServer.getUri();
   masterConnection = await mongoose.createConnection(uri, { dbName: 'master_test' }).asPromise();
   tenantConnection = await mongoose.createConnection(uri, { dbName: 'tenant_test' }).asPromise();
 });
 
 afterEach(async () => {
-  await masterConnection.dropDatabase();
-  await tenantConnection.dropDatabase();
+  if (masterConnection) {
+    await masterConnection.dropDatabase();
+  }
+  if (tenantConnection) {
+    await tenantConnection.dropDatabase();
+  }
 });
 
 afterAll(async () => {
-  await masterConnection.close();
-  await tenantConnection.close();
-  await mongoServer.stop();
+  if (masterConnection) {
+    await masterConnection.close();
+  }
+  if (tenantConnection) {
+    await tenantConnection.close();
+  }
+  if (mongoServer) {
+    await mongoServer.stop();
+  }
 });
 
 describe('replicateDefaultSapFilters', () => {

@@ -6,6 +6,8 @@ import hubspotAuthService from './hubspotAuthService.js';
 import * as hubspotClient from './hubspotClient.js';
 import sapSessionManager, { isSessionInvalidError } from './sapSessionManager.js';
 import tenantConfigurationService from './tenantConfiguration.service.js';
+import ProcessWebhookDealEventBatch from '../application/use-cases/ProcessWebhookDealEventBatch.js';
+import MongooseWebhookEventRepository from '../infrastructure/repositories/MongooseWebhookEventRepository.js';
 
 import {
   buildErrorResponseSnapshot,
@@ -913,7 +915,6 @@ async function processSingleEvent({ event, tenantModels, tenantId, tenantKey, po
     });
     auditTrail.payload_SAP.order = orderPayload;
 
-    console.log(JSON.stringify(orderPayload))
     const orderResponse = await createOrder({
       sapConfig,
       orderPayload,
@@ -961,26 +962,8 @@ async function processSingleEvent({ event, tenantModels, tenantId, tenantKey, po
 }
 
 export async function claimEventsToProcess(WebhookEvent, batchSize = DEFAULT_BATCH_SIZE) {
-  const claimed = [];
-  const safeBatchSize = Math.max(1, Number(batchSize || DEFAULT_BATCH_SIZE));
-
-  while (claimed.length < safeBatchSize) {
-    // Claim oldest waiting events first so parallel workers do not process same document twice.
-    // eslint-disable-next-line no-await-in-loop #$$$$$
-    const event = await WebhookEvent.findOneAndUpdate(
-      { status: 'waiting' },
-      { $set: { status: 'inprocess' } },
-      { sort: { createdAt: 1, _id: 1 }, new: true }
-    ).lean();
-
-    if (!event) {
-      break;
-    }
-
-    claimed.push(event);
-  }
-
-  return claimed;
+  const repository = new MongooseWebhookEventRepository({ WebhookEvent, batchSize });
+  return repository.claimWaiting();
 }
 
 const webhookProcessor = {
@@ -989,131 +972,21 @@ const webhookProcessor = {
       throw new Error('Tenant models are required to process webhook events');
     }
 
-    const { WebhookEvent } = tenantModels;
     const maxRetriesByEnv = Math.max(1, Number(process.env.WEBHOOK_EVENT_MAX_RETRIES || DEFAULT_MAX_RETRIES));
-    const events = await claimEventsToProcess(WebhookEvent);
-
-    if (!events?.length) {
-      return {
-        processed: 0,
-        completed: 0,
-        retried: 0,
-        errored: 0,
-        skipped: 0,
-        errorDetails: [],
-      };
-    }
-
-    logger.info({
-      msg: 'Webhook batch processing started',
-      tenantId: tenantId || null,
-      tenantKey: tenantKey || null,
-      portalId: portalId || null,
-      batchSize: events.length,
+    const repository = new MongooseWebhookEventRepository({
+      WebhookEvent: tenantModels?.WebhookEvent,
+      batchSize: DEFAULT_BATCH_SIZE,
+    });
+    const useCase = new ProcessWebhookDealEventBatch({
+      webhookEventRepository: repository,
+      processWebhookDealEvent: processSingleEvent,
+      logger,
+      maxRetries: maxRetriesByEnv,
+      buildWebhookSyncErrorEntry,
+      buildErrorResponseSnapshot,
     });
 
-    const summary = {
-      processed: events.length,
-      completed: 0,
-      retried: 0,
-      errored: 0,
-      skipped: 0,
-      errorDetails: [],
-    };
-
-    for (const event of events) {
-      try {
-        // eslint-disable-next-line no-await-in-loop
-        const result = await processSingleEvent({
-          event,
-          tenantModels,
-          tenantId,
-          tenantKey,
-          portalId,
-        });
-
-        // eslint-disable-next-line no-await-in-loop
-        await WebhookEvent.updateOne(
-          { _id: event._id },
-          {
-            $set: {
-              status: 'completed',
-              lastError: null,
-              'payload.sapResult': {
-                docEntry: result.docEntry,
-                docNum: result.docNum,
-                cardCode: result.cardCode,
-              },
-              'payload.processedAt': new Date().toISOString(),
-            },
-          }
-        );
-
-        summary.completed += 1;
-        logger.info({
-          msg: 'Webhook event processed',
-          tenantId: tenantId || null,
-          tenantKey: tenantKey || null,
-          eventId: String(event._id),
-          status: 'completed',
-          docEntry: result.docEntry,
-          docNum: result.docNum,
-        });
-      } catch (error) {
-        const currentRetries = Number(event?.retries || 0);
-        const configuredMaxRetries = Math.max(
-          1,
-          Number(event?.maxRetries || 0) || maxRetriesByEnv
-        );
-        const isPermanent = Boolean(error?.permanent);
-        const nextRetries = isPermanent ? configuredMaxRetries : currentRetries + 1;
-        const shouldRetry = !isPermanent && nextRetries < configuredMaxRetries;
-        const nextStatus = shouldRetry ? 'waiting' : 'errored';
-
-        // eslint-disable-next-line no-await-in-loop
-        await WebhookEvent.updateOne(
-          { _id: event._id },
-          {
-            $set: {
-              status: nextStatus,
-              retries: nextRetries,
-              lastError: error?.response?.data?.error?.message || error.message,
-            },
-          }
-        );
-
-        if (shouldRetry) {
-          summary.retried += 1;
-        } else {
-          summary.errored += 1;
-          if (Array.isArray(error?.syncLogWebhookErrors) && error.syncLogWebhookErrors.length > 0) {
-            summary.errorDetails.push(...error.syncLogWebhookErrors);
-          } else {
-            summary.errorDetails.push(
-              buildWebhookSyncErrorEntry({
-                payloadHubspot: event?.payload || null,
-                payloadSap: null,
-                responseHubspot: null,
-                responseSap: buildErrorResponseSnapshot(error),
-              })
-            );
-          }
-        }
-
-        logger.error({
-          msg: 'Webhook event processing failed',
-          tenantId: tenantId || null,
-          tenantKey: tenantKey || null,
-          eventId: String(event._id),
-          retries: nextRetries,
-          maxRetries: configuredMaxRetries,
-          nextStatus,
-          error: error.message,
-        });
-      }
-    }
-
-    return summary;
+    return useCase.execute({ tenantModels, tenantId, tenantKey, portalId });
   },
 };
 

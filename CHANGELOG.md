@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 This changelog was initialized from the available git history. The repository does not currently have release tags, so the first entry summarizes the current `package.json` version and recent project history.
 
+## [Unreleased]
+
+### Added
+
+- Add a hexagonal application use case for HubSpot deal webhook batch processing.
+- Add a Mongoose webhook event repository adapter for claiming and updating webhook events.
+- Add unit coverage for webhook batch completion, retry, and permanent-error behavior.
+- Add the `api-design-principles` project skill for API design guidance.
+
+### Changed
+
+- Refactor webhook event batch processing so the existing `webhookProcessor` facade delegates retry, status, and summary handling to the application layer.
+- Update test fixtures to match the current Service Layer, OAuth, mapping, HubSpot auth, SAP service, and tenant provisioning contracts.
+- Harden Mongo-backed integration tests by using valid ObjectId plan IDs, local MongoMemoryServer binding, disabled background webhook cron, and explicit queue/Redis cleanup.
+
+### Fixed
+
+- Remove noisy SAP order payload logging from webhook processing.
+- Fix test suite reliability by closing queue and Redis resources after integration tests.
+
 ## [1.3.19] - 2026-04-30
 
 ### Added

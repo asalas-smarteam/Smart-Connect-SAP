@@ -5,10 +5,12 @@ const mockGetTenantConnection = jest.fn();
 const mockExchangeCodeForTokens = jest.fn();
 const mockSeedHubspotMappings = jest.fn();
 const mockSeedCreateFieldsHubspot = jest.fn();
+const mockReplicateMasterClientConfigs = jest.fn();
 const mockRequireTenantModels = jest.fn();
 const mockLoggerError = jest.fn();
 
 jest.unstable_mockModule('../../src/config/database.js', () => ({
+  FeatureFlags: { db: { id: 'master-connection' } },
   SaaSClient: {},
 }));
 
@@ -33,6 +35,10 @@ jest.unstable_mockModule('../../src/services/hubspotAuthService.js', () => ({
 jest.unstable_mockModule('../../src/services/tenant/tenantHubspotSeed.service.js', () => ({
   seedHubspotMappings: mockSeedHubspotMappings,
   seedCreateFieldsHubspot: mockSeedCreateFieldsHubspot,
+}));
+
+jest.unstable_mockModule('../../src/services/tenant/replicateMasterClientConfigs.js', () => ({
+  replicateMasterClientConfigs: mockReplicateMasterClientConfigs,
 }));
 
 jest.unstable_mockModule('../../src/utils/tenantModels.js', () => ({
@@ -63,6 +69,7 @@ describe('oauth.controller oauthCallback', () => {
     mockGetTenantModels.mockResolvedValue(tenantModels);
     mockGetTenantConnection.mockResolvedValue(tenantConnection);
     mockExchangeCodeForTokens.mockResolvedValue(credentials);
+    mockReplicateMasterClientConfigs.mockResolvedValue({ created: 1, updated: 0 });
     mockSeedHubspotMappings.mockResolvedValue({ pipelinesCount: 1, stagesCount: 1, ownersCount: 1 });
     mockSeedCreateFieldsHubspot.mockResolvedValue({ totalFields: 3, createdFields: 3, existingFields: 0 });
 

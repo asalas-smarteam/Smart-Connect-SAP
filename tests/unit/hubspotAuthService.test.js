@@ -26,7 +26,7 @@ describe('hubspotAuthService.getAccessToken', () => {
 
     const tenantModels = {
       HubspotCredentials: {
-        findOne: jest.fn(),
+        findOne: jest.fn().mockResolvedValue(credentials),
       },
     };
 
@@ -49,6 +49,11 @@ describe('hubspotAuthService.getAccessToken', () => {
     expect(credentials.refreshToken).toBe('fresh-refresh-token');
     expect(credentials.expiresAt).toBeInstanceOf(Date);
     expect(credentials.save).toHaveBeenCalledTimes(1);
-    expect(tenantModels.HubspotCredentials.findOne).not.toHaveBeenCalled();
+    expect(tenantModels.HubspotCredentials.findOne).toHaveBeenCalledWith({
+      $or: [
+        { clientConfigId: 'cred-1' },
+        { _id: 'cred-1' },
+      ],
+    });
   });
 });
