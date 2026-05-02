@@ -1,3 +1,8 @@
+---
+name: job-queue-patterns
+description: Build and review job queue systems, especially BullMQ workflows, with idempotent jobs, retries, deduplication, failure handling, atomic job design, observability, and monitoring. Use when Codex needs to implement, debug, or evaluate background jobs and queue workers.
+---
+
 # Job Queue Patterns (BullMQ)
 
 ## Principles

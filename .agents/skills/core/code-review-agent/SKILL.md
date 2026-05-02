@@ -1,3 +1,8 @@
+---
+name: code-review-agent
+description: Review backend code for Node.js, Fastify-style services, multi-tenant SaaS boundaries, API integrations, and job processing systems. Use when Codex needs to perform a code review, identify critical issues, suggest improvements, evaluate architecture alignment, or propose backend refactors.
+---
+
 # Code Review Agent
 
 ## Purpose

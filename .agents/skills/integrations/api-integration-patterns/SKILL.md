@@ -1,3 +1,8 @@
+---
+name: api-integration-patterns
+description: Build and review resilient external API integrations with retries, idempotency, error handling, rate limiting, pagination, request logging, response logging, and timeouts. Use when Codex needs to implement, debug, or evaluate third-party API communication patterns.
+---
+
 # API Integration Patterns
 
 ## Principles
