@@ -1,19 +1,16 @@
 import Fastify from 'fastify';
-import routes from './routes/index.js';
-import winstonLogger from './core/logger.js';
-import startSapSync from './tasks/sapSyncTask.js';
-import startWebhookProcessor from './tasks/webhookProcessorTask.js';
-import { initializeExternalConnections } from './utils/externalDb.js';
-import env from './config/env.js';
-import { bootstrapSapSyncScheduler } from './bootstrap/sapSyncScheduler.bootstrap.js';
+import routes from './interfaces/http/routes/index.js';
+import appConfig from './config/app.config.js';
 import { registerBullBoard } from './bootstrap/bullBoard.js';
+import { registerAppLifecycle } from './bootstrap/appLifecycle.bootstrap.js';
+import logger from './infrastructure/logger/logger.adapter.js';
 
 const app = Fastify({
-  logger: true
+  logger: appConfig.logger
 });
 
 // 🧩 Asegura que Fastify pueda leer JSON (importante para Power BI y Postman)
-app.addContentTypeParser('application/json', { parseAs: 'string' }, function (req, body, done) {
+app.addContentTypeParser(appConfig.jsonContentType, { parseAs: 'string' }, function (req, body, done) {
   try {
     const json = JSON.parse(body);
     done(null, json);
@@ -24,7 +21,7 @@ app.addContentTypeParser('application/json', { parseAs: 'string' }, function (re
 
 // Middleware opcional de auditoría
 app.addHook('onRequest', async (req, reply) => {
-  winstonLogger.info({
+  logger.info({
     msg: 'Incoming request',
     method: req.method,
     url: req.url,
@@ -35,26 +32,6 @@ app.addHook('onRequest', async (req, reply) => {
 // Rutas principales
 app.register(routes);
 registerBullBoard(app);
-
-app.addHook('onReady', async () => {
-  await initializeExternalConnections();
-  await bootstrapSapSyncScheduler();
-  const isSapSyncEnabled = env.SAP_SYNC_CRON_ENABLED !== 'false';
-
-  if (isSapSyncEnabled) {
-    const job = await startSapSync();
-    if (job?.start) {
-      job.start();
-    }
-  }
-
-  const isWebhookProcessorEnabled = env.WEBHOOK_PROCESSOR_CRON_ENABLED !== 'false';
-  if (isWebhookProcessorEnabled) {
-    const webhookJob = await startWebhookProcessor();
-    if (webhookJob?.start) {
-      webhookJob.start();
-    }
-  }
-});
+registerAppLifecycle(app);
 
 export default app;

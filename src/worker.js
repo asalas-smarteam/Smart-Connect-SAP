@@ -1,10 +1,10 @@
 import dotenv from 'dotenv';
-import db from './config/database.js';
-import logger from './core/logger.js';
+import db from './infrastructure/database/master/master-db.js';
+import logger from './infrastructure/logger/logger.adapter.js';
 import { closeAllConnections } from './utils/externalDb.js';
-import { disconnectTenantConnections } from './config/tenantDatabase.js';
-import { closeSapSyncQueue } from './queues/sapSync.queue.js';
-import { closeWebhookQueue } from './queues/webhook.queue.js';
+import { disconnectTenantConnections } from './infrastructure/database/tenant/tenant-db.js';
+import { closeSapSyncQueue } from './infrastructure/queue/sap-sync.queue.adapter.js';
+import { closeWebhookQueue } from './infrastructure/queue/webhook.queue.adapter.js';
 import { closeSharedBullMQConnection } from './lib/bullmqRedis.js';
 import { startSapSyncWorker } from './workers/sapSync.worker.js';
 import { startWebhookWorker } from './workers/webhook.worker.js';

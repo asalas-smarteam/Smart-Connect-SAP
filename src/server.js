@@ -1,13 +1,14 @@
 import dotenv from 'dotenv';
 import app from './app.js';
-import db from './config/database.js';
-import logger from './core/logger.js';
+import db from './infrastructure/database/master/master-db.js';
+import logger from './infrastructure/logger/logger.adapter.js';
 import { closeAllConnections } from './utils/externalDb.js';
 import { seedDefaultSapFilters } from '../database/seeds/defaultSapFilters.seed.js';
 import { seedMasterClientConfigs } from '../database/seeds/masterClientConfigs.seed.js';
-import { closeSapSyncQueue } from './queues/sapSync.queue.js';
+import { closeSapSyncQueue } from './infrastructure/queue/sap-sync.queue.adapter.js';
 import { closeSharedBullMQConnection } from './lib/bullmqRedis.js';
-import { disconnectTenantConnections } from './config/tenantDatabase.js';
+import { disconnectTenantConnections } from './infrastructure/database/tenant/tenant-db.js';
+import appConfig from './config/app.config.js';
 
 dotenv.config();
 
@@ -68,12 +69,11 @@ process.once('beforeExit', () => {
 
 const start = async () => {
   try {
-    const PORT = process.env.PORT || 3000;
     const masterConnection = await connect();
     await seedDefaultSapFilters(masterConnection);
     await seedMasterClientConfigs(masterConnection);
-    await app.listen({ port: PORT, host: '0.0.0.0' });
-    logger.info(`🚀 Server running on http://localhost:${PORT}`);
+    await app.listen({ port: appConfig.port, host: '0.0.0.0' });
+    logger.info(`🚀 Server running on http://localhost:${appConfig.port}`);
 
   } catch (err) {
     app.log.error(err);
