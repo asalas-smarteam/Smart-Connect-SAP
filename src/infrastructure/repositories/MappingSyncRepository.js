@@ -1,4 +1,4 @@
-import mappingService from '../../services/mapping.service.js';
+import mappingService from '../database/repositories/mapping.service.js';
 
 export class MappingSyncRepository {
   async mapRecords({ sapRecords, hubspotCredentialId, objectType, tenantModels }) {

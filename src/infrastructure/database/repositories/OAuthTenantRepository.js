@@ -1,5 +1,5 @@
-import { SaaSClient } from '../../../config/database.js';
-import { getTenantConnection, getTenantModels } from '../../../config/tenantDatabase.js';
+import { SaaSClient } from '../master/database.js';
+import { getTenantConnection, getTenantModels } from '../tenant/tenantDatabase.js';
 
 export class OAuthTenantRepository {
   async getTenantModels(tenantKey) {

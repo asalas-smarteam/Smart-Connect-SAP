@@ -1,4 +1,4 @@
-import { createCompany, findCompanyByEmail, updateCompany } from '../../services/hubspotClient.js';
+import { createCompany, findCompanyByEmail, updateCompany } from './hubspotClient.js';
 
 export const hubspotCompanyAdapter = Object.freeze({
   createCompany,

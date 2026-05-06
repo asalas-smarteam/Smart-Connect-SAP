@@ -1,4 +1,4 @@
-import hubspotAuthService from '../../services/hubspotAuthService.js';
+import hubspotAuthService from './hubspotAuthService.js';
 
 export class HubspotAuthProviderAdapter {
   generateAuthUrl(clientConfigId, state) {

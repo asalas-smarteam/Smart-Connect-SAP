@@ -3,7 +3,7 @@ import ManageSapCredentials, {
 } from '../../../application/use-cases/ManageSapCredentials.js';
 import MongooseObjectIdValidator from '../../../infrastructure/database/MongooseObjectIdValidator.js';
 import TenantSapCredentialsRepository from '../../../infrastructure/database/repositories/TenantSapCredentialsRepository.js';
-import { requireTenantModels } from '../../../utils/tenantModels.js';
+import requestTenantModelsAdapter from '../../../infrastructure/tenants/RequestTenantModelsAdapter.js';
 
 function createManageSapCredentials() {
   return new ManageSapCredentials({
@@ -49,12 +49,13 @@ function sendResult(reply, result) {
 
 function createSapCredentialsController({
   manageSapCredentials = createManageSapCredentials(),
+  tenantModelsResolver = requestTenantModelsAdapter,
 } = {}) {
   return {
     async createSapCredentials(req, reply) {
       try {
         const result = await manageSapCredentials.create({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           payload: req.body,
         });
         return sendResult(reply, result);
@@ -66,7 +67,7 @@ function createSapCredentialsController({
     async listSapCredentials(req, reply) {
       try {
         const result = await manageSapCredentials.list({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           query: req.query,
         });
         return sendResult(reply, result);
@@ -78,7 +79,7 @@ function createSapCredentialsController({
     async getSapCredentials(req, reply) {
       try {
         const result = await manageSapCredentials.get({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           id: req.params.id,
         });
         return sendResult(reply, result);
@@ -90,7 +91,7 @@ function createSapCredentialsController({
     async patchSapCredentials(req, reply) {
       try {
         const result = await manageSapCredentials.patch({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           id: req.params.id,
           payload: req.body,
         });
@@ -103,7 +104,7 @@ function createSapCredentialsController({
     async deleteSapCredentials(req, reply) {
       try {
         const result = await manageSapCredentials.delete({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           id: req.params.id,
         });
         return sendResult(reply, result);

@@ -1,4 +1,4 @@
-import { connect, database } from '../../config/database.js';
+import { connect, database } from './master/database.js';
 
 const STATE_LABELS = Object.freeze({
   0: 'disconnected',

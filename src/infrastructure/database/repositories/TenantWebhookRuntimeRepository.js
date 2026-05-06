@@ -1,5 +1,5 @@
-import mappingService from '../../../services/mapping.service.js';
-import tenantConfigurationService from '../../../services/tenantConfiguration.service.js';
+import mappingService from './mapping.service.js';
+import tenantConfigurationService from '../../config/tenantConfiguration.service.js';
 import { PermanentWebhookError } from '../../../shared/errors/index.js';
 import { normalizePositiveInteger, toNonEmptyString } from '../../../shared/utils/string.utils.js';
 

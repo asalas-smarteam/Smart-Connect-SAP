@@ -6,6 +6,17 @@ const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(currentDir, '../../..');
 const srcRoot = path.join(projectRoot, 'src');
 
+const hexagonalRoots = [
+  'application',
+  'bootstrap',
+  'domain',
+  'infrastructure',
+  'interfaces',
+  'main',
+  'ports',
+  'shared',
+];
+
 const guardedRoots = [
   'application',
   'domain',
@@ -13,11 +24,11 @@ const guardedRoots = [
   'shared',
 ].map((directory) => path.join(srcRoot, directory));
 
-const bannedInternalRoots = [
+const removedLegacyRoots = [
   'config',
   'controllers',
+  'core',
   'db',
-  'infrastructure',
   'integrations',
   'lib',
   'middleware',
@@ -27,6 +38,11 @@ const bannedInternalRoots = [
   'tasks',
   'utils',
   'workers',
+];
+
+const bannedInternalRoots = [
+  'infrastructure',
+  ...removedLegacyRoots,
 ].map((directory) => path.join(srcRoot, directory));
 
 const bannedPackages = new Set([
@@ -81,8 +97,20 @@ function isInsideDirectory(filePath, directory) {
 }
 
 describe('hexagonal architecture boundaries', () => {
-  it('keeps HTTP route registration in the interfaces layer', () => {
-    expect(fs.existsSync(path.join(srcRoot, 'routes'))).toBe(false);
+  it('keeps every src JavaScript file under a hexagonal root', () => {
+    const violations = listJavaScriptFiles(srcRoot)
+      .map((filePath) => path.relative(srcRoot, filePath))
+      .filter((relativePath) => !hexagonalRoots.includes(relativePath.split(path.sep)[0]));
+
+    expect(violations).toEqual([]);
+  });
+
+  it('removes legacy implementation roots from src', () => {
+    const existingRoots = removedLegacyRoots.filter((directory) =>
+      fs.existsSync(path.join(srcRoot, directory))
+    );
+
+    expect(existingRoots).toEqual([]);
   });
 
   it('does not expose debug or test HTTP routes', () => {
@@ -167,6 +195,42 @@ describe('hexagonal architecture boundaries', () => {
     );
 
     expect(legacyImports).toEqual([]);
+  });
+
+  it('keeps HTTP controllers from importing legacy implementation roots directly', () => {
+    const controllerFiles = listJavaScriptFiles(path.join(srcRoot, 'interfaces', 'http', 'controllers'));
+    const bannedRootsForControllers = [
+      'config',
+      'integrations',
+      'lib',
+      'queues',
+      'services',
+      'tasks',
+      'utils',
+      'workers',
+    ].map((directory) => path.join(srcRoot, directory));
+    const violations = controllerFiles.flatMap((filePath) => {
+      const source = fs.readFileSync(filePath, 'utf8');
+
+      return parseImportSpecifiers(source)
+        .map((specifier) => {
+          const resolved = resolveImportPath(filePath, specifier);
+          if (!resolved) {
+            return null;
+          }
+
+          const bannedRoot = bannedRootsForControllers.find((directory) =>
+            resolved === directory || isInsideDirectory(resolved, directory)
+          );
+
+          return bannedRoot
+            ? `${path.relative(projectRoot, filePath)} imports ${path.relative(projectRoot, resolved)}`
+            : null;
+        })
+        .filter(Boolean);
+    });
+
+    expect(violations).toEqual([]);
   });
 
   it('keeps interface jobs from importing legacy services directly', () => {

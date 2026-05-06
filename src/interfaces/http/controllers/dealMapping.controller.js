@@ -3,7 +3,7 @@ import ManageDealMappings, {
 } from '../../../application/use-cases/ManageDealMappings.js';
 import MongooseObjectIdValidator from '../../../infrastructure/database/MongooseObjectIdValidator.js';
 import TenantDealMappingRepository from '../../../infrastructure/database/repositories/TenantDealMappingRepository.js';
-import { requireTenantModels } from '../../../utils/tenantModels.js';
+import requestTenantModelsAdapter from '../../../infrastructure/tenants/RequestTenantModelsAdapter.js';
 
 function buildManageDealMappings() {
   return new ManageDealMappings({
@@ -46,12 +46,13 @@ function sendResult(reply, result) {
 
 function createDealMappingController({
   manageDealMappings = buildManageDealMappings(),
+  tenantModelsResolver = requestTenantModelsAdapter,
 } = {}) {
   return {
     async listPipelines(req, reply) {
       try {
         const result = await manageDealMappings.listPipelines({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           hubspotCredentialId: req.query?.hubspotCredentialId,
         });
         return sendResult(reply, result);
@@ -63,7 +64,7 @@ function createDealMappingController({
     async listStages(req, reply) {
       try {
         const result = await manageDealMappings.listStages({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           hubspotCredentialId: req.query?.hubspotCredentialId,
           hubspotPipelineId: req.query?.hubspotPipelineId,
         });
@@ -76,7 +77,7 @@ function createDealMappingController({
     async upsertPipeline(req, reply) {
       try {
         const result = await manageDealMappings.upsertPipeline({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           hubspotCredentialId: req.params.hubspotCredentialId,
           payload: req.body,
         });
@@ -89,7 +90,7 @@ function createDealMappingController({
     async upsertStage(req, reply) {
       try {
         const result = await manageDealMappings.upsertStage({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           hubspotCredentialId: req.params.hubspotCredentialId,
           payload: req.body,
         });
@@ -102,7 +103,7 @@ function createDealMappingController({
     async patchPipeline(req, reply) {
       try {
         const result = await manageDealMappings.patchPipeline({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           id: req.params.id,
           payload: req.body,
         });
@@ -124,7 +125,7 @@ function createDealMappingController({
     async deletePipeline(req, reply) {
       try {
         const result = await manageDealMappings.deletePipeline({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           id: req.params.id,
         });
 
@@ -141,7 +142,7 @@ function createDealMappingController({
     async createPipeline(req, reply) {
       try {
         const result = await manageDealMappings.createPipeline({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           payload: req.body,
         });
 
@@ -158,7 +159,7 @@ function createDealMappingController({
     async patchStage(req, reply) {
       try {
         const result = await manageDealMappings.patchStage({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           id: req.params.id,
           payload: req.body,
         });
@@ -180,7 +181,7 @@ function createDealMappingController({
     async deleteStage(req, reply) {
       try {
         const result = await manageDealMappings.deleteStage({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           id: req.params.id,
         });
 
@@ -197,7 +198,7 @@ function createDealMappingController({
     async createStage(req, reply) {
       try {
         const result = await manageDealMappings.createStage({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           payload: req.body,
         });
 

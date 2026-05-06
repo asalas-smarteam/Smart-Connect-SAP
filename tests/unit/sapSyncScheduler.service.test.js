@@ -8,22 +8,22 @@ const mockGetTenantModels = jest.fn();
 const mockLoggerInfo = jest.fn();
 const mockLoggerError = jest.fn();
 
-jest.unstable_mockModule('../../src/queues/sapSync.queue.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/queue/sapSync.queue.js', () => ({
   SAP_SYNC_JOB_NAME: 'sap-sync-job',
   addScheduledSapSyncJob: mockAddScheduledSapSyncJob,
   buildScheduledJobId: ({ tenantKey, configId }) => `sap-sync:${tenantKey}:${String(configId)}`,
   getSapSyncQueue: mockGetSapSyncQueue,
 }));
 
-jest.unstable_mockModule('../../src/utils/tenantSubscriptions.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/tenants/tenantSubscriptions.js', () => ({
   listActiveTenants: mockListActiveTenants,
 }));
 
-jest.unstable_mockModule('../../src/config/tenantDatabase.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/database/tenant/tenantDatabase.js', () => ({
   getTenantModels: mockGetTenantModels,
 }));
 
-jest.unstable_mockModule('../../src/core/logger.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/logger/logger.js', () => ({
   default: {
     info: mockLoggerInfo,
     error: mockLoggerError,
@@ -33,7 +33,7 @@ jest.unstable_mockModule('../../src/core/logger.js', () => ({
 const {
   bootstrapScheduledJobs,
   syncScheduledJob,
-} = await import('../../src/services/scheduler/sapSyncScheduler.service.js');
+} = await import('../../src/infrastructure/scheduler/sapSyncScheduler.service.js');
 
 function buildLegacyRepeatableKey({ jobId, suffix, timezone = '' }) {
   return crypto

@@ -2,7 +2,7 @@ import { jest } from '@jest/globals';
 import {
   buildWebhookTenantJobId,
   removeReplaceableWebhookTenantJob,
-} from '../../src/queues/webhook.queue.js';
+} from '../../src/infrastructure/queue/webhook.queue.js';
 
 describe('webhook.queue buildWebhookTenantJobId', () => {
   it('builds a BullMQ-safe deterministic job id', () => {

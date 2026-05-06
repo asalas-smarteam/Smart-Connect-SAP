@@ -1,4 +1,4 @@
-import { resolveActiveTenant } from '../../utils/tenantSubscriptions.js';
+import { resolveActiveTenant } from './tenantSubscriptions.js';
 
 export class ActiveTenantSubscriptionResolver {
   async resolve({ tenantId, tenantKey, portalId } = {}) {

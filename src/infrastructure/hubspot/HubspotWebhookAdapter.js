@@ -1,5 +1,5 @@
-import hubspotAuthService from '../../services/hubspotAuthService.js';
-import * as hubspotClient from '../../services/hubspotClient.js';
+import hubspotAuthService from './hubspotAuthService.js';
+import * as hubspotClient from './hubspotClient.js';
 import { resolveHubspotPropertyNameBySapField } from '../../domain/orders/order-builder.service.js';
 import { toNonEmptyString } from '../../shared/utils/string.utils.js';
 

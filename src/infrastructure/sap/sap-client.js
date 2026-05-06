@@ -1,5 +1,5 @@
-import serviceLayerService from '../../services/serviceLayer.service.js';
-import sapService from '../../integrations/sap/sapService.js';
+import serviceLayerService from './serviceLayer.service.js';
+import sapService from './sapService.js';
 
 export { serviceLayerService, sapService };
 

@@ -3,7 +3,7 @@ import ManageOwnerMappings, {
 } from '../../../application/use-cases/ManageOwnerMappings.js';
 import MongooseObjectIdValidator from '../../../infrastructure/database/MongooseObjectIdValidator.js';
 import TenantOwnerMappingRepository from '../../../infrastructure/database/repositories/TenantOwnerMappingRepository.js';
-import { requireTenantModels } from '../../../utils/tenantModels.js';
+import requestTenantModelsAdapter from '../../../infrastructure/tenants/RequestTenantModelsAdapter.js';
 
 function buildManageOwnerMappings() {
   return new ManageOwnerMappings({
@@ -46,12 +46,13 @@ function sendResult(reply, result) {
 
 function createOwnerMappingController({
   manageOwnerMappings = buildManageOwnerMappings(),
+  tenantModelsResolver = requestTenantModelsAdapter,
 } = {}) {
   return {
     async listOwners(req, reply) {
       try {
         const result = await manageOwnerMappings.list({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           hubspotCredentialId: req.query?.hubspotCredentialId,
         });
         return sendResult(reply, result);
@@ -63,7 +64,7 @@ function createOwnerMappingController({
     async upsertOwner(req, reply) {
       try {
         const result = await manageOwnerMappings.upsert({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           hubspotCredentialId: req.params.hubspotCredentialId,
           payload: req.body,
         });
@@ -78,7 +79,7 @@ function createOwnerMappingController({
     async patchOwner(req, reply) {
       try {
         const result = await manageOwnerMappings.patch({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           id: req.params.id,
           payload: req.body,
         });
@@ -96,7 +97,7 @@ function createOwnerMappingController({
     async deleteOwner(req, reply) {
       try {
         const result = await manageOwnerMappings.delete({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           id: req.params.id,
         });
 
@@ -113,7 +114,7 @@ function createOwnerMappingController({
     async createOwner(req, reply) {
       try {
         const result = await manageOwnerMappings.create({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           payload: req.body,
         });
 
@@ -130,7 +131,7 @@ function createOwnerMappingController({
     async getOwner(req, reply) {
       try {
         const result = await manageOwnerMappings.get({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           id: req.params.id,
         });
         return sendResult(reply, result);

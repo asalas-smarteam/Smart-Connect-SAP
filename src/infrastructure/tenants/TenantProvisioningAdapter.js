@@ -1,4 +1,4 @@
-import { provisionTenant } from '../../services/tenantProvisioning.js';
+import { provisionTenant } from './tenantProvisioning.js';
 
 export class TenantProvisioningAdapter {
   provisionTenant(payload) {

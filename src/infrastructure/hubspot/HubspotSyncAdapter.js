@@ -1,4 +1,4 @@
-import hubspotService from '../../services/hubspotService.js';
+import hubspotService from './hubspotService.js';
 
 export class HubspotSyncAdapter {
   async send({ mappedRecords, config, objectType, tenantModels, credentials }) {

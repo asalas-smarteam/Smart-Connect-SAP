@@ -1,24 +1,11 @@
 import { ApplicationError } from '../../shared/errors/index.js';
+import HubspotCreateDealWebhook from '../../domain/webhooks/HubspotCreateDealWebhook.js';
 
 function validationError(message) {
   return new ApplicationError(message, {
     code: 'INVALID_HUBSPOT_WEBHOOK_PAYLOAD',
     statusCode: 400,
   });
-}
-
-function validatePayload(payload) {
-  if (!payload?.portalId) {
-    throw validationError('portalId is required');
-  }
-
-  if (!payload?.deal) {
-    throw validationError('deal is required');
-  }
-
-  if (!payload?.deal?.hs_object_id) {
-    throw validationError('deal.hs_object_id is required');
-  }
 }
 
 export class QueueHubspotCreateDealWebhook {
@@ -35,22 +22,22 @@ export class QueueHubspotCreateDealWebhook {
   }
 
   async execute({ payload = {}, tenantId }) {
-    validatePayload(payload);
-
-    const resolvedTenantId = tenantId || payload.tenantId;
-    if (!resolvedTenantId) {
-      throw validationError('tenantId is required');
+    const webhook = HubspotCreateDealWebhook.fromRequest({ payload, tenantId });
+    try {
+      webhook.validate();
+    } catch (error) {
+      throw validationError(error.message);
     }
 
     this.logger.info({
       msg: 'HubSpot createDeal webhook received',
-      tenantId: resolvedTenantId,
-      portalId: payload.portalId,
-      dealId: payload?.deal?.hs_object_id,
+      tenantId: webhook.tenantId,
+      portalId: webhook.portalId,
+      dealId: webhook.dealId,
     });
 
     const tenantContext = await this.activeTenantResolver.resolve({
-      tenantId: resolvedTenantId,
+      tenantId: webhook.tenantId,
     });
 
     if (!tenantContext) {
@@ -61,8 +48,10 @@ export class QueueHubspotCreateDealWebhook {
     }
 
     const tenantPortalId = tenantContext.client?.hubspot?.portalId;
-    if (tenantPortalId && tenantPortalId !== payload.portalId) {
-      throw validationError('portalId does not match tenant');
+    try {
+      webhook.assertMatchesTenantPortal(tenantPortalId);
+    } catch (error) {
+      throw validationError(error.message);
     }
 
     const queueResult = await this.webhookEventRepository.queueCreateDealEvent({
@@ -73,9 +62,9 @@ export class QueueHubspotCreateDealWebhook {
     if (queueResult.duplicated) {
       this.logger.info({
         msg: 'Duplicate HubSpot createDeal webhook detected',
-        tenantId: resolvedTenantId,
-        portalId: payload.portalId,
-        dealId: payload.deal.hs_object_id,
+        tenantId: webhook.tenantId,
+        portalId: webhook.portalId,
+        dealId: webhook.dealId,
         webhookEventId: queueResult.eventId,
       });
 
@@ -88,15 +77,15 @@ export class QueueHubspotCreateDealWebhook {
     await this.webhookQueue.addManualJob({
       tenantId: tenantContext.client._id,
       tenantKey: tenantContext.client.tenantKey,
-      portalId: tenantPortalId || payload.portalId,
+      portalId: tenantPortalId || webhook.portalId,
       triggerType: 'webhook',
     });
 
     this.logger.info({
       msg: 'HubSpot createDeal webhook event queued',
-      tenantId: resolvedTenantId,
-      portalId: payload.portalId,
-      dealId: payload.deal.hs_object_id,
+      tenantId: webhook.tenantId,
+      portalId: webhook.portalId,
+      dealId: webhook.dealId,
       webhookEventId: queueResult.eventId,
     });
 

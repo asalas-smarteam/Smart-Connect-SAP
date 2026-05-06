@@ -1,9 +1,9 @@
-import { FeatureFlags } from '../../config/database.js';
-import { replicateMasterClientConfigs } from '../../services/tenant/replicateMasterClientConfigs.js';
+import { FeatureFlags } from '../database/master/database.js';
+import { replicateMasterClientConfigs } from '../tenants/replicateMasterClientConfigs.js';
 import {
   seedCreateFieldsHubspot,
   seedHubspotMappings,
-} from '../../services/tenant/tenantHubspotSeed.service.js';
+} from './tenantHubspotSeed.service.js';
 
 export class MasterConfigReplicatorAdapter {
   async replicate({ tenantModels, hubspotCredentialId }) {

@@ -4,7 +4,7 @@ import {
   createProduct,
   findProductBySKU,
   updateProduct,
-} from '../../services/hubspotClient.js';
+} from './hubspotClient.js';
 
 export const hubspotProductAdapter = Object.freeze({
   batchCreateProducts,

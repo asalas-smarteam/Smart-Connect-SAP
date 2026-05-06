@@ -1,5 +1,5 @@
-import tenantConfigurationService from '../../services/tenantConfiguration.service.js';
-import { getHubspotWarehouseStockPropertiesForTenant } from '../../utils/warehouseStock.js';
+import tenantConfigurationService from '../config/tenantConfiguration.service.js';
+import { getHubspotWarehouseStockPropertiesForTenant } from '../hubspot/warehouseStock.js';
 
 const DEFAULT_PRICE_LIST = '4';
 

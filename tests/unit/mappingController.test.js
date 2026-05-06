@@ -2,11 +2,11 @@ import { jest } from '@jest/globals';
 
 const mockRequireTenantModels = jest.fn();
 
-jest.unstable_mockModule('../../src/utils/tenantModels.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/tenants/tenantModels.js', () => ({
   requireTenantModels: mockRequireTenantModels,
 }));
 
-const { createMapping } = await import('../../src/controllers/mapping.controller.js');
+const { createMapping } = await import('../../src/interfaces/http/controllers/mapping.controller.js');
 
 describe('mapping.controller createMapping', () => {
   beforeEach(() => {

@@ -2,7 +2,7 @@ import {
   acquireTenantSapSyncLock,
   extendTenantSapSyncLock,
   releaseTenantSapSyncLock,
-} from '../../services/locks/tenantSapSyncLock.service.js';
+} from './tenantSapSyncLock.service.js';
 
 export class TenantSapSyncLockAdapter {
   async acquire(tenantKey) {

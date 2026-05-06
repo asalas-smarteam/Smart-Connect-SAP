@@ -5,14 +5,14 @@ import HandleHubspotOAuthCallback, {
 import InitHubspotOAuthForTenant, {
   initHubspotOAuthReasons,
 } from '../../../application/use-cases/InitHubspotOAuthForTenant.js';
-import logger from '../../../core/logger.js';
+import logger from '../../../infrastructure/logger/logger.js';
 import OAuthTenantRepository from '../../../infrastructure/database/repositories/OAuthTenantRepository.js';
 import HubspotAuthProviderAdapter from '../../../infrastructure/hubspot/HubspotAuthProviderAdapter.js';
 import {
   MasterConfigReplicatorAdapter,
   TenantHubspotSeederAdapter,
 } from '../../../infrastructure/hubspot/TenantHubspotSeederAdapter.js';
-import { requireTenantModels } from '../../../utils/tenantModels.js';
+import requestTenantModelsAdapter from '../../../infrastructure/tenants/RequestTenantModelsAdapter.js';
 
 function buildHubspotAuthProvider() {
   return new HubspotAuthProviderAdapter();
@@ -47,7 +47,7 @@ export const initOAuth = (req, reply) => {
 
 export const oauthCallback = async (req, reply) => {
   const useCase = buildOAuthCallbackUseCase();
-  const requestTenantModels = req.tenantModels ? requireTenantModels(req) : null;
+  const requestTenantModels = req.tenantModels ? requestTenantModelsAdapter.resolve(req) : null;
   const result = await useCase.execute({
     code: req.query?.code,
     state: req.query?.state,

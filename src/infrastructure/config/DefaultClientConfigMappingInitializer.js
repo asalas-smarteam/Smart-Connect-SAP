@@ -3,7 +3,7 @@ import {
   ensureDefaultContactEmployeeMappings,
   ensureDefaultDealMappings,
   ensureDefaultProductMappings,
-} from '../../services/tenant/defaultClientConfigMappings.service.js';
+} from '../../application/services/defaultClientConfigMappings.service.js';
 
 export class DefaultClientConfigMappingInitializer {
   async ensureAll({ FieldMapping, clientConfig }) {

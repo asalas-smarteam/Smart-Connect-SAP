@@ -1,4 +1,4 @@
-import { APP_VERSION } from '../../../config/appMetadata.js';
+import { APP_VERSION } from '../../../infrastructure/config/appMetadata.js';
 import GetHealthStatus from '../../../application/use-cases/GetHealthStatus.js';
 import MongooseDatabaseStatusProvider from '../../../infrastructure/database/MongooseDatabaseStatusProvider.js';
 import { createHealthController } from '../controllers/health.controller.js';

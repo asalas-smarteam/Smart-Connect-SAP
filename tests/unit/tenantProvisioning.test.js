@@ -25,24 +25,24 @@ const mockSubscription = {
   create: jest.fn(),
 };
 
-jest.unstable_mockModule('../../src/config/tenantDatabase.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/database/tenant/tenantDatabase.js', () => ({
   buildTenantDatabaseName: mockBuildTenantDatabaseName,
   getTenantConnection: mockGetTenantConnection,
 }));
 
-jest.unstable_mockModule('../../src/db/models/tenant/index.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/database/models/tenant/index.js', () => ({
   registerTenantModels: mockRegisterTenantModels,
 }));
 
-jest.unstable_mockModule('../../src/utils/provisioningValidation.js', () => ({
+jest.unstable_mockModule('../../src/shared/utils/provisioningValidation.js', () => ({
   sanitizeMongoCollectionName: mockSanitizeMongoCollectionName,
 }));
 
-jest.unstable_mockModule('../../src/services/tenant/replicateDefaultSapFilters.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/tenants/replicateDefaultSapFilters.js', () => ({
   replicateDefaultSapFilters: mockReplicateDefaultSapFilters,
 }));
 
-jest.unstable_mockModule('../../src/config/database.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/database/master/database.js', () => ({
   FeatureFlags: mockFeatureFlags,
   GlobalAuditLog: mockGlobalAuditLog,
   PaymentStatus: mockPaymentStatus,
@@ -50,7 +50,7 @@ jest.unstable_mockModule('../../src/config/database.js', () => ({
   Subscription: mockSubscription,
 }));
 
-const { provisionTenant } = await import('../../src/services/tenantProvisioning.js');
+const { provisionTenant } = await import('../../src/infrastructure/tenants/tenantProvisioning.js');
 
 describe('provisionTenant', () => {
   beforeEach(() => {

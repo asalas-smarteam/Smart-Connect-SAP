@@ -20,20 +20,20 @@ jest.unstable_mockModule('axios', () => ({
   },
 }));
 
-jest.unstable_mockModule('../../src/services/hubspotAuthService.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/hubspot/hubspotAuthService.js', () => ({
   default: {
     getAccessToken: mockGetAccessToken,
   },
 }));
 
-jest.unstable_mockModule('../../src/services/hubspotClient.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/hubspot/hubspotClient.js', () => ({
   batchUpdateLineItems: mockBatchUpdateLineItems,
   batchUpdateProducts: mockBatchUpdateProducts,
   findProductBySKU: mockFindProductBySKU,
   updateDeal: mockUpdateDeal,
 }));
 
-jest.unstable_mockModule('../../src/services/sapSessionManager.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/sap/sapSessionManager.js', () => ({
   default: {
     getSessionCookie: mockGetSessionCookie,
     invalidateSession: mockInvalidateSession,
@@ -42,14 +42,14 @@ jest.unstable_mockModule('../../src/services/sapSessionManager.js', () => ({
   isSessionInvalidError: (error) => [401, 403].includes(error?.response?.status),
 }));
 
-jest.unstable_mockModule('../../src/core/logger.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/logger/logger.js', () => ({
   default: {
     info: mockLoggerInfo,
     warn: mockLoggerWarn,
   },
 }));
 
-const lineItemPriceService = (await import('../../src/services/lineItemPrice.service.js')).default;
+const lineItemPriceService = (await import('../../src/infrastructure/external-services/lineItemPrice.service.js')).default;
 
 describe('lineItemPrice.service syncPrices', () => {
   beforeEach(() => {

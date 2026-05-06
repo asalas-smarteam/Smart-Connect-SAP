@@ -3,5 +3,5 @@ export {
   getTenantConnection,
   getTenantModels,
   disconnectTenantConnections,
-} from '../../../config/tenantDatabase.js';
+} from './tenantDatabase.js';
 

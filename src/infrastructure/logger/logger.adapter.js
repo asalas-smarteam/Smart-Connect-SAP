@@ -1,4 +1,4 @@
-import * as loggerModule from '../../core/logger.js';
+import * as loggerModule from './logger.js';
 
 const logger = loggerModule.default;
 

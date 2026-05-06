@@ -1,4 +1,4 @@
-import { processWebhookTenant } from '../../services/webhookProcessorRunner.service.js';
+import { processWebhookTenant } from './webhookProcessorRunner.service.js';
 
 export class WebhookTenantProcessorAdapter {
   async process(payload) {

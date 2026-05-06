@@ -1,5 +1,5 @@
 import { initOAuth, initOAuthForTenant, oauthCallback } from '../controllers/oauth.controller.js';
-import { tenantResolver } from '../../../middleware/tenantResolver.js';
+import { tenantResolver } from '../middlewares/tenantResolver.js';
 
 export default async function routes(app) {
   app.get('/oauth/hubspot/init/:clientConfigId', { preHandler: tenantResolver }, initOAuth);

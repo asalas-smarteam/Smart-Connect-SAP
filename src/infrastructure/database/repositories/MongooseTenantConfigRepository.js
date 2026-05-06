@@ -1,5 +1,5 @@
-import { SaaSClient } from '../../../config/database.js';
-import { getTenantModels } from '../../../config/tenantDatabase.js';
+import { SaaSClient } from '../master/database.js';
+import { getTenantModels } from '../tenant/tenantDatabase.js';
 
 function toNonEmptyString(value) {
   const normalized = String(value ?? '').trim();

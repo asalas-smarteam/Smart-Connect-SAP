@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import { claimEventsToProcess } from '../../src/services/webhookProcessor.js';
+import { claimEventsToProcess } from '../../src/infrastructure/webhook/webhookProcessor.js';
 
 describe('webhookProcessor claimEventsToProcess', () => {
   it('claims waiting events and marks them as inprocess', async () => {

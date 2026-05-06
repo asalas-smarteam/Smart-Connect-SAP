@@ -1,5 +1,5 @@
 import sapCredentialsController from '../controllers/sapCredentials.controller.js';
-import { tenantResolver } from '../../../middleware/tenantResolver.js';
+import { tenantResolver } from '../middlewares/tenantResolver.js';
 
 export default async function routes(app) {
   app.route({

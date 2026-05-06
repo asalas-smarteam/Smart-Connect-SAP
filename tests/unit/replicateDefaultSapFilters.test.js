@@ -1,8 +1,8 @@
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
-import { createDefaultSapFilterModel } from '../../models/master/defaultSapFilter.model.js';
-import { createSapFilterModel } from '../../models/tenant/sapFilter.model.js';
-import { replicateDefaultSapFilters } from '../../src/services/tenant/replicateDefaultSapFilters.js';
+import { createDefaultSapFilterModel } from '../../src/infrastructure/database/models/master/defaultSapFilter.model.js';
+import { createSapFilterModel } from '../../src/infrastructure/database/models/tenant/sapFilter.model.js';
+import { replicateDefaultSapFilters } from '../../src/infrastructure/tenants/replicateDefaultSapFilters.js';
 
 let mongoServer;
 let masterConnection;

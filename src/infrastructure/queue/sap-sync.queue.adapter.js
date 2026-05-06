@@ -8,7 +8,7 @@ import {
   buildScheduledJobId,
   closeSapSyncQueue,
   getSapSyncQueue,
-} from '../../queues/sapSync.queue.js';
+} from './sapSync.queue.js';
 
 export {
   SAP_SYNC_JOB_NAME,

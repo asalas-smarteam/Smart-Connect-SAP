@@ -5,7 +5,7 @@ const mockResolveTenantKey = jest.fn();
 const mockInvalidateSession = jest.fn();
 const mockAxiosGet = jest.fn();
 
-jest.unstable_mockModule('../../src/services/sapSessionManager.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/sap/sapSessionManager.js', () => ({
   default: {
     getSessionCookie: mockGetSessionCookie,
     resolveTenantKey: mockResolveTenantKey,
@@ -20,7 +20,7 @@ jest.unstable_mockModule('axios', () => ({
   },
 }));
 
-const serviceLayerService = (await import('../../src/services/serviceLayer.service.js')).default;
+const serviceLayerService = (await import('../../src/infrastructure/sap/serviceLayer.service.js')).default;
 
 describe('serviceLayerService.execute', () => {
   beforeEach(() => {

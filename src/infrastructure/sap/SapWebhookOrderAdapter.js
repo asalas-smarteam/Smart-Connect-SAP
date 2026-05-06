@@ -1,6 +1,6 @@
 import axios from 'axios';
 import https from 'https';
-import sapSessionManager, { isSessionInvalidError } from '../../services/sapSessionManager.js';
+import sapSessionManager, { isSessionInvalidError } from './sapSessionManager.js';
 import {
   buildDefaultBusinessPartnerCardCode,
   mapHubspotToSapFields,

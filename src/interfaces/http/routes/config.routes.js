@@ -11,7 +11,7 @@ import {
   getMasterClientConfigs,
   patchMasterClientConfigHandler,
 } from '../controllers/master/masterClientConfig.controller.js';
-import { tenantResolver } from '../../../middleware/tenantResolver.js';
+import { tenantResolver } from '../middlewares/tenantResolver.js';
 
 export default async function routes(app) {
   app.post('/config/client', { preHandler: tenantResolver }, createClientConfig);

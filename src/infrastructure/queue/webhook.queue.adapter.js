@@ -6,7 +6,7 @@ import {
   closeWebhookQueue,
   getWebhookQueue,
   removeReplaceableWebhookTenantJob,
-} from '../../queues/webhook.queue.js';
+} from './webhook.queue.js';
 
 export {
   WEBHOOK_JOB_NAME,

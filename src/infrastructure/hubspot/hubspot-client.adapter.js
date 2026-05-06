@@ -1,6 +1,6 @@
-import * as hubspotClient from '../../services/hubspotClient.js';
+import * as hubspotClient from './hubspotClient.js';
 
-export * from '../../services/hubspotClient.js';
+export * from './hubspotClient.js';
 
 export const hubspotClientAdapter = Object.freeze({
   ...hubspotClient,

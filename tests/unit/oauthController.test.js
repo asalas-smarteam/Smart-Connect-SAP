@@ -9,43 +9,43 @@ const mockReplicateMasterClientConfigs = jest.fn();
 const mockRequireTenantModels = jest.fn();
 const mockLoggerError = jest.fn();
 
-jest.unstable_mockModule('../../src/config/database.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/database/master/database.js', () => ({
   FeatureFlags: { db: { id: 'master-connection' } },
   SaaSClient: {},
 }));
 
-jest.unstable_mockModule('../../src/config/tenantDatabase.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/database/tenant/tenantDatabase.js', () => ({
   getTenantModels: mockGetTenantModels,
   getTenantConnection: mockGetTenantConnection,
 }));
 
-jest.unstable_mockModule('../../src/core/logger.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/logger/logger.js', () => ({
   default: {
     error: mockLoggerError,
   },
 }));
 
-jest.unstable_mockModule('../../src/services/hubspotAuthService.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/hubspot/hubspotAuthService.js', () => ({
   default: {
     exchangeCodeForTokens: mockExchangeCodeForTokens,
     generateAuthUrl: jest.fn(),
   },
 }));
 
-jest.unstable_mockModule('../../src/services/tenant/tenantHubspotSeed.service.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/hubspot/tenantHubspotSeed.service.js', () => ({
   seedHubspotMappings: mockSeedHubspotMappings,
   seedCreateFieldsHubspot: mockSeedCreateFieldsHubspot,
 }));
 
-jest.unstable_mockModule('../../src/services/tenant/replicateMasterClientConfigs.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/tenants/replicateMasterClientConfigs.js', () => ({
   replicateMasterClientConfigs: mockReplicateMasterClientConfigs,
 }));
 
-jest.unstable_mockModule('../../src/utils/tenantModels.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/tenants/tenantModels.js', () => ({
   requireTenantModels: mockRequireTenantModels,
 }));
 
-const { oauthCallback } = await import('../../src/controllers/oauth.controller.js');
+const { oauthCallback } = await import('../../src/interfaces/http/controllers/oauth.controller.js');
 
 function buildState({ clientConfigId, tenantKey }) {
   return Buffer.from(JSON.stringify({ clientConfigId, tenantKey }), 'utf8')

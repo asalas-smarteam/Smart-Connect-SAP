@@ -1,4 +1,4 @@
-import { tenantResolver } from '../../../middleware/tenantResolver.js';
+import { tenantResolver } from '../middlewares/tenantResolver.js';
 import QueueHubspotCreateDealWebhook from '../../../application/use-cases/QueueHubspotCreateDealWebhook.js';
 import MongooseQueuedWebhookEventRepository from '../../../infrastructure/database/repositories/MongooseQueuedWebhookEventRepository.js';
 import { webhookQueueAdapter } from '../../../infrastructure/queue/webhook.queue.adapter.js';

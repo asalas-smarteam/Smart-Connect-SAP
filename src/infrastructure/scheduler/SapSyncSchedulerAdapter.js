@@ -1,1 +1,1 @@
-export { syncScheduledJob } from '../../services/scheduler/sapSyncScheduler.service.js';
+export { syncScheduledJob } from './sapSyncScheduler.service.js';

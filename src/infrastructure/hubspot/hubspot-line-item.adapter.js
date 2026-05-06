@@ -1,4 +1,4 @@
-import { batchUpdateLineItems, createLineItem } from '../../services/hubspotClient.js';
+import { batchUpdateLineItems, createLineItem } from './hubspotClient.js';
 
 export const hubspotLineItemAdapter = Object.freeze({
   batchUpdateLineItems,

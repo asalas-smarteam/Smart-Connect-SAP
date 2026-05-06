@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { getConnection } from '../../utils/externalDb.js';
+import { getConnection } from '../database/externalDb.js';
 
 export class HubspotAssociationFetchAdapter {
   async fetch({ config, clientConfig }) {

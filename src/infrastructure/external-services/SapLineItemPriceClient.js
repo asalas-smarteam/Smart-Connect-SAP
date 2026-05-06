@@ -1,8 +1,8 @@
 import axios from 'axios';
 import https from 'https';
-import logger from '../../core/logger.js';
-import sapSessionManager, { isSessionInvalidError } from '../../services/sapSessionManager.js';
-import { runWithRetry } from '../../utils/retry.js';
+import logger from '../logger/logger.js';
+import sapSessionManager, { isSessionInvalidError } from '../sap/sapSessionManager.js';
+import { runWithRetry } from '../../shared/utils/retry.js';
 
 const httpsAgent = new https.Agent({
   rejectUnauthorized: false,

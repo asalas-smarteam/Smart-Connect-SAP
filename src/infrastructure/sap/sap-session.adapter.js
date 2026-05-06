@@ -1,4 +1,4 @@
-import sapSessionManager, { isSessionInvalidError } from '../../services/sapSessionManager.js';
+import sapSessionManager, { isSessionInvalidError } from './sapSessionManager.js';
 
 export { isSessionInvalidError };
 

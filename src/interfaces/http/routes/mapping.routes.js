@@ -4,8 +4,8 @@ import {
   createMapping,
   getMappings,
 } from '../controllers/mapping.controller.js';
-import { internalKeyAuthOnly } from '../../../middleware/internalAuth.js';
-import { tenantResolver } from '../../../middleware/tenantResolver.js';
+import { internalKeyAuthOnly } from '../middlewares/internalAuth.js';
+import { tenantResolver } from '../middlewares/tenantResolver.js';
 
 export default async function routes(app) {
   app.post('/mapping', { preHandler: tenantResolver }, createMapping);

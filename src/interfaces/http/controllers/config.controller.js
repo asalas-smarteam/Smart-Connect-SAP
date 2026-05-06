@@ -1,12 +1,12 @@
 import ManageClientConfigs, {
   clientConfigReasons,
 } from '../../../application/use-cases/ManageClientConfigs.js';
-import logger from '../../../core/logger.js';
+import logger from '../../../infrastructure/logger/logger.js';
 import * as filterPolicy from '../../../infrastructure/config/ClientConfigFilterPolicyAdapter.js';
 import DefaultClientConfigMappingInitializer from '../../../infrastructure/config/DefaultClientConfigMappingInitializer.js';
 import TenantClientConfigRepository from '../../../infrastructure/database/repositories/TenantClientConfigRepository.js';
 import * as scheduler from '../../../infrastructure/scheduler/SapSyncSchedulerAdapter.js';
-import { requireTenantModels } from '../../../utils/tenantModels.js';
+import requestTenantModelsAdapter from '../../../infrastructure/tenants/RequestTenantModelsAdapter.js';
 
 function buildManageClientConfigs() {
   return new ManageClientConfigs({
@@ -47,12 +47,13 @@ function sendResult(reply, result) {
 
 function createConfigController({
   manageClientConfigs = buildManageClientConfigs(),
+  tenantModelsResolver = requestTenantModelsAdapter,
 } = {}) {
   return {
     createClientConfig: async (req, reply) => {
       try {
         const result = await manageClientConfigs.createClientConfig({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           tenantKey: req.tenantKey,
           payload: req.body,
         });
@@ -66,7 +67,7 @@ function createConfigController({
     getClientConfig: async (req, reply) => {
       try {
         const result = await manageClientConfigs.listClientConfigs({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
         });
         return sendResult(reply, result);
       } catch (error) {
@@ -77,7 +78,7 @@ function createConfigController({
     createIntegrationMode: async (req, reply) => {
       try {
         const result = await manageClientConfigs.createIntegrationMode({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           payload: req.body,
         });
         return sendResult(reply, result);
@@ -89,7 +90,7 @@ function createConfigController({
     getIntegrationModes: async (req, reply) => {
       try {
         const result = await manageClientConfigs.listIntegrationModes({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
         });
         return sendResult(reply, result);
       } catch (error) {
@@ -100,7 +101,7 @@ function createConfigController({
     patchClientConfig: async (req, reply) => {
       try {
         const result = await manageClientConfigs.patchClientConfig({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           tenantKey: req.tenantKey,
           id: req.params.id,
           payload: req.body,

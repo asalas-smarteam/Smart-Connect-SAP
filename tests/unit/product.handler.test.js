@@ -2,11 +2,11 @@ import { jest } from '@jest/globals';
 
 const mockGetHubspotWarehouseStockPropertiesForTenant = jest.fn();
 
-jest.unstable_mockModule('../../src/utils/warehouseStock.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/hubspot/warehouseStock.js', () => ({
   getHubspotWarehouseStockPropertiesForTenant: mockGetHubspotWarehouseStockPropertiesForTenant,
 }));
 
-const { preprocess, resolveHubspotPriceFields } = await import('../../src/services/hubspot/handlers/product.handler.js');
+const { preprocess, resolveHubspotPriceFields } = await import('../../src/infrastructure/hubspot/handlers/product.handler.js');
 
 describe('product.handler preprocess', () => {
   beforeEach(() => {

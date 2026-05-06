@@ -3,16 +3,16 @@ import { jest } from '@jest/globals';
 const mockRequireTenantModels = jest.fn();
 const mockSyncScheduledJob = jest.fn();
 
-jest.unstable_mockModule('../../src/utils/tenantModels.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/tenants/tenantModels.js', () => ({
   requireTenantModels: mockRequireTenantModels,
 }));
 
-jest.unstable_mockModule('../../src/services/scheduler/sapSyncScheduler.service.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/scheduler/sapSyncScheduler.service.js', () => ({
   syncScheduledJob: mockSyncScheduledJob,
 }));
 
-const { createClientConfig } = await import('../../src/controllers/config.controller.js');
-const { buildServiceLayerUrl } = await import('../../src/services/serviceLayerUrlBuilder.js');
+const { createClientConfig } = await import('../../src/interfaces/http/controllers/config.controller.js');
+const { buildServiceLayerUrl } = await import('../../src/infrastructure/sap/serviceLayerUrlBuilder.js');
 
 describe('SERVICE_LAYER configuration flow', () => {
   beforeEach(() => {

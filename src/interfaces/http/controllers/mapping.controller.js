@@ -4,7 +4,7 @@ import ManageFieldMappings, {
 import FieldMappingService from '../../../application/services/field-mapping.service.js';
 import TenantFieldMappingRepository from '../../../infrastructure/database/repositories/TenantFieldMappingRepository.js';
 import TenantMappingManagementRepository from '../../../infrastructure/database/repositories/TenantMappingManagementRepository.js';
-import { requireTenantModels } from '../../../utils/tenantModels.js';
+import requestTenantModelsAdapter from '../../../infrastructure/tenants/RequestTenantModelsAdapter.js';
 
 function buildManageFieldMappings() {
   return new ManageFieldMappings({
@@ -32,12 +32,13 @@ function sendFailure(reply, result) {
 
 export function createMappingController({
   manageFieldMappings = buildManageFieldMappings(),
+  tenantModelsResolver = requestTenantModelsAdapter,
 } = {}) {
   return {
     createMapping: async (req, reply) => {
       try {
         const result = await manageFieldMappings.createTenantMapping({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           payload: req.body,
         });
 
@@ -50,7 +51,7 @@ export function createMappingController({
     createAdminMapping: async (req, reply) => {
       try {
         const result = await manageFieldMappings.createAdminMapping({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           payload: req.body,
         });
 
@@ -63,7 +64,7 @@ export function createMappingController({
     getMappings: async (req, reply) => {
       try {
         const result = await manageFieldMappings.listMappings({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           query: req.query,
         });
 
@@ -76,7 +77,7 @@ export function createMappingController({
     applyMappingTest: async (req, reply) => {
       try {
         const result = await manageFieldMappings.applyMappingTest({
-          tenantModels: requireTenantModels(req),
+          tenantModels: tenantModelsResolver.resolve(req),
           payload: req.body,
         });
 

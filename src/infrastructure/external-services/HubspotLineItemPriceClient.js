@@ -1,7 +1,7 @@
-import logger from '../../core/logger.js';
-import hubspotAuthService from '../../services/hubspotAuthService.js';
-import * as hubspotClient from '../../services/hubspotClient.js';
-import { runWithRetry } from '../../utils/retry.js';
+import logger from '../logger/logger.js';
+import hubspotAuthService from '../hubspot/hubspotAuthService.js';
+import * as hubspotClient from '../hubspot/hubspotClient.js';
+import { runWithRetry } from '../../shared/utils/retry.js';
 
 function toNonEmptyString(value) {
   const normalized = String(value ?? '').trim();

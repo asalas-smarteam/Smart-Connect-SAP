@@ -1,4 +1,4 @@
-import { createContact, findContactByEmail, updateContact } from '../../services/hubspotClient.js';
+import { createContact, findContactByEmail, updateContact } from './hubspotClient.js';
 
 export const hubspotContactAdapter = Object.freeze({
   createContact,

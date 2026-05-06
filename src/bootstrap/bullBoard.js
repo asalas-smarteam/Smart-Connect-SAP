@@ -1,10 +1,10 @@
 import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter.js';
 import { FastifyAdapter } from '@bull-board/fastify';
-import { getSapSyncQueue } from '../queues/sapSync.queue.js';
-import { getWebhookQueue } from '../queues/webhook.queue.js';
-import { internalKeyAuthOnly } from '../middleware/internalAuth.js';
-import logger from '../core/logger.js';
+import { getSapSyncQueue } from '../infrastructure/queue/sapSync.queue.js';
+import { getWebhookQueue } from '../infrastructure/queue/webhook.queue.js';
+import { internalKeyAuthOnly } from '../interfaces/http/middlewares/internalAuth.js';
+import logger from '../infrastructure/logger/logger.js';
 
 const DEFAULT_BULL_BOARD_PATH = '/admin/queues';
 

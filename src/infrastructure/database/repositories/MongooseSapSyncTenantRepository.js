@@ -1,4 +1,4 @@
-import { getTenantModels } from '../../../config/tenantDatabase.js';
+import { getTenantModels } from '../tenant/tenantDatabase.js';
 
 export class MongooseSapSyncTenantRepository {
   async getTenantModels(tenantKey) {

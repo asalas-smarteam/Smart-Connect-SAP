@@ -1,4 +1,4 @@
 export {
   buildMergedFilters,
   sanitizeIncomingCustomFilters,
-} from '../../services/tenant/clientConfigFilters.service.js';
+} from '../../application/services/clientConfigFilters.service.js';

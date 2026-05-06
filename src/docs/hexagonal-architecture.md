@@ -16,7 +16,6 @@ solo `interfaces`, `application`, `domain`, `ports` e `infrastructure`.
 - `ports`: contratos JSDoc para SAP, HubSpot, base de datos y colas.
 - `infrastructure`: adaptadores concretos para SAP, HubSpot, MongoDB, BullMQ y logger.
 - `interfaces`: entradas HTTP y jobs. Deben traducir entrada/salida y llamar casos de uso.
-- `config`: configuracion centralizada derivada de variables de entorno.
 - `shared`: errores y utilidades transversales sin dependencias de framework.
 
 ## Estado Actual
@@ -33,41 +32,58 @@ Avance del Plan 2:
   `associationTest` y `echo_test`) ya no estan expuestas.
 - El webhook `createDeal` ya entra por controller fino, caso de uso de aplicacion
   y adapters de infraestructura para tenant, persistencia del evento y cola.
-- `src/app.js` delega el ciclo de vida de conexiones, schedulers y cron jobs a
-  `bootstrap/appLifecycle.bootstrap.js`.
+- Los entrypoints viven en `src/main`: `app.js`, `server.js`, `worker.js` y
+  `container.js`.
+- `src/main/app.js` delega el ciclo de vida de conexiones, schedulers y cron jobs
+  a `bootstrap/appLifecycle.bootstrap.js`.
 - `interfaces/jobs/webhook.job.js` ya no importa services legacy directamente;
   usa un adapter de infraestructura.
+- Los controllers HTTP activos ya no importan `src/services`, `src/tasks`,
+  `src/queues`, `src/utils`, `src/config` ni `src/integrations` directamente.
+- Las facades legacy en `src/controllers/*.js` fueron eliminadas; los imports
+  internos y tests apuntan a `src/interfaces/http/controllers`.
+- `sapSync`, `lineItemPrice`, `masterClientConfig` y resolucion de tenant models
+  usan adapters de infraestructura en vez de acoplar controllers a services/utilidades.
+- El dominio ahora contiene una entidad pura para validar webhooks createDeal de
+  HubSpot, ademas del servicio de construccion de ordenes SAP.
 - Los contratos de line item price fueron movidos a `src/ports` para evitar
   puertos duplicados dentro de `domain`.
+- Los roots legacy `src/config`, `src/core`, `src/db`, `src/integrations`,
+  `src/lib`, `src/middleware`, `src/queues`, `src/services`, `src/tasks`,
+  `src/utils`, `src/workers`, `database` y `models` fueron eliminados o movidos
+  a capas hexagonales.
 - Los tests de arquitectura bloquean la reintroduccion de rutas test/debug y
-  protegen el controller migrado de webhook y los jobs de interfaz contra
-  imports legacy.
+  protegen controllers HTTP, jobs de interfaz, capas internas y roots legacy
+  contra regresiones.
 
 ## Tabla De Migracion
 
 | Archivo actual | Problema detectado | Nueva ubicacion propuesta | Accion | Prioridad |
 | --- | --- | --- | --- | --- |
-| `src/app.js` | Conserva bootstrap Fastify y schedulers | `interfaces/http`, `config`, `bootstrap` | Adelgazado; lifecycle movido a `bootstrap/appLifecycle.bootstrap.js` | Alta |
+| `src/app.js`, `src/server.js`, `src/worker.js` | Entry points en raiz de `src` | `src/main` | Movidos a `main`; scripts actualizados | Alta |
 | rutas HTTP test/debug | Exponian endpoints no productivos y saltos a services legacy | No aplica | Eliminadas de `interfaces/http/routes` y del route index | Alta |
-| `src/interfaces/http/controllers/webhook.controller.js` | Orquestaba tenant, DB y cola directamente | `application/use-cases/QueueHubspotCreateDealWebhook.js` + adapters | Migrado | Alta |
-| `src/services/webhookProcessor.js` | Facade legacy de compatibilidad | `application/use-cases`, `domain/orders`, `infrastructure/sap`, `infrastructure/hubspot` | Migrado; eliminar facade cuando no haya imports externos | Alta |
-| `src/services/hubspot/syncOrchestrator.js` | Facade legacy de compatibilidad | `application/use-cases/SendMappedItemsToHubspot.js` | Migrado | Alta |
-| `src/services/hubspot/associationOrchestrator.js` | Facade legacy de compatibilidad | `application/use-cases/HandleHubspotAssociations.js` | Migrado | Alta |
-| `src/services/mapping.service.js` | Facade legacy de compatibilidad | `application/services/field-mapping.service.js` + repositorios tenant | Migrado | Alta |
-| `src/services/hubspotClient.js` | Cliente externo dentro de services | `infrastructure/hubspot` | Adapters delegados creados; cliente legacy pendiente de eliminar | Alta |
-| `src/services/sapSessionManager.js` | Sesion SAP dentro de services | `infrastructure/sap` | Adapter delegado creado; manager legacy pendiente de eliminar | Alta |
-| `src/queues/*.queue.js` | BullMQ vive fuera de infraestructura | `infrastructure/queue` | Adapters delegados creados | Alta |
-| `src/workers/*.worker.js` | Wrapper BullMQ | `interfaces/jobs` + `infrastructure/queue` | Migrado; job webhook desacoplado de services directos | Media |
-| `src/config/database.js` | Master DB no expuesta como adapter | `infrastructure/database/master` | Wrapper creado | Media |
-| `src/config/tenantDatabase.js` | Tenant DB no expuesta como adapter | `infrastructure/database/tenant` | Wrapper creado | Media |
-| `src/controllers/*.js` | Facades legacy de compatibilidad | `interfaces/http/controllers` | Rutas activas ya usan interfaces; queda extraer logica de controllers grandes | Media |
-| `src/tasks/*.js` | Cron jobs llaman servicios legacy o facades | `interfaces/jobs` | SAP sync migrado; cron wrappers pendientes de adelgazar | Media |
+| `src/interfaces/http/controllers/*.js` | Importaban services/tasks/utils/config legacy | `application/use-cases` + `infrastructure/*` adapters | Controllers activos desacoplados de roots legacy directos | Alta |
+| `src/interfaces/http/controllers/webhook.controller.js` | Orquestaba tenant, DB y cola directamente | `application/use-cases/QueueHubspotCreateDealWebhook.js` + adapters | Migrado con dominio `HubspotCreateDealWebhook` | Alta |
+| `src/services/webhookProcessor.js` | Facade legacy de compatibilidad | `infrastructure/webhook/webhookProcessor.js` + `application/use-cases` | Movido fuera de `src/services` | Alta |
+| `src/services/hubspot/syncOrchestrator.js` | Facade legacy de compatibilidad | `infrastructure/hubspot/syncOrchestrator.js` + `application/use-cases/SendMappedItemsToHubspot.js` | Movido fuera de `src/services` | Alta |
+| `src/services/hubspot/associationOrchestrator.js` | Facade legacy de compatibilidad | `infrastructure/hubspot/associationOrchestrator.js` + `application/use-cases/HandleHubspotAssociations.js` | Movido fuera de `src/services` | Alta |
+| `src/services/mapping.service.js` | Facade legacy de compatibilidad | `infrastructure/database/repositories/mapping.service.js` + `application/services/field-mapping.service.js` | Movido fuera de `src/services` | Alta |
+| `src/services/hubspotClient.js` | Cliente externo dentro de services | `infrastructure/hubspot/hubspotClient.js` | Movido fuera de `src/services` | Alta |
+| `src/services/sapSessionManager.js` | Sesion SAP dentro de services | `infrastructure/sap/sapSessionManager.js` | Movido fuera de `src/services` | Alta |
+| `src/services/*` | Raiz legacy mezclaba aplicacion, dominio e infraestructura | Capas hexagonales existentes | Eliminada; imports actualizados | Alta |
+| `src/queues/*.queue.js` | BullMQ vive fuera de infraestructura | `infrastructure/queue` | Movido; adapters apuntan a infraestructura | Alta |
+| `src/workers/*.worker.js` | Wrapper BullMQ | `interfaces/jobs/workers` + `infrastructure/queue` | Migrado | Media |
+| `src/config/*.js` | Configuracion en root legacy | `infrastructure/config` y `infrastructure/database/*` | Movido | Media |
+| `src/db/models/**/*.js`, `models/**/*.js` | Modelos Mongoose fuera de infraestructura | `infrastructure/database/models` | Movido | Media |
+| `src/controllers/*.js` | Facades legacy de compatibilidad | `interfaces/http/controllers` | Eliminadas | Media |
+| `src/tasks/*.js` | Cron jobs llaman servicios legacy o facades | `interfaces/jobs/tasks` + `infrastructure/scheduler` | Movido | Media |
+| `src/utils/*.js`, `src/lib/*.js`, `src/middleware/*.js`, `src/integrations/**/*.js` | Utilidades/adapters en roots legacy | `shared`, `interfaces` e `infrastructure` | Movido | Media |
 
 ## Reglas De Dependencia
 
 - `domain` no importa nada de infraestructura.
 - `application` puede depender de `ports` y `shared`, y recibe adaptadores desde afuera.
-- `infrastructure` puede depender de librerias externas y modulos legacy mientras dure la transicion.
+- `infrastructure` puede depender de librerias externas y detalles concretos.
 - `interfaces` no debe contener logica de negocio compleja.
 - Los modelos Mongoose deben quedar detras de repositorios o servicios de tenant.
 - Las rutas test/debug no deben registrarse en el API.
@@ -75,17 +91,14 @@ Avance del Plan 2:
   hacia `config`, `queues`, `services`, `tasks` y `utils`.
 - Los jobs en `interfaces/jobs` no deben importar `services`, `tasks`, `queues`
   ni `utils` directamente.
+- Los roots legacy eliminados no deben volver a existir; cualquier nuevo
+  comportamiento debe ubicarse en la capa correspondiente.
 
 ## Pendiente Para Cierre Total
 
-- Extraer logica de configuracion, OAuth, SAP credentials, owner mapping, deal
-  mapping, line item prices e internal tenant desde controllers HTTP hacia casos
-  de uso dedicados.
-- Migrar SAP sync y line item price para que no importen `src/services` ni
-  `src/tasks` desde controllers HTTP.
-- Reemplazar imports de infraestructura que todavia delegan en `src/services/*`
-  por adapters concretos, especialmente HubSpot client, SAP session, sync log y
-  tenant configuration.
-- Eliminar facades legacy cuando no queden imports internos ni consumidores externos.
-- Endurecer gradualmente los tests de arquitectura para bloquear controllers y
-  services legacy en rutas activas.
+- Seguir adelgazando controllers HTTP hasta que la composicion de dependencias
+  viva preferiblemente en rutas/factories o container dedicado.
+- Seguir refinando nombres de adapters movidos desde roots legacy para reducir
+  sufijos como `.service` donde ya exista un adapter con contrato claro.
+- Reducir dependencias directas desde `interfaces` hacia adapters concretos,
+  moviendo composicion repetida al container/factories.
