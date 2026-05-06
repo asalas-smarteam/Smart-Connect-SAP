@@ -37,7 +37,7 @@ async function resolveTenantContext({ tenantId, tenantKey, portalId }) {
 export async function processWebhookTenant({ tenantId, tenantKey, portalId, triggerType = 'worker' }) {
   const context = await resolveTenantContext({ tenantId, tenantKey, portalId });
   const tenantModels = await getTenantModels(context.tenantKey);
-  const syncLog = await startSyncLog({ tenantModels });
+  const syncLog = await startSyncLog({ tenantModels, objectType: 'Deal' });
 
   logger.info({
     msg: 'Starting webhook tenant processing',

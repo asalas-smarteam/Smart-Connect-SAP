@@ -30,7 +30,10 @@ function createLineItemPriceController({
 
       try {
         tenantModels = dependencies.tenantModelsResolver.resolve(req);
-        syncLogRecord = await dependencies.syncLogGateway.start({ tenantModels });
+        syncLogRecord = await dependencies.syncLogGateway.start({
+          tenantModels,
+          objectType: 'Product',
+        });
 
         preparedPayload = await dependencies.webhookPayload.preparePayload(req.body[0], {
           tenantModels,

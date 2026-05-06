@@ -1,12 +1,18 @@
 import { finishSyncLog, startSyncLog } from '#infrastructure/sync/syncLog.service.js';
 
 export class MongooseSyncLogRepository {
-  async start({ tenantModels, clientConfigId = null, startedAt = new Date() } = {}) {
+  async start({
+    tenantModels,
+    clientConfigId = null,
+    objectType = null,
+    startedAt = new Date(),
+  } = {}) {
     return startSyncLog({
       tenantModels: {
         SyncLog: tenantModels?.SyncLog,
       },
       clientConfigId,
+      objectType,
       startedAt,
     });
   }
@@ -17,4 +23,3 @@ export class MongooseSyncLogRepository {
 }
 
 export default MongooseSyncLogRepository;
-

@@ -8,6 +8,11 @@ export const syncLogSchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: 'ClientConfig',
     },
+    objectType: {
+      type: String,
+      enum: ['Product', 'Contact', 'Deal', 'Company'],
+      default: null,
+    },
     status: {
       type: String,
       enum: ['completed', 'errored'],

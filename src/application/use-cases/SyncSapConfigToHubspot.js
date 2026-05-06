@@ -24,6 +24,7 @@ export class SyncSapConfigToHubspot {
       syncLog = await this.syncLogRepository.start({
         tenantModels,
         clientConfigId,
+        objectType: config?.objectType,
         startedAt,
       });
 
@@ -127,4 +128,3 @@ export class SyncSapConfigToHubspot {
 }
 
 export default SyncSapConfigToHubspot;
-

@@ -54,7 +54,28 @@ export function buildWebhookSyncErrorEntry({
   };
 }
 
-export async function startSyncLog({ tenantModels, clientConfigId = null, startedAt = new Date() } = {}) {
+const SYNC_LOG_OBJECT_TYPES = Object.freeze({
+  product: 'Product',
+  products: 'Product',
+  contact: 'Contact',
+  contacts: 'Contact',
+  deal: 'Deal',
+  deals: 'Deal',
+  company: 'Company',
+  companies: 'Company',
+});
+
+export function normalizeSyncLogObjectType(objectType) {
+  const normalized = String(objectType || '').trim().toLowerCase();
+  return SYNC_LOG_OBJECT_TYPES[normalized] || null;
+}
+
+export async function startSyncLog({
+  tenantModels,
+  clientConfigId = null,
+  objectType = null,
+  startedAt = new Date(),
+} = {}) {
   const SyncLog = tenantModels?.SyncLog;
 
   if (!SyncLog) {
@@ -63,6 +84,7 @@ export async function startSyncLog({ tenantModels, clientConfigId = null, starte
 
   return SyncLog.create({
     clientConfigId: clientConfigId || undefined,
+    objectType: normalizeSyncLogObjectType(objectType),
     recordsProcessed: 0,
     sent: 0,
     failed: 0,

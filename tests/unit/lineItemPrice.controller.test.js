@@ -89,6 +89,10 @@ describe('lineItemPrice.controller syncPrices', () => {
 
     await buildController().syncPrices(req, reply);
 
+    expect(mockStartSyncLog).toHaveBeenCalledWith({
+      tenantModels: req.tenantModels,
+      objectType: 'Product',
+    });
     expect(mockPreparePayload).toHaveBeenCalledWith(req.body[0], {
       tenantModels: req.tenantModels,
       tenant: req.tenant,
