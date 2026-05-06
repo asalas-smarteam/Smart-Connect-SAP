@@ -29,6 +29,7 @@ function buildHubspotBatchPayload(enrichedLineItems) {
       properties: {
         price: String(roundCurrency(lineItem.Price ?? 0)),
         quantity: String(normalizeQuantity(lineItem.quantity ?? lineItem.Quantity)),
+        discount: String(normalizeNumber(lineItem.Discount ?? lineItem.discount, 0)),
         ...(lineItem.warehouseStockProperties || {}),
       },
     })),

@@ -11,6 +11,10 @@ export class LineItemPriceCredentialRepository {
     throw new Error('Not implemented');
   }
 
+  async resolveTenantTaxSettings() {
+    throw new Error('Not implemented');
+  }
+
   async resolveWarehouseStockProperties() {
     throw new Error('Not implemented');
   }

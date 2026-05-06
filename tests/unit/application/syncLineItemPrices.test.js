@@ -11,6 +11,10 @@ function createUseCase(overrides = {}) {
       serviceLayerBaseUrl: 'https://sap.example.com:50000',
     }),
     resolveTenantPriceList: jest.fn().mockResolvedValue(4),
+    resolveTenantTaxSettings: jest.fn().mockResolvedValue({
+      fieldItem: null,
+      taxCodes: [],
+    }),
     resolveWarehouseStockProperties: jest.fn().mockResolvedValue({
       A01_stock: 8,
     }),
@@ -186,6 +190,91 @@ describe('SyncLineItemPrices', () => {
         },
       ],
     });
+  });
+
+  it('uses configured SAP tax field as HubSpot line item discount for business partner prices', async () => {
+    const { useCase, credentialRepository, sapPriceClient, hubspotPriceClient } = createUseCase();
+
+    credentialRepository.resolveTenantTaxSettings.mockResolvedValue({
+      fieldItem: 'U_SalesTaxCode',
+      taxCodes: [
+        { Code: 'IVA', Rate: 15 },
+        { Code: 'EXE', Rate: 0 },
+      ],
+    });
+    sapPriceClient.fetchItemPrices.mockResolvedValue({
+      U_SalesTaxCode: 'IVA',
+      ItemWarehouseInfoCollection: [{ WarehouseCode: 'A01', Ordered: 2, Committed: 1, InStock: 7 }],
+    });
+
+    await useCase.execute(
+      {
+        cardCode: 'C20000',
+        lineItems: [{ itemCode: 'A0001', id: 'line-1', quantity: 2 }],
+      },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    expect(sapPriceClient.fetchItemPrices).toHaveBeenCalledWith({
+      sapConfig: {
+        serviceLayerBaseUrl: 'https://sap.example.com:50000',
+        tenantKey: 'tenant_1',
+      },
+      itemCode: 'A0001',
+      tenantKey: 'tenant_1',
+      selectFields: ['ItemPrices', 'ItemWarehouseInfoCollection', 'U_SalesTaxCode'],
+    });
+    expect(hubspotPriceClient.updateLineItems).toHaveBeenCalledWith({
+      token: 'hubspot-token',
+      enrichedLineItems: [
+        expect.objectContaining({
+          id: 'line-1',
+          Price: 704.35,
+          Discount: 15,
+        }),
+      ],
+      tenantKey: 'tenant_1',
+    });
+  });
+
+  it('uses configured SAP tax field as HubSpot line item discount with tenant price list', async () => {
+    const { useCase, credentialRepository, sapPriceClient } = createUseCase();
+
+    credentialRepository.resolveTenantTaxSettings.mockResolvedValue({
+      fieldItem: 'U_SalesTaxCode',
+      taxCodes: [
+        { Code: 'IVA', Rate: 15 },
+        { Code: 'EXE', Rate: 0 },
+      ],
+    });
+    sapPriceClient.fetchItemPrices.mockResolvedValue({
+      U_SalesTaxCode: 'IVA',
+      ItemPrices: [{ PriceList: 4, Price: 704.35, Currency: 'C$' }],
+      ItemWarehouseInfoCollection: [{ WarehouseCode: 'A01', Ordered: 2, Committed: 1, InStock: 7 }],
+    });
+
+    const result = await useCase.execute(
+      {
+        lineItems: [{ itemCode: 'A0001', id: 'line-1', quantity: 1 }],
+      },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    expect(result.data.lineItems).toEqual([
+      expect.objectContaining({
+        itemCode: 'A0001',
+        Price: 704.35,
+        Discount: 15,
+      }),
+    ]);
   });
 
   it('attaches sync log details when an injected adapter fails', async () => {

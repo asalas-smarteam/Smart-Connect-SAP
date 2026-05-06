@@ -11,6 +11,7 @@ const httpsAgent = new https.Agent({
 const SAP_ITEM_PRICE_PATH = '/b1s/v2/CompanyService_GetItemPrice';
 const SAP_ITEM_PRICES_SELECT_PATH = '/b1s/v2/Items';
 const EXTERNAL_TIMEOUT_MS = 15000;
+const DEFAULT_SAP_ITEM_SELECT_FIELDS = ['ItemPrices', 'ItemWarehouseInfoCollection'];
 
 function buildSapPricePayload({ cardCode, itemCode, date }) {
   return {
@@ -22,8 +23,12 @@ function buildSapPricePayload({ cardCode, itemCode, date }) {
   };
 }
 
-function buildSapItemPricesPath(itemCode) {
-  return `${SAP_ITEM_PRICES_SELECT_PATH}('${encodeURIComponent(String(itemCode))}')?$select=ItemPrices,ItemWarehouseInfoCollection`;
+function buildSapItemPricesPath(itemCode, selectFields = DEFAULT_SAP_ITEM_SELECT_FIELDS) {
+  const normalizedSelectFields = selectFields
+    .map((field) => String(field ?? '').trim())
+    .filter((field, index, fields) => field && fields.indexOf(field) === index);
+
+  return `${SAP_ITEM_PRICES_SELECT_PATH}('${encodeURIComponent(String(itemCode))}')?$select=${normalizedSelectFields.join(',')}`;
 }
 
 function resolveBaseUrl(sapConfig) {
@@ -105,8 +110,8 @@ export class SapLineItemPriceClient {
     });
   }
 
-  async fetchItemPrices({ sapConfig, itemCode, tenantKey }) {
-    const endpoint = buildSapItemPricesPath(itemCode);
+  async fetchItemPrices({ sapConfig, itemCode, tenantKey, selectFields }) {
+    const endpoint = buildSapItemPricesPath(itemCode, selectFields);
     const url = `${resolveBaseUrl(sapConfig)}${endpoint}`;
 
     const makeRequest = async () => {

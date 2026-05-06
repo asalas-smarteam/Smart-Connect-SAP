@@ -13,6 +13,34 @@ function normalizePriceList(value) {
   return Number.isInteger(normalized) && normalized > 0 ? normalized : null;
 }
 
+function normalizeOptionalNumber(value) {
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return null;
+  }
+
+  const normalized = Number(rawValue);
+  return Number.isFinite(normalized) ? normalized : null;
+}
+
+function normalizeTaxSettings(configuration) {
+  const rawConfiguration = typeof configuration?.toObject === 'function'
+    ? configuration.toObject()
+    : configuration;
+
+  return {
+    fieldItem: toNonEmptyString(rawConfiguration?.FieldItem),
+    taxCodes: Array.isArray(rawConfiguration?.value)
+      ? rawConfiguration.value
+        .map((taxCode) => ({
+          Code: toNonEmptyString(taxCode?.Code),
+          Rate: normalizeOptionalNumber(taxCode?.Rate),
+        }))
+        .filter((taxCode) => taxCode.Code && taxCode.Rate !== null)
+      : [],
+  };
+}
+
 export class TenantLineItemPriceConfigRepository {
   async resolveHubspotCredentials({ tenantModels, tenant }) {
     const { HubspotCredentials } = tenantModels;
@@ -67,6 +95,21 @@ export class TenantLineItemPriceConfigRepository {
     }
 
     return priceList;
+  }
+
+  async resolveTenantTaxSettings({ tenantModels }) {
+    const Configuration = tenantModels?.Configuration;
+
+    if (typeof Configuration?.findOne !== 'function') {
+      return normalizeTaxSettings(null);
+    }
+
+    const query = Configuration.findOne({ key: 'taxCodes' });
+    const configuration = typeof query?.lean === 'function'
+      ? await query.lean()
+      : await query;
+
+    return normalizeTaxSettings(configuration);
   }
 
   async resolveWarehouseStockProperties({ tenantModels, itemWarehouseInfoCollection }) {

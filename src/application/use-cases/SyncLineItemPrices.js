@@ -1,4 +1,5 @@
 const SAP_ITEM_PRICES_SELECT_PATH = '/b1s/v2/Items';
+const DEFAULT_SAP_ITEM_SELECT_FIELDS = ['ItemPrices', 'ItemWarehouseInfoCollection'];
 
 function toNonEmptyString(value) {
   const normalized = String(value ?? '').trim();
@@ -12,6 +13,16 @@ function formatCurrentDate(date = new Date()) {
 function normalizeNumber(value, fallback = 0) {
   const normalized = Number(String(value ?? '').trim());
   return Number.isFinite(normalized) ? normalized : fallback;
+}
+
+function normalizeOptionalNumber(value) {
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return null;
+  }
+
+  const normalized = Number(rawValue);
+  return Number.isFinite(normalized) ? normalized : null;
 }
 
 function normalizeQuantity(value) {
@@ -49,8 +60,15 @@ function buildSapPricePayload({ cardCode, itemCode, date }) {
   };
 }
 
-function buildSapItemPricesPath(itemCode) {
-  return `${SAP_ITEM_PRICES_SELECT_PATH}('${encodeURIComponent(String(itemCode))}')?$select=ItemPrices,ItemWarehouseInfoCollection`;
+function buildItemSelectFields(taxFieldItem) {
+  return [
+    ...DEFAULT_SAP_ITEM_SELECT_FIELDS,
+    toNonEmptyString(taxFieldItem),
+  ].filter((field, index, fields) => field && fields.indexOf(field) === index);
+}
+
+function buildSapItemPricesPath(itemCode, selectFields = DEFAULT_SAP_ITEM_SELECT_FIELDS) {
+  return `${SAP_ITEM_PRICES_SELECT_PATH}('${encodeURIComponent(String(itemCode))}')?$select=${selectFields.join(',')}`;
 }
 
 function selectConfiguredItemPrice(itemPrices, priceList, itemCode) {
@@ -63,6 +81,25 @@ function selectConfiguredItemPrice(itemPrices, priceList, itemCode) {
   }
 
   return selectedPrice;
+}
+
+function resolveTaxRate({ sapItemData, taxSettings, fallbackDiscount }) {
+  const taxFieldItem = toNonEmptyString(taxSettings?.fieldItem);
+  if (!taxFieldItem) {
+    return fallbackDiscount;
+  }
+
+  const taxCode = toNonEmptyString(sapItemData?.[taxFieldItem]);
+  if (!taxCode || !Array.isArray(taxSettings?.taxCodes)) {
+    return fallbackDiscount;
+  }
+
+  const taxCodeConfig = taxSettings.taxCodes.find(
+    (entry) => toNonEmptyString(entry?.Code) === taxCode
+  );
+  const taxRate = normalizeOptionalNumber(taxCodeConfig?.Rate);
+
+  return taxRate ?? fallbackDiscount;
 }
 
 export class SyncLineItemPrices {
@@ -108,6 +145,10 @@ export class SyncLineItemPrices {
       const fallbackPriceList = useBusinessPartnerPrice
         ? null
         : await this.credentialRepository.resolveTenantPriceList({ tenantModels });
+      const taxSettings = typeof this.credentialRepository.resolveTenantTaxSettings === 'function'
+        ? await this.credentialRepository.resolveTenantTaxSettings({ tenantModels })
+        : { fieldItem: null, taxCodes: [] };
+      const itemSelectFields = buildItemSelectFields(taxSettings?.fieldItem);
       const sapCredentialsData = typeof sapCredentials?.toObject === 'function'
         ? sapCredentials.toObject()
         : sapCredentials;
@@ -142,7 +183,7 @@ export class SyncLineItemPrices {
         } else {
           const sapRequestPayload = {
             method: 'GET',
-            endpoint: buildSapItemPricesPath(itemCode),
+            endpoint: buildSapItemPricesPath(itemCode, itemSelectFields),
             priceList: fallbackPriceList,
           };
 
@@ -152,6 +193,7 @@ export class SyncLineItemPrices {
             sapConfig,
             itemCode,
             tenantKey,
+            selectFields: itemSelectFields,
           });
           const selectedPrice = selectConfiguredItemPrice(
             sapItemData?.ItemPrices,
@@ -181,6 +223,7 @@ export class SyncLineItemPrices {
             sapConfig,
             itemCode,
             tenantKey,
+            selectFields: itemSelectFields,
           })
           : auditTrail.response_SAP[auditTrail.response_SAP.length - 1];
         const warehouseStockProperties = await this.credentialRepository.resolveWarehouseStockProperties({
@@ -189,6 +232,11 @@ export class SyncLineItemPrices {
         });
         const quantity = normalizeQuantity(lineItem.quantity ?? lineItem.Quantity);
         const price = roundCurrency(priceData?.Price ?? 0);
+        const discount = resolveTaxRate({
+          sapItemData: sapItemStockData,
+          taxSettings,
+          fallbackDiscount: normalizeNumber(priceData?.Discount, 0),
+        });
         const lineTotal = roundCurrency(quantity * price);
 
         enrichedLineItems.push({
@@ -197,7 +245,7 @@ export class SyncLineItemPrices {
           quantity,
           Price: price,
           Currency: priceData?.Currency ?? null,
-          Discount: priceData?.Discount ?? 0,
+          Discount: discount,
           lineTotal,
           warehouseStockProperties,
         });
