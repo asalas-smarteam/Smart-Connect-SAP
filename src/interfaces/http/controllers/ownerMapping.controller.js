@@ -1,16 +1,6 @@
-import ManageOwnerMappings, {
-  ownerMappingReasons,
-} from '../../../application/use-cases/ManageOwnerMappings.js';
-import MongooseObjectIdValidator from '../../../infrastructure/database/MongooseObjectIdValidator.js';
-import TenantOwnerMappingRepository from '../../../infrastructure/database/repositories/TenantOwnerMappingRepository.js';
-import requestTenantModelsAdapter from '../../../infrastructure/tenants/RequestTenantModelsAdapter.js';
-
-function buildManageOwnerMappings() {
-  return new ManageOwnerMappings({
-    ownerMappingRepository: new TenantOwnerMappingRepository(),
-    objectIdValidator: new MongooseObjectIdValidator(),
-  });
-}
+import { ownerMappingReasons } from '#application/use-cases/ManageOwnerMappings.js';
+import buildManageOwnerMappings from '#composition/owner-mappings.composition.js';
+import requestTenantModelsAdapter from '#infrastructure/tenants/RequestTenantModelsAdapter.js';
 
 function statusFor(result) {
   if (

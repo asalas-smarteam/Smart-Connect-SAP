@@ -1,7 +1,7 @@
 import mappingService from './mapping.service.js';
-import tenantConfigurationService from '../../config/tenantConfiguration.service.js';
-import { PermanentWebhookError } from '../../../shared/errors/index.js';
-import { normalizePositiveInteger, toNonEmptyString } from '../../../shared/utils/string.utils.js';
+import tenantConfigurationService from '#infrastructure/config/tenantConfiguration.service.js';
+import { PermanentWebhookError } from '#shared/errors/index.js';
+import { normalizePositiveInteger, toNonEmptyString } from '#shared/utils/string.utils.js';
 
 export class TenantWebhookRuntimeRepository {
   async resolveRuntimeContext({ tenantModels, payload, tenantId, tenantKey, portalId }) {

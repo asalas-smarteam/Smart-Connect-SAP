@@ -1,24 +1,13 @@
 import cron from 'node-cron';
-import { listActiveTenants } from '../../../infrastructure/tenants/tenantSubscriptions.js';
-import MongooseSapSyncTenantRepository from '../../../infrastructure/database/repositories/MongooseSapSyncTenantRepository.js';
-import MongooseSyncLogRepository from '../../../infrastructure/database/repositories/MongooseSyncLogRepository.js';
-import MappingSyncRepository from '../../../infrastructure/repositories/MappingSyncRepository.js';
-import HubspotSyncAdapter from '../../../infrastructure/hubspot/HubspotSyncAdapter.js';
-import SapSyncDataAdapter from '../../../infrastructure/sap/SapSyncDataAdapter.js';
-import SyncSapConfigToHubspot from '../../../application/use-cases/SyncSapConfigToHubspot.js';
-
-function createSyncUseCase() {
-  return new SyncSapConfigToHubspot({
-    sapDataSource: new SapSyncDataAdapter(),
-    mappingRepository: new MappingSyncRepository(),
-    hubspotSyncTarget: new HubspotSyncAdapter(),
-    syncLogRepository: new MongooseSyncLogRepository(),
-  });
-}
+import {
+  buildSapSyncTenantRepository,
+  buildSyncSapConfigToHubspot,
+} from '#composition/sap-sync.composition.js';
+import { listActiveTenants } from '#infrastructure/tenants/tenantSubscriptions.js';
 
 export async function runSapSyncOnce({
-  tenantRepository = new MongooseSapSyncTenantRepository(),
-  syncUseCase = createSyncUseCase(),
+  tenantRepository = buildSapSyncTenantRepository(),
+  syncUseCase = buildSyncSapConfigToHubspot(),
   tenantProvider = listActiveTenants,
 } = {}) {
   const activeTenants = await tenantProvider();
@@ -38,4 +27,3 @@ export default function startSapSync() {
     return sapSyncJob;
   }
 }
-

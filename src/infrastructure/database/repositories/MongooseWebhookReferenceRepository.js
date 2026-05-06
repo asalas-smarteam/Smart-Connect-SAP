@@ -1,4 +1,4 @@
-import { buildWebhookEventReferenceUpdates } from '../../../application/services/webhook-payload.service.js';
+import { buildWebhookEventReferenceUpdates } from '#application/services/webhook-payload.service.js';
 
 export class MongooseWebhookReferenceRepository {
   async persistReferences({

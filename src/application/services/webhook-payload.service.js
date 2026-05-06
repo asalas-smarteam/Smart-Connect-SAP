@@ -1,4 +1,4 @@
-import { toNonEmptyString } from '../../shared/utils/string.utils.js';
+import { toNonEmptyString } from '#shared/utils/string.utils.js';
 
 export function resolveEventPayload(event) {
   const payload = event?.payload || {};

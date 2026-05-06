@@ -1,5 +1,5 @@
-import logger from '../infrastructure/logger/logger.js';
-import { bootstrapScheduledJobs } from '../infrastructure/scheduler/sapSyncScheduler.service.js';
+import logger from '#infrastructure/logger/logger.js';
+import { bootstrapScheduledJobs } from '#infrastructure/scheduler/sapSyncScheduler.service.js';
 
 export async function bootstrapSapSyncScheduler() {
   try {

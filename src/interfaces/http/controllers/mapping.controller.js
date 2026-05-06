@@ -1,19 +1,6 @@
-import ManageFieldMappings, {
-  fieldMappingReasons,
-} from '../../../application/use-cases/ManageFieldMappings.js';
-import FieldMappingService from '../../../application/services/field-mapping.service.js';
-import TenantFieldMappingRepository from '../../../infrastructure/database/repositories/TenantFieldMappingRepository.js';
-import TenantMappingManagementRepository from '../../../infrastructure/database/repositories/TenantMappingManagementRepository.js';
-import requestTenantModelsAdapter from '../../../infrastructure/tenants/RequestTenantModelsAdapter.js';
-
-function buildManageFieldMappings() {
-  return new ManageFieldMappings({
-    mappingManagementRepository: new TenantMappingManagementRepository(),
-    fieldMappingService: new FieldMappingService({
-      fieldMappingRepository: new TenantFieldMappingRepository(),
-    }),
-  });
-}
+import { fieldMappingReasons } from '#application/use-cases/ManageFieldMappings.js';
+import buildManageFieldMappings from '#composition/field-mappings.composition.js';
+import requestTenantModelsAdapter from '#infrastructure/tenants/RequestTenantModelsAdapter.js';
 
 function sendFailure(reply, result) {
   if (result.reason === fieldMappingReasons.DUPLICATE_MAPPING) {

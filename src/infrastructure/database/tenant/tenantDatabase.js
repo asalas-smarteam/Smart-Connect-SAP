@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import env from '../../config/env.js';
+import env from '#infrastructure/config/env.js';
 import { registerTenantModels } from '../models/tenant/index.js';
 
 const { MONGODB_URI, TENANT_DB_PREFIX } = env;

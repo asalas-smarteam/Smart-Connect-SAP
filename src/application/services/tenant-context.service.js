@@ -1,4 +1,4 @@
-import { TenantContextResolutionError } from '../../shared/errors/index.js';
+import { TenantContextResolutionError } from '#shared/errors/index.js';
 
 function toNonEmptyString(value) {
   const normalized = String(value ?? '').trim();

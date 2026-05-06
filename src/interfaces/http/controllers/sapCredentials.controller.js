@@ -1,16 +1,6 @@
-import ManageSapCredentials, {
-  sapCredentialsReasons,
-} from '../../../application/use-cases/ManageSapCredentials.js';
-import MongooseObjectIdValidator from '../../../infrastructure/database/MongooseObjectIdValidator.js';
-import TenantSapCredentialsRepository from '../../../infrastructure/database/repositories/TenantSapCredentialsRepository.js';
-import requestTenantModelsAdapter from '../../../infrastructure/tenants/RequestTenantModelsAdapter.js';
-
-function createManageSapCredentials() {
-  return new ManageSapCredentials({
-    sapCredentialsRepository: new TenantSapCredentialsRepository(),
-    objectIdValidator: new MongooseObjectIdValidator(),
-  });
-}
+import { sapCredentialsReasons } from '#application/use-cases/ManageSapCredentials.js';
+import buildManageSapCredentials from '#composition/sap-credentials.composition.js';
+import requestTenantModelsAdapter from '#infrastructure/tenants/RequestTenantModelsAdapter.js';
 
 function resolveFailureStatus(result) {
   if (
@@ -48,7 +38,7 @@ function sendResult(reply, result) {
 }
 
 function createSapCredentialsController({
-  manageSapCredentials = createManageSapCredentials(),
+  manageSapCredentials = buildManageSapCredentials(),
   tenantModelsResolver = requestTenantModelsAdapter,
 } = {}) {
   return {

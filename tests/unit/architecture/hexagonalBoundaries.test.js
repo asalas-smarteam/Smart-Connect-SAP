@@ -9,6 +9,7 @@ const srcRoot = path.join(projectRoot, 'src');
 const hexagonalRoots = [
   'application',
   'bootstrap',
+  'composition',
   'domain',
   'infrastructure',
   'interfaces',
@@ -54,6 +55,18 @@ const bannedPackages = new Set([
   'redis',
 ]);
 
+const importAliasRoots = {
+  '#application': 'application',
+  '#bootstrap': 'bootstrap',
+  '#composition': 'composition',
+  '#domain': 'domain',
+  '#infrastructure': 'infrastructure',
+  '#interfaces': 'interfaces',
+  '#main': 'main',
+  '#ports': 'ports',
+  '#shared': 'shared',
+};
+
 function listJavaScriptFiles(directory) {
   if (!fs.existsSync(directory)) {
     return [];
@@ -84,11 +97,18 @@ function parseImportSpecifiers(source) {
 }
 
 function resolveImportPath(filePath, specifier) {
-  if (!specifier.startsWith('.')) {
+  if (specifier.startsWith('.')) {
+    return path.resolve(path.dirname(filePath), specifier);
+  }
+
+  const [alias, ...rest] = specifier.split('/');
+  const root = importAliasRoots[alias];
+
+  if (!root) {
     return null;
   }
 
-  return path.resolve(path.dirname(filePath), specifier);
+  return path.join(srcRoot, root, ...rest);
 }
 
 function isInsideDirectory(filePath, directory) {
@@ -262,7 +282,7 @@ describe('hexagonal architecture boundaries', () => {
 
         return parseImportSpecifiers(source)
           .map((specifier) => {
-            if (!specifier.startsWith('.')) {
+            if (!specifier.startsWith('.') && !specifier.startsWith('#')) {
               const packageName = specifier.split('/')[0];
               return bannedPackages.has(packageName)
                 ? `${path.relative(projectRoot, filePath)} imports package ${specifier}`
@@ -270,6 +290,9 @@ describe('hexagonal architecture boundaries', () => {
             }
 
             const resolved = resolveImportPath(filePath, specifier);
+            if (!resolved) {
+              return null;
+            }
             const bannedRoot = bannedInternalRoots.find((directory) =>
               resolved === directory || isInsideDirectory(resolved, directory)
             );

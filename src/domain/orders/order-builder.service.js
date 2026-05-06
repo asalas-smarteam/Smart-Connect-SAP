@@ -1,6 +1,6 @@
-import { PermanentWebhookError } from '../../shared/errors/index.js';
-import { pickByPath } from '../../shared/utils/object-path.utils.js';
-import { normalizeNumber, toNonEmptyString } from '../../shared/utils/string.utils.js';
+import { PermanentWebhookError } from '#shared/errors/index.js';
+import { pickByPath } from '#shared/utils/object-path.utils.js';
+import { normalizeNumber, toNonEmptyString } from '#shared/utils/string.utils.js';
 
 export function mapHubspotToSapFields(source, mappings) {
   const mapped = {};

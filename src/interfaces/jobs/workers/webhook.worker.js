@@ -1,9 +1,9 @@
 import { Worker } from 'bullmq';
-import logger from '../../../infrastructure/logger/logger.adapter.js';
-import { createBullMQConnection } from '../../../infrastructure/queue/bullmqRedis.js';
+import logger from '#infrastructure/logger/logger.adapter.js';
+import { createBullMQConnection } from '#infrastructure/queue/bullmqRedis.js';
 import {
   WEBHOOK_QUEUE_NAME,
-} from '../../../infrastructure/queue/webhook.queue.adapter.js';
+} from '#infrastructure/queue/webhook.queue.adapter.js';
 import { processWebhookJob } from '../webhook.job.js';
 
 const DEFAULT_WORKER_CONCURRENCY = Number(process.env.WEBHOOK_WORKER_CONCURRENCY || 5);

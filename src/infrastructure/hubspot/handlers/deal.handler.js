@@ -1,6 +1,6 @@
 import * as hubspotClient from '../hubspotClient.js';
-import dealMappingResolver from '../../database/repositories/dealMappingResolver.js';
-import { getMappedOwnerId } from '../../database/repositories/ownerMapping.service.js';
+import dealMappingResolver from '#infrastructure/database/repositories/dealMappingResolver.js';
+import { getMappedOwnerId } from '#infrastructure/database/repositories/ownerMapping.service.js';
 
 export async function preprocess({ item, clientConfig, tenantModels }) {
   const { pipeline, dealstage, hubspot_owner_id } = item.properties ?? {};

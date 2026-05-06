@@ -1,33 +1,14 @@
-import logger from '../logger/logger.adapter.js';
-import ProcessWebhookDealEventBatch from '../../application/use-cases/ProcessWebhookDealEventBatch.js';
-import ProcessHubspotWebhookEvent from '../../application/use-cases/ProcessHubspotWebhookEvent.js';
-import MongooseWebhookEventRepository from '../repositories/MongooseWebhookEventRepository.js';
-import TenantWebhookRuntimeRepository from '../database/repositories/TenantWebhookRuntimeRepository.js';
-import MongooseWebhookReferenceRepository from '../database/repositories/MongooseWebhookReferenceRepository.js';
-import SapWebhookOrderAdapter from '../sap/SapWebhookOrderAdapter.js';
-import HubspotWebhookAdapter from '../hubspot/HubspotWebhookAdapter.js';
-
 import {
-  buildErrorResponseSnapshot,
-  buildWebhookSyncErrorEntry,
-} from '../sync/syncLog.service.js';
+  buildProcessHubspotWebhookEventUseCase,
+  buildProcessWebhookDealEventBatch,
+  buildWebhookEventRepository,
+} from '#composition/webhook-processing.composition.js';
 
 const DEFAULT_BATCH_SIZE = Number(process.env.WEBHOOK_EVENT_BATCH_SIZE || 10);
 const DEFAULT_MAX_RETRIES = Number(process.env.WEBHOOK_EVENT_MAX_RETRIES || 3);
 
-function createProcessHubspotWebhookEventUseCase() {
-  return new ProcessHubspotWebhookEvent({
-    runtimeRepository: new TenantWebhookRuntimeRepository(),
-    sapOrderAdapter: new SapWebhookOrderAdapter(),
-    hubspotWebhookAdapter: new HubspotWebhookAdapter(),
-    webhookReferenceRepository: new MongooseWebhookReferenceRepository(),
-    buildWebhookSyncErrorEntry,
-    buildErrorResponseSnapshot,
-  });
-}
-
 export async function claimEventsToProcess(WebhookEvent, batchSize = DEFAULT_BATCH_SIZE) {
-  const repository = new MongooseWebhookEventRepository({ WebhookEvent, batchSize });
+  const repository = buildWebhookEventRepository({ WebhookEvent, batchSize });
   return repository.claimWaiting();
 }
 
@@ -41,18 +22,15 @@ const webhookProcessor = {
       1,
       Number(process.env.WEBHOOK_EVENT_MAX_RETRIES || DEFAULT_MAX_RETRIES)
     );
-    const repository = new MongooseWebhookEventRepository({
+    const repository = buildWebhookEventRepository({
       WebhookEvent: tenantModels?.WebhookEvent,
       batchSize: DEFAULT_BATCH_SIZE,
     });
-    const processHubspotWebhookEvent = createProcessHubspotWebhookEventUseCase();
-    const useCase = new ProcessWebhookDealEventBatch({
+    const processHubspotWebhookEvent = buildProcessHubspotWebhookEventUseCase();
+    const useCase = buildProcessWebhookDealEventBatch({
       webhookEventRepository: repository,
-      processWebhookDealEvent: (input) => processHubspotWebhookEvent.execute(input),
-      logger,
       maxRetries: maxRetriesByEnv,
-      buildWebhookSyncErrorEntry,
-      buildErrorResponseSnapshot,
+      processHubspotWebhookEvent,
     });
 
     return useCase.execute({ tenantModels, tenantId, tenantKey, portalId });

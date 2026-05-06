@@ -1,5 +1,5 @@
-import { ApplicationError } from '../../shared/errors/index.js';
-import HubspotCreateDealWebhook from '../../domain/webhooks/HubspotCreateDealWebhook.js';
+import { ApplicationError } from '#shared/errors/index.js';
+import HubspotCreateDealWebhook from '#domain/webhooks/HubspotCreateDealWebhook.js';
 
 function validationError(message) {
   return new ApplicationError(message, {

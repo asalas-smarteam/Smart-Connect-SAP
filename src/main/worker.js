@@ -1,13 +1,13 @@
 import dotenv from 'dotenv';
-import db from '../infrastructure/database/master/master-db.js';
-import logger from '../infrastructure/logger/logger.adapter.js';
-import { closeAllConnections } from '../infrastructure/database/externalDb.js';
-import { disconnectTenantConnections } from '../infrastructure/database/tenant/tenant-db.js';
-import { closeSapSyncQueue } from '../infrastructure/queue/sap-sync.queue.adapter.js';
-import { closeWebhookQueue } from '../infrastructure/queue/webhook.queue.adapter.js';
-import { closeSharedBullMQConnection } from '../infrastructure/queue/bullmqRedis.js';
-import { startSapSyncWorker } from '../interfaces/jobs/workers/sapSync.worker.js';
-import { startWebhookWorker } from '../interfaces/jobs/workers/webhook.worker.js';
+import db from '#infrastructure/database/master/master-db.js';
+import logger from '#infrastructure/logger/logger.adapter.js';
+import { closeAllConnections } from '#infrastructure/database/externalDb.js';
+import { disconnectTenantConnections } from '#infrastructure/database/tenant/tenant-db.js';
+import { closeSapSyncQueue } from '#infrastructure/queue/sap-sync.queue.adapter.js';
+import { closeWebhookQueue } from '#infrastructure/queue/webhook.queue.adapter.js';
+import { closeSharedBullMQConnection } from '#infrastructure/queue/bullmqRedis.js';
+import { startSapSyncWorker } from '#interfaces/jobs/workers/sapSync.worker.js';
+import { startWebhookWorker } from '#interfaces/jobs/workers/webhook.worker.js';
 
 dotenv.config();
 

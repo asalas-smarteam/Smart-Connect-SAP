@@ -4,7 +4,7 @@ import scriptMode from './modes/scriptMode.js';
 import apiMode from './modes/apiMode.js';
 import mappingService from '../database/repositories/mapping.service.js';
 import serviceLayerService from './serviceLayer.service.js';
-import { ensureDefaultProductMappings } from '../../application/services/defaultClientConfigMappings.service.js';
+import { ensureDefaultProductMappings } from '#application/services/defaultClientConfigMappings.service.js';
 
 export class SapSyncDataAdapter {
   async fetchData({ clientConfigId, tenantModels, fetchOptions = {} }) {

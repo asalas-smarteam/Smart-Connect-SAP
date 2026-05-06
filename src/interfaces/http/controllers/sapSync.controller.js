@@ -1,6 +1,6 @@
-import sapSyncAdminAdapter from '../../../infrastructure/scheduler/SapSyncAdminAdapter.js';
+import { buildSapSyncAdmin } from '#composition/sap-sync.composition.js';
 
-function createSapSyncController({ sapSyncAdmin = sapSyncAdminAdapter } = {}) {
+function createSapSyncController({ sapSyncAdmin = buildSapSyncAdmin() } = {}) {
   return {
     triggerSapSync: async (req, reply) =>  {
   try {

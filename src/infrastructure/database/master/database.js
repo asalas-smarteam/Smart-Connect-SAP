@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import env from '../../config/env.js';
+import env from '#infrastructure/config/env.js';
 import FeatureFlags from '../models/global/FeatureFlags.js';
 import GlobalAuditLog from '../models/global/GlobalAuditLog.js';
 import PaymentStatus from '../models/global/PaymentStatus.js';

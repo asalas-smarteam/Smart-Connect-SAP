@@ -1,39 +1,12 @@
-import { buildOAuthState } from '../../../application/services/oauth-state.service.js';
-import HandleHubspotOAuthCallback, {
-  oauthReasons,
-} from '../../../application/use-cases/HandleHubspotOAuthCallback.js';
-import InitHubspotOAuthForTenant, {
-  initHubspotOAuthReasons,
-} from '../../../application/use-cases/InitHubspotOAuthForTenant.js';
-import logger from '../../../infrastructure/logger/logger.js';
-import OAuthTenantRepository from '../../../infrastructure/database/repositories/OAuthTenantRepository.js';
-import HubspotAuthProviderAdapter from '../../../infrastructure/hubspot/HubspotAuthProviderAdapter.js';
+import { buildOAuthState } from '#application/services/oauth-state.service.js';
+import { oauthReasons } from '#application/use-cases/HandleHubspotOAuthCallback.js';
+import { initHubspotOAuthReasons } from '#application/use-cases/InitHubspotOAuthForTenant.js';
 import {
-  MasterConfigReplicatorAdapter,
-  TenantHubspotSeederAdapter,
-} from '../../../infrastructure/hubspot/TenantHubspotSeederAdapter.js';
-import requestTenantModelsAdapter from '../../../infrastructure/tenants/RequestTenantModelsAdapter.js';
-
-function buildHubspotAuthProvider() {
-  return new HubspotAuthProviderAdapter();
-}
-
-function buildOAuthCallbackUseCase() {
-  return new HandleHubspotOAuthCallback({
-    tenantRepository: new OAuthTenantRepository(),
-    hubspotAuthProvider: buildHubspotAuthProvider(),
-    masterConfigReplicator: new MasterConfigReplicatorAdapter(),
-    tenantHubspotSeeder: new TenantHubspotSeederAdapter(),
-    logger,
-  });
-}
-
-function buildInitHubspotOAuthForTenantUseCase() {
-  return new InitHubspotOAuthForTenant({
-    tenantRepository: new OAuthTenantRepository(),
-    hubspotAuthProvider: buildHubspotAuthProvider(),
-  });
-}
+  buildHubspotAuthProvider,
+  buildInitHubspotOAuthForTenantUseCase,
+  buildOAuthCallbackUseCase,
+} from '#composition/oauth.composition.js';
+import requestTenantModelsAdapter from '#infrastructure/tenants/RequestTenantModelsAdapter.js';
 
 export const initOAuth = (req, reply) => {
   const { clientConfigId } = req.params;

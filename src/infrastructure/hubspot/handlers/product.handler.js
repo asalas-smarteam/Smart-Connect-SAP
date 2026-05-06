@@ -1,5 +1,5 @@
 import * as hubspotClient from '../hubspotClient.js';
-import tenantConfigurationService from '../../config/tenantConfiguration.service.js';
+import tenantConfigurationService from '#infrastructure/config/tenantConfiguration.service.js';
 import { getHubspotWarehouseStockPropertiesForTenant } from '../warehouseStock.js';
 
 const DEFAULT_PRICE_FIELDS = ['hs_price_usd'];

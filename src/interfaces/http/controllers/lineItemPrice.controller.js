@@ -1,10 +1,4 @@
-import SyncLineItemPrices from '../../../application/use-cases/SyncLineItemPrices.js';
-import HubspotLineItemPriceClient from '../../../infrastructure/external-services/HubspotLineItemPriceClient.js';
-import SapLineItemPriceClient from '../../../infrastructure/external-services/SapLineItemPriceClient.js';
-import TenantLineItemPriceConfigRepository from '../../../infrastructure/repositories/TenantLineItemPriceConfigRepository.js';
-import syncLogAdapter from '../../../infrastructure/sync/SyncLogAdapter.js';
-import requestTenantModelsAdapter from '../../../infrastructure/tenants/RequestTenantModelsAdapter.js';
-import lineItemPriceWebhookPayloadAdapter from '../../../infrastructure/webhook/LineItemPriceWebhookPayloadAdapter.js';
+import { buildLineItemPriceControllerDependencies } from '#composition/line-item-prices.composition.js';
 
 function resolveStatusCode(error) {
   return /lineItems must be a non-empty array|itemCode is required|\.id is required|portalId is required|eventId is required|subscriptionId is required|appId is required|occurredAt is required|fromObjectId is required/.test(
@@ -14,22 +8,19 @@ function resolveStatusCode(error) {
     : 500;
 }
 
-function buildSyncLineItemPrices(syncLog) {
-  return new SyncLineItemPrices({
-    credentialRepository: new TenantLineItemPriceConfigRepository(),
-    sapPriceClient: new SapLineItemPriceClient(),
-    hubspotPriceClient: new HubspotLineItemPriceClient(),
-    buildErrorResponseSnapshot: (error) => syncLog.buildErrorResponseSnapshot(error),
-    buildWebhookSyncErrorEntry: (entry) => syncLog.buildWebhookSyncErrorEntry(entry),
-  });
-}
-
 function createLineItemPriceController({
-  tenantModelsResolver = requestTenantModelsAdapter,
-  webhookPayload = lineItemPriceWebhookPayloadAdapter,
-  syncLogGateway = syncLogAdapter,
-  syncLineItemPrices = buildSyncLineItemPrices(syncLogGateway),
+  tenantModelsResolver,
+  webhookPayload,
+  syncLogGateway,
+  syncLineItemPrices,
 } = {}) {
+  const dependencies = buildLineItemPriceControllerDependencies({
+    tenantModelsResolver,
+    webhookPayload,
+    syncLogGateway,
+    syncLineItemPrices,
+  });
+
   return {
     async syncPrices(req, reply) {
       let tenantModels = null;
@@ -38,16 +29,16 @@ function createLineItemPriceController({
       let syncLogRecord = null;
 
       try {
-        tenantModels = tenantModelsResolver.resolve(req);
-        syncLogRecord = await syncLogGateway.start({ tenantModels });
+        tenantModels = dependencies.tenantModelsResolver.resolve(req);
+        syncLogRecord = await dependencies.syncLogGateway.start({ tenantModels });
 
-        preparedPayload = await webhookPayload.preparePayload(req.body[0], {
+        preparedPayload = await dependencies.webhookPayload.preparePayload(req.body[0], {
           tenantModels,
           tenant: req.tenant,
         });
 
         if (preparedPayload.skip) {
-          await syncLogGateway.finish(syncLogRecord, {
+          await dependencies.syncLogGateway.finish(syncLogRecord, {
             status: 'completed',
             recordsProcessed: 0,
             sent: 0,
@@ -63,14 +54,14 @@ function createLineItemPriceController({
 
         executionId = preparedPayload.executionId;
 
-        const result = await syncLineItemPrices.execute(preparedPayload.payload, {
+        const result = await dependencies.syncLineItemPrices.execute(preparedPayload.payload, {
           tenantModels,
           tenant: req.tenant,
           tenantKey: req.tenantKey,
         });
 
         if (executionId) {
-          await webhookPayload.markAsSent(
+          await dependencies.webhookPayload.markAsSent(
             tenantModels.LineItemPriceWebhookEvent,
             executionId
           );
@@ -80,7 +71,7 @@ function createLineItemPriceController({
           Number(result?.meta?.requestedCount) || preparedPayload?.payload?.lineItems?.length || 0;
         const updatedCount = Number(result?.meta?.updatedCount) || 0;
 
-        await syncLogGateway.finish(syncLogRecord, {
+        await dependencies.syncLogGateway.finish(syncLogRecord, {
           status: 'completed',
           recordsProcessed: requestedCount,
           sent: updatedCount,
@@ -100,24 +91,24 @@ function createLineItemPriceController({
         });
 
         if (executionId) {
-          await webhookPayload.markAsError(
+          await dependencies.webhookPayload.markAsError(
             tenantModels.LineItemPriceWebhookEvent,
             executionId,
             error
           );
         }
 
-        await syncLogGateway.finish(syncLogRecord, {
+        await dependencies.syncLogGateway.finish(syncLogRecord, {
           status: 'errored',
           recordsProcessed: preparedPayload?.payload?.lineItems?.length || 0,
           sent: 0,
           failed: preparedPayload?.payload?.lineItems?.length || 1,
           errorMessage: error.syncLogWebhookErrors || [
-            syncLogGateway.buildWebhookSyncErrorEntry({
+            dependencies.syncLogGateway.buildWebhookSyncErrorEntry({
               payloadHubspot: preparedPayload?.payload || req.body?.[0] || req.body,
               payloadSap: null,
               responseHubspot: null,
-              responseSap: syncLogGateway.buildErrorResponseSnapshot(error),
+              responseSap: dependencies.syncLogGateway.buildErrorResponseSnapshot(error),
             }),
           ],
         });

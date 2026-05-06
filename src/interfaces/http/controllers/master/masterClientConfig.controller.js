@@ -1,4 +1,4 @@
-import masterClientConfigAdapter from '../../../../infrastructure/config/MasterClientConfigAdapter.js';
+import { buildMasterClientConfig } from '#composition/master-client-config.composition.js';
 
 function resolveStatusCode(error) {
   if (/Missing required fields|intervalMinutes|mode|executionTime|ValidationError/.test(error.message)) {
@@ -9,7 +9,7 @@ function resolveStatusCode(error) {
 }
 
 function createMasterClientConfigController({
-  masterClientConfig = masterClientConfigAdapter,
+  masterClientConfig = buildMasterClientConfig(),
 } = {}) {
   return {
     async getMasterClientConfigs(req, reply) {

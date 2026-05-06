@@ -1,22 +1,7 @@
-import ManageClientConfigs, {
-  clientConfigReasons,
-} from '../../../application/use-cases/ManageClientConfigs.js';
-import logger from '../../../infrastructure/logger/logger.js';
-import * as filterPolicy from '../../../infrastructure/config/ClientConfigFilterPolicyAdapter.js';
-import DefaultClientConfigMappingInitializer from '../../../infrastructure/config/DefaultClientConfigMappingInitializer.js';
-import TenantClientConfigRepository from '../../../infrastructure/database/repositories/TenantClientConfigRepository.js';
-import * as scheduler from '../../../infrastructure/scheduler/SapSyncSchedulerAdapter.js';
-import requestTenantModelsAdapter from '../../../infrastructure/tenants/RequestTenantModelsAdapter.js';
-
-function buildManageClientConfigs() {
-  return new ManageClientConfigs({
-    clientConfigRepository: new TenantClientConfigRepository(),
-    filterPolicy,
-    defaultMappingInitializer: new DefaultClientConfigMappingInitializer(),
-    scheduler,
-    logger,
-  });
-}
+import { clientConfigReasons } from '#application/use-cases/ManageClientConfigs.js';
+import buildManageClientConfigs from '#composition/client-configs.composition.js';
+import logger from '#infrastructure/logger/logger.js';
+import requestTenantModelsAdapter from '#infrastructure/tenants/RequestTenantModelsAdapter.js';
 
 function statusFor(result) {
   if (result.reason === clientConfigReasons.BAD_REQUEST) {

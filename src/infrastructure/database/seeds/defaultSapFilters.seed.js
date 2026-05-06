@@ -1,5 +1,5 @@
 import { createDefaultSapFilterModel } from '../models/master/defaultSapFilter.model.js';
-import logger from '../../logger/logger.js';
+import logger from '#infrastructure/logger/logger.js';
 
 const BASE_DEFAULT_SAP_FILTERS = [
   {

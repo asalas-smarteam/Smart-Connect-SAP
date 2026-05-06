@@ -1,14 +1,14 @@
 import dotenv from 'dotenv';
 import app from './app.js';
-import db from '../infrastructure/database/master/master-db.js';
-import logger from '../infrastructure/logger/logger.adapter.js';
-import { closeAllConnections } from '../infrastructure/database/externalDb.js';
-import { seedDefaultSapFilters } from '../infrastructure/database/seeds/defaultSapFilters.seed.js';
-import { seedMasterClientConfigs } from '../infrastructure/database/seeds/masterClientConfigs.seed.js';
-import { closeSapSyncQueue } from '../infrastructure/queue/sap-sync.queue.adapter.js';
-import { closeSharedBullMQConnection } from '../infrastructure/queue/bullmqRedis.js';
-import { disconnectTenantConnections } from '../infrastructure/database/tenant/tenant-db.js';
-import appConfig from '../infrastructure/config/app.config.js';
+import db from '#infrastructure/database/master/master-db.js';
+import logger from '#infrastructure/logger/logger.adapter.js';
+import { closeAllConnections } from '#infrastructure/database/externalDb.js';
+import { seedDefaultSapFilters } from '#infrastructure/database/seeds/defaultSapFilters.seed.js';
+import { seedMasterClientConfigs } from '#infrastructure/database/seeds/masterClientConfigs.seed.js';
+import { closeSapSyncQueue } from '#infrastructure/queue/sap-sync.queue.adapter.js';
+import { closeSharedBullMQConnection } from '#infrastructure/queue/bullmqRedis.js';
+import { disconnectTenantConnections } from '#infrastructure/database/tenant/tenant-db.js';
+import appConfig from '#infrastructure/config/app.config.js';
 
 dotenv.config();
 

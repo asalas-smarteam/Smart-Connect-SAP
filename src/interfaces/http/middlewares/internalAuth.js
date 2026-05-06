@@ -1,5 +1,5 @@
-import env from '../../../infrastructure/config/env.js';
-import { validateProvisioningPayload } from '../../../shared/utils/provisioningValidation.js';
+import env from '#infrastructure/config/env.js';
+import { validateProvisioningPayload } from '#shared/utils/provisioningValidation.js';
 
 const { INTERNAL_KEY } = env;
 

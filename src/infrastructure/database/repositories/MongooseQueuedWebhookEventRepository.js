@@ -1,5 +1,5 @@
 import { getTenantModels } from '../tenant/tenantDatabase.js';
-import { queueCreateDealEvent } from '../../webhook/webhookEvent.service.js';
+import { queueCreateDealEvent } from '#infrastructure/webhook/webhookEvent.service.js';
 
 export class MongooseQueuedWebhookEventRepository {
   constructor({

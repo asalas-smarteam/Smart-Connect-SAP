@@ -1,15 +1,5 @@
-import ProvisionInternalTenant, {
-  provisioningReasons,
-} from '../../../application/use-cases/ProvisionInternalTenant.js';
-import ProvisioningPayloadValidatorAdapter from '../../../infrastructure/tenants/ProvisioningPayloadValidatorAdapter.js';
-import TenantProvisioningAdapter from '../../../infrastructure/tenants/TenantProvisioningAdapter.js';
-
-function buildProvisionInternalTenant() {
-  return new ProvisionInternalTenant({
-    provisioningService: new TenantProvisioningAdapter(),
-    provisioningValidator: new ProvisioningPayloadValidatorAdapter(),
-  });
-}
+import { provisioningReasons } from '#application/use-cases/ProvisionInternalTenant.js';
+import buildProvisionInternalTenant from '#composition/internal-tenant.composition.js';
 
 export const provisionInternalTenant = async (req, reply) => {
   try {

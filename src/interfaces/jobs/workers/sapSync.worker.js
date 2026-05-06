@@ -1,9 +1,9 @@
 import { Worker } from 'bullmq';
-import logger from '../../../infrastructure/logger/logger.adapter.js';
-import { createBullMQConnection } from '../../../infrastructure/queue/bullmqRedis.js';
+import logger from '#infrastructure/logger/logger.adapter.js';
+import { createBullMQConnection } from '#infrastructure/queue/bullmqRedis.js';
 import {
   SAP_SYNC_QUEUE_NAME,
-} from '../../../infrastructure/queue/sap-sync.queue.adapter.js';
+} from '#infrastructure/queue/sap-sync.queue.adapter.js';
 import {
   LOCK_RETRY_ERROR_CODE,
   processSapSyncJob,

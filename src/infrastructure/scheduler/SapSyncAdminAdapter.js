@@ -1,5 +1,5 @@
-import { runSapSyncOnce } from '../../interfaces/jobs/tasks/sapSyncTask.js';
-import { runWebhookProcessorManualOnce } from '../../interfaces/jobs/tasks/webhookProcessorTask.js';
+import { runSapSyncOnce } from '#interfaces/jobs/tasks/sapSyncTask.js';
+import { runWebhookProcessorManualOnce } from '#interfaces/jobs/tasks/webhookProcessorTask.js';
 import {
   getQueueDashboardSnapshot,
   purgeTenantJobs,

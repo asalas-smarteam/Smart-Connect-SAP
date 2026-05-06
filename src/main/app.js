@@ -1,9 +1,9 @@
 import Fastify from 'fastify';
-import routes from '../interfaces/http/routes/index.js';
-import appConfig from '../infrastructure/config/app.config.js';
-import { registerBullBoard } from '../bootstrap/bullBoard.js';
-import { registerAppLifecycle } from '../bootstrap/appLifecycle.bootstrap.js';
-import logger from '../infrastructure/logger/logger.adapter.js';
+import routes from '#interfaces/http/routes/index.js';
+import appConfig from '#infrastructure/config/app.config.js';
+import { registerBullBoard } from '#bootstrap/bullBoard.js';
+import { registerAppLifecycle } from '#bootstrap/appLifecycle.bootstrap.js';
+import logger from '#infrastructure/logger/logger.adapter.js';
 
 const app = Fastify({
   logger: appConfig.logger

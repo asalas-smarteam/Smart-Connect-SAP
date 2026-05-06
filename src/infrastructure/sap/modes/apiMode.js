@@ -1,5 +1,5 @@
 import axios from 'axios';
-import logger from '../../logger/logger.js';
+import logger from '#infrastructure/logger/logger.js';
 
 const apiMode = {
   async execute(config) {

@@ -1,9 +1,21 @@
 {
   "name": "sap-hubspot-connector",
-  "version": "2.0.0",
+  "version": "2.1.3",
   "description": "Conector bidireccional entre SAP y HubSpot ",
   "main": "src/main/app.js",
   "type": "module",
+  "imports": {
+    "#application/*": "./src/application/*",
+    "#bootstrap/*": "./src/bootstrap/*",
+    "#domain/*": "./src/domain/*",
+    "#infrastructure/*": "./src/infrastructure/*",
+    "#interfaces/*": "./src/interfaces/*",
+    "#main/*": "./src/main/*",
+    "#ports/*": "./src/ports/*",
+    "#shared/*": "./src/shared/*",
+    "#composition/*": "./src/composition/*",
+    "#plugins/*": "./src/plugins/*"
+  },
   "scripts": {
     "dev": "npx nodemon src/main/server.js",
     "dev:all": "bash -lc 'trap \"kill 0\" EXIT INT TERM; npm run dev & npm run dev:worker & wait'",

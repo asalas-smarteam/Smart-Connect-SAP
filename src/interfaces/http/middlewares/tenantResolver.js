@@ -1,7 +1,7 @@
 import crypto from 'crypto';
-import env from '../../../infrastructure/config/env.js';
-import { SaaSClient, Subscription } from '../../../infrastructure/database/master/database.js';
-import { getTenantConnection, getTenantModels } from '../../../infrastructure/database/tenant/tenantDatabase.js';
+import env from '#infrastructure/config/env.js';
+import { SaaSClient, Subscription } from '#infrastructure/database/master/database.js';
+import { getTenantConnection, getTenantModels } from '#infrastructure/database/tenant/tenantDatabase.js';
 
 const { JWT_SECRET } = env;
 

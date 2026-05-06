@@ -1,26 +1,7 @@
 import HandleHubspotAssociations, {
   ASSOCIATION_MAP,
-} from '../../application/use-cases/HandleHubspotAssociations.js';
-import FieldMappingService from '../../application/services/field-mapping.service.js';
-import TenantFieldMappingRepository from '../database/repositories/TenantFieldMappingRepository.js';
-import HubspotAssociationFetchAdapter from './HubspotAssociationFetchAdapter.js';
-import associationRegistryService from './associationRegistryService.js';
-import associationService from './associationService.js';
-import contactHandler from './handlers/contact.handler.js';
-import { generateFallbackEmail } from './utils/email.utils.js';
-
-function createHandleHubspotAssociations() {
-  return new HandleHubspotAssociations({
-    associationFetcher: new HubspotAssociationFetchAdapter(),
-    associationRegistry: associationRegistryService,
-    associationService,
-    fieldMappingService: new FieldMappingService({
-      fieldMappingRepository: new TenantFieldMappingRepository(),
-    }),
-    contactHandler,
-    fallbackEmailGenerator: generateFallbackEmail,
-  });
-}
+} from '#application/use-cases/HandleHubspotAssociations.js';
+import buildHandleHubspotAssociations from '#composition/hubspot-associations.composition.js';
 
 export async function handleAssociations({
   objectType,
@@ -30,7 +11,7 @@ export async function handleAssociations({
   tenantModels,
   hubspotId,
 }) {
-  return createHandleHubspotAssociations().execute({
+  return buildHandleHubspotAssociations().execute({
     objectType,
     token,
     item,

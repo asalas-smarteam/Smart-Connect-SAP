@@ -1,12 +1,12 @@
 import logger from '../logger/logger.js';
 import { createMasterClientConfigModel } from '../database/models/master/ClientConfig.js';
-import { buildMergedFilters } from '../../application/services/clientConfigFilters.service.js';
+import { buildMergedFilters } from '#application/services/clientConfigFilters.service.js';
 import {
   ensureDefaultContactEmployeeMappings,
   ensureDefaultDealMappings,
   ensureDefaultProductMappings,
   ensureDefaultCompanyEmployeeMappings,
-} from '../../application/services/defaultClientConfigMappings.service.js';
+} from '#application/services/defaultClientConfigMappings.service.js';
 
 function buildClientConfigPayload({
   masterConfig,

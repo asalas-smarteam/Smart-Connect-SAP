@@ -1,16 +1,4 @@
-import { APP_VERSION } from '../../../infrastructure/config/appMetadata.js';
-import GetHealthStatus from '../../../application/use-cases/GetHealthStatus.js';
-import MongooseDatabaseStatusProvider from '../../../infrastructure/database/MongooseDatabaseStatusProvider.js';
-import { createHealthController } from '../controllers/health.controller.js';
-
-function buildHealthController() {
-  const getHealthStatus = new GetHealthStatus({
-    databaseStatusProvider: new MongooseDatabaseStatusProvider(),
-    version: APP_VERSION,
-  });
-
-  return createHealthController({ getHealthStatus });
-}
+import buildHealthController from '#composition/health.composition.js';
 
 export default async function healthRoutes(app) {
   app.get('/health', buildHealthController());

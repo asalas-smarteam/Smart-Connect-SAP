@@ -2,12 +2,12 @@ import {
   buildOrderPayload,
   mapDocumentLines,
   mapHubspotToSapFields,
-} from '../../domain/orders/order-builder.service.js';
+} from '#domain/orders/order-builder.service.js';
 import {
   resolveEventPayload,
   resolveHubspotSapId,
 } from '../services/webhook-payload.service.js';
-import { toNonEmptyString } from '../../shared/utils/string.utils.js';
+import { toNonEmptyString } from '#shared/utils/string.utils.js';
 
 export class ProcessHubspotWebhookEvent {
   constructor({

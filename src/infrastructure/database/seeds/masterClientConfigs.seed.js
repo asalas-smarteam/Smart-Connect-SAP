@@ -1,4 +1,4 @@
-import logger from '../../logger/logger.js';
+import logger from '#infrastructure/logger/logger.js';
 import { createMasterClientConfigModel } from '../models/master/ClientConfig.js';
 
 const BASE_MASTER_CLIENT_CONFIGS = [

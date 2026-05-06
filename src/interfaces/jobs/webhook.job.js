@@ -1,8 +1,8 @@
-import logger from '../../infrastructure/logger/logger.adapter.js';
+import logger from '#infrastructure/logger/logger.adapter.js';
 import {
   WEBHOOK_JOB_NAME,
-} from '../../infrastructure/queue/webhook.queue.adapter.js';
-import webhookTenantProcessorAdapter from '../../infrastructure/webhook/WebhookTenantProcessorAdapter.js';
+} from '#infrastructure/queue/webhook.queue.adapter.js';
+import webhookTenantProcessorAdapter from '#infrastructure/webhook/WebhookTenantProcessorAdapter.js';
 
 export function createWebhookJobProcessor({
   webhookTenantProcessor = (payload) => webhookTenantProcessorAdapter.process(payload),

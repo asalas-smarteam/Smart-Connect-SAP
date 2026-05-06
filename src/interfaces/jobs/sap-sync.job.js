@@ -1,12 +1,10 @@
-import logger from '../../infrastructure/logger/logger.adapter.js';
-import { SAP_SYNC_JOB_NAME } from '../../infrastructure/queue/sap-sync.queue.adapter.js';
-import MongooseSapSyncTenantRepository from '../../infrastructure/database/repositories/MongooseSapSyncTenantRepository.js';
-import MongooseSyncLogRepository from '../../infrastructure/database/repositories/MongooseSyncLogRepository.js';
-import MappingSyncRepository from '../../infrastructure/repositories/MappingSyncRepository.js';
-import HubspotSyncAdapter from '../../infrastructure/hubspot/HubspotSyncAdapter.js';
-import SapSyncDataAdapter from '../../infrastructure/sap/SapSyncDataAdapter.js';
-import TenantSapSyncLockAdapter from '../../infrastructure/locks/TenantSapSyncLockAdapter.js';
-import SyncSapConfigToHubspot from '../../application/use-cases/SyncSapConfigToHubspot.js';
+import {
+  buildSapSyncTenantRepository,
+  buildSyncSapConfigToHubspot,
+  buildTenantSapSyncLockAdapter,
+} from '#composition/sap-sync.composition.js';
+import logger from '#infrastructure/logger/logger.adapter.js';
+import { SAP_SYNC_JOB_NAME } from '#infrastructure/queue/sap-sync.queue.adapter.js';
 
 export const LOCK_RETRY_ERROR_CODE = 'TENANT_SAP_SYNC_LOCKED';
 
@@ -30,19 +28,10 @@ export async function safeUpdateJobData(job, nextData) {
   }
 }
 
-function createDefaultSyncUseCase() {
-  return new SyncSapConfigToHubspot({
-    sapDataSource: new SapSyncDataAdapter(),
-    mappingRepository: new MappingSyncRepository(),
-    hubspotSyncTarget: new HubspotSyncAdapter(),
-    syncLogRepository: new MongooseSyncLogRepository(),
-  });
-}
-
 export function createSapSyncJobProcessor({
-  tenantRepository = new MongooseSapSyncTenantRepository(),
-  lockAdapter = new TenantSapSyncLockAdapter(),
-  syncUseCase = createDefaultSyncUseCase(),
+  tenantRepository = buildSapSyncTenantRepository(),
+  lockAdapter = buildTenantSapSyncLockAdapter(),
+  syncUseCase = buildSyncSapConfigToHubspot(),
   dateProvider = () => new Date(),
 } = {}) {
   return async function processSapSyncJob(job) {
@@ -188,4 +177,3 @@ export function createSapSyncJobProcessor({
 export const processSapSyncJob = createSapSyncJobProcessor();
 
 export default processSapSyncJob;
-

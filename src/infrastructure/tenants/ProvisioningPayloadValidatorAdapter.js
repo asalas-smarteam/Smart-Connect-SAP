@@ -1,4 +1,4 @@
-import { validateProvisioningPayload } from '../../shared/utils/provisioningValidation.js';
+import { validateProvisioningPayload } from '#shared/utils/provisioningValidation.js';
 
 export class ProvisioningPayloadValidatorAdapter {
   validate(payload) {

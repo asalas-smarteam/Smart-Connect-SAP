@@ -1,8 +1,8 @@
-import env from '../infrastructure/config/env.js';
-import { initializeExternalConnections } from '../infrastructure/database/externalDb.js';
+import env from '#infrastructure/config/env.js';
+import { initializeExternalConnections } from '#infrastructure/database/externalDb.js';
 import { bootstrapSapSyncScheduler } from './sapSyncScheduler.bootstrap.js';
-import startSapSync from '../interfaces/jobs/tasks/sapSyncTask.js';
-import startWebhookProcessor from '../interfaces/jobs/tasks/webhookProcessorTask.js';
+import startSapSync from '#interfaces/jobs/tasks/sapSyncTask.js';
+import startWebhookProcessor from '#interfaces/jobs/tasks/webhookProcessorTask.js';
 
 async function startCronJobIfEnabled({ enabled, createJob }) {
   if (!enabled) {

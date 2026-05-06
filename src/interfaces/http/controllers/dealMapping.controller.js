@@ -1,16 +1,6 @@
-import ManageDealMappings, {
-  dealMappingReasons,
-} from '../../../application/use-cases/ManageDealMappings.js';
-import MongooseObjectIdValidator from '../../../infrastructure/database/MongooseObjectIdValidator.js';
-import TenantDealMappingRepository from '../../../infrastructure/database/repositories/TenantDealMappingRepository.js';
-import requestTenantModelsAdapter from '../../../infrastructure/tenants/RequestTenantModelsAdapter.js';
-
-function buildManageDealMappings() {
-  return new ManageDealMappings({
-    dealMappingRepository: new TenantDealMappingRepository(),
-    objectIdValidator: new MongooseObjectIdValidator(),
-  });
-}
+import { dealMappingReasons } from '#application/use-cases/ManageDealMappings.js';
+import buildManageDealMappings from '#composition/deal-mappings.composition.js';
+import requestTenantModelsAdapter from '#infrastructure/tenants/RequestTenantModelsAdapter.js';
 
 function statusFor(result) {
   if (

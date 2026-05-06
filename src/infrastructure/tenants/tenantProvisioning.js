@@ -7,7 +7,7 @@ import {
 } from '../database/master/database.js';
 import { buildTenantDatabaseName, getTenantConnection } from '../database/tenant/tenantDatabase.js';
 import { registerTenantModels } from '../database/models/tenant/index.js';
-import { sanitizeMongoCollectionName } from '../../shared/utils/provisioningValidation.js';
+import { sanitizeMongoCollectionName } from '#shared/utils/provisioningValidation.js';
 import { replicateDefaultSapFilters } from './replicateDefaultSapFilters.js';
 
 function slugifyCompanyName(companyName) {

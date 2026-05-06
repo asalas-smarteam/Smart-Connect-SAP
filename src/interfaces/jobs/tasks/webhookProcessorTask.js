@@ -1,6 +1,6 @@
 import cron from 'node-cron';
-import { enqueueWebhookJobsForActiveTenants } from '../../../infrastructure/scheduler/webhookDispatcher.service.js';
-import { processWebhookForActiveTenants } from '../../../infrastructure/webhook/webhookProcessorRunner.service.js';
+import { enqueueWebhookJobsForActiveTenants } from '#infrastructure/scheduler/webhookDispatcher.service.js';
+import { processWebhookForActiveTenants } from '#infrastructure/webhook/webhookProcessorRunner.service.js';
 
 export async function runWebhookProcessorOnce() {
   return enqueueWebhookJobsForActiveTenants({ triggerType: 'scheduled' });

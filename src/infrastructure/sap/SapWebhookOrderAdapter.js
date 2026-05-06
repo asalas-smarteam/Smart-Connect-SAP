@@ -5,13 +5,13 @@ import {
   buildDefaultBusinessPartnerCardCode,
   mapHubspotToSapFields,
   resolveContactDisplayName,
-} from '../../domain/orders/order-builder.service.js';
-import { PermanentWebhookError } from '../../shared/errors/index.js';
+} from '#domain/orders/order-builder.service.js';
+import { PermanentWebhookError } from '#shared/errors/index.js';
 import {
   escapeODataString,
   normalizeNumber,
   toNonEmptyString,
-} from '../../shared/utils/string.utils.js';
+} from '#shared/utils/string.utils.js';
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 

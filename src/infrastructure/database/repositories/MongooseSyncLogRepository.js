@@ -1,4 +1,4 @@
-import { finishSyncLog, startSyncLog } from '../../sync/syncLog.service.js';
+import { finishSyncLog, startSyncLog } from '#infrastructure/sync/syncLog.service.js';
 
 export class MongooseSyncLogRepository {
   async start({ tenantModels, clientConfigId = null, startedAt = new Date() } = {}) {
