@@ -22,6 +22,9 @@ This changelog was initialized from the available git history. The repository do
 - Add infrastructure adapters for tenant line item price configuration, SAP price retrieval, and HubSpot price/stock updates.
 - Add unit coverage for line item price synchronization through application-layer fakes.
 - Add the `api-design-principles` project skill for API design guidance.
+- Add product sync strategies for SAP-to-HubSpot product loading, including default one-to-one sync and one-to-many sync by configured SAP price lists.
+- Add tenant configuration loading for `productSyncStrategy` with default `oneToOne_Product` behavior and validation through the product strategy factory.
+- Add SAP product price-list adapter support for resolving configured item prices during product sync without changing line item price APIs.
 
 ### Changed
 
@@ -35,6 +38,7 @@ This changelog was initialized from the available git history. The repository do
 - Refactor individual HubSpot webhook event processing into an application use case with domain order building and SAP/HubSpot/webhook reference adapters.
 - Refactor `lineItemPrice.service` into a compatibility facade that composes the new hexagonal use case and adapters.
 - Refactor mapping, SAP sync, HubSpot sync, and HubSpot association flows behind application services or use cases while retaining legacy service entry points.
+- Route only product SAP syncs through the new product strategy factory while keeping contact, company, deal, and line item price flows unchanged.
 - Update test fixtures to match the current Service Layer, OAuth, mapping, HubSpot auth, SAP service, and tenant provisioning contracts.
 - Harden Mongo-backed integration tests by using valid ObjectId plan IDs, local MongoMemoryServer binding, disabled background webhook cron, and explicit queue/Redis cleanup.
 

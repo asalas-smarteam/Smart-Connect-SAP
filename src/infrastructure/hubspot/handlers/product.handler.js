@@ -39,6 +39,10 @@ export async function preprocess({ item, tenantModels }) {
 
   Object.assign(item.properties, warehouseStockProperties);
 
+  if (item?.rawSapData?.selectedPrice) {
+    return;
+  }
+
   priceFields.forEach((field) => {
     item.properties[field] = 0.0;
   });

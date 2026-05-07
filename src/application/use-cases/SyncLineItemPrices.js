@@ -230,13 +230,9 @@ export class SyncLineItemPrices {
           tenantModels,
           itemWarehouseInfoCollection: sapItemStockData?.ItemWarehouseInfoCollection,
         });
+        const tax = taxSettings?.taxCodes?.find((entry) => toNonEmptyString(entry?.Code) === toNonEmptyString(sapItemStockData?.[taxSettings.fieldItem])) || {};
         const quantity = normalizeQuantity(lineItem.quantity ?? lineItem.Quantity);
         const price = roundCurrency(priceData?.Price ?? 0);
-        const discount = resolveTaxRate({
-          sapItemData: sapItemStockData,
-          taxSettings,
-          fallbackDiscount: normalizeNumber(priceData?.Discount, 0),
-        });
         const lineTotal = roundCurrency(quantity * price);
 
         enrichedLineItems.push({
@@ -245,8 +241,8 @@ export class SyncLineItemPrices {
           quantity,
           Price: price,
           Currency: priceData?.Currency ?? null,
-          Discount: discount,
           lineTotal,
+          tax: tax.HSCode,
           warehouseStockProperties,
         });
       }

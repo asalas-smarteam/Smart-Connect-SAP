@@ -35,6 +35,7 @@ function normalizeTaxSettings(configuration) {
         .map((taxCode) => ({
           Code: toNonEmptyString(taxCode?.Code),
           Rate: normalizeOptionalNumber(taxCode?.Rate),
+          HSCode: toNonEmptyString(taxCode?.HSCode),
         }))
         .filter((taxCode) => taxCode.Code && taxCode.Rate !== null)
       : [],

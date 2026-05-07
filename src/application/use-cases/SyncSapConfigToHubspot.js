@@ -6,12 +6,16 @@ export class SyncSapConfigToHubspot {
     mappingRepository,
     hubspotSyncTarget,
     syncLogRepository,
+    productSyncConfigRepository = null,
+    productSyncStrategyFactory = null,
     dateProvider = () => new Date(),
   }) {
     this.sapDataSource = sapDataSource;
     this.mappingRepository = mappingRepository;
     this.hubspotSyncTarget = hubspotSyncTarget;
     this.syncLogRepository = syncLogRepository;
+    this.productSyncConfigRepository = productSyncConfigRepository;
+    this.productSyncStrategyFactory = productSyncStrategyFactory;
     this.dateProvider = dateProvider;
   }
 
@@ -72,23 +76,17 @@ export class SyncSapConfigToHubspot {
         rawSapData: rawData?.[index] ?? null,
       }));
 
-      let hubspotResult = { sent: 0, failed: 0 };
-
-      try {
-        hubspotResult = await this.hubspotSyncTarget.send({
-          mappedRecords: mappedRecordsWithRawSap,
-          config,
-          objectType,
-          tenantModels,
-          credentials,
-        });
-      } catch (_error) {
-        hubspotResult = { sent: 0, failed: mappedRecordsWithRawSap.length };
-      }
+      const hubspotResult = await this.sendMappedRecords({
+        mappedRecords: mappedRecordsWithRawSap,
+        config,
+        objectType,
+        tenantModels,
+        credentials,
+      });
 
       await this.syncLogRepository.finish(syncLog, {
         status: 'completed',
-        recordsProcessed: mappedRecordsWithRawSap.length,
+        recordsProcessed: hubspotResult.recordsProcessed ?? mappedRecordsWithRawSap.length,
         sent: hubspotResult.sent,
         failed: hubspotResult.failed,
         finishedAt: this.dateProvider(),
@@ -124,6 +122,54 @@ export class SyncSapConfigToHubspot {
 
     config.lastRun = this.dateProvider();
     await config.save();
+  }
+
+  async sendMappedRecords({
+    mappedRecords,
+    config,
+    objectType,
+    tenantModels,
+    credentials,
+  }) {
+    if (objectType === 'product' && this.productSyncConfigRepository && this.productSyncStrategyFactory) {
+      const strategyConfig = await this.productSyncConfigRepository.getProductSyncStrategyConfig({
+        tenantModels,
+      });
+      const strategy = this.productSyncStrategyFactory.getStrategy(strategyConfig.strategy);
+
+      return strategy.execute({
+        mappedRecords,
+        config,
+        objectType,
+        tenantModels,
+        credentials,
+        tenantId: config?.tenantId ?? config?.tenantKey ?? null,
+        tenantKey: config?.tenantKey ?? null,
+        strategyConfig,
+      });
+    }
+
+    try {
+      const result = await this.hubspotSyncTarget.send({
+        mappedRecords,
+        config,
+        objectType,
+        tenantModels,
+        credentials,
+      });
+
+      return {
+        sent: result?.sent ?? 0,
+        failed: result?.failed ?? 0,
+        recordsProcessed: mappedRecords.length,
+      };
+    } catch (_error) {
+      return {
+        sent: 0,
+        failed: mappedRecords.length,
+        recordsProcessed: mappedRecords.length,
+      };
+    }
   }
 }
 

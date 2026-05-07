@@ -74,4 +74,33 @@ describe('product.handler preprocess', () => {
 
     expect(fields).toEqual(['hs_price_usd']);
   });
+
+  it('preserves strategy price fields when product has a selected SAP price', async () => {
+    const tenantModels = {
+      Configuration: {
+        findOneAndUpdate: jest.fn().mockResolvedValue({
+          key: 'fieldsPricesHS',
+          value: ['price'],
+          userUpdated: 'admin',
+        }),
+      },
+    };
+    const item = {
+      properties: {
+        price: 120,
+      },
+      rawSapData: {
+        selectedPrice: { Price: 120, PriceList: 1 },
+        ItemWarehouseInfoCollection: [],
+      },
+    };
+
+    await preprocess({ item, tenantModels });
+
+    expect(item.properties).toEqual({
+      A01_stock: 11,
+      B10_stock: 4,
+      price: 120,
+    });
+  });
 });

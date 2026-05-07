@@ -102,4 +102,54 @@ describe('SyncSapConfigToHubspot', () => {
       errorMessage: 'No HubSpot credentials assigned to this clientConfig',
     }));
   });
+
+  it('uses configured product sync strategy only for product syncs', async () => {
+    const syncLog = { _id: 'log-1' };
+    const config = createConfig({ objectType: 'product' });
+    const tenantModels = {
+      HubspotCredentials: {
+        findById: jest.fn().mockResolvedValue({ _id: 'cred-1' }),
+      },
+    };
+    const productSyncConfig = { strategy: 'oneToMany_Product' };
+    const productStrategy = {
+      execute: jest.fn().mockResolvedValue({ sent: 2, failed: 0, recordsProcessed: 2 }),
+    };
+    const productSyncConfigRepository = {
+      getProductSyncStrategyConfig: jest.fn().mockResolvedValue(productSyncConfig),
+    };
+    const productSyncStrategyFactory = {
+      getStrategy: jest.fn().mockReturnValue(productStrategy),
+    };
+    const useCase = new SyncSapConfigToHubspot({
+      sapDataSource: {
+        fetchData: jest.fn().mockResolvedValue([{ ItemCode: 'SKU-1' }]),
+      },
+      mappingRepository: {
+        mapRecords: jest.fn().mockResolvedValue([{ properties: { hs_sku: 'SKU-1' } }]),
+      },
+      hubspotSyncTarget: {
+        send: jest.fn(),
+      },
+      syncLogRepository: {
+        start: jest.fn().mockResolvedValue(syncLog),
+        finish: jest.fn().mockResolvedValue(null),
+      },
+      productSyncConfigRepository,
+      productSyncStrategyFactory,
+      dateProvider: () => new Date('2026-05-05T00:00:00.000Z'),
+    });
+
+    await useCase.execute({ config, tenantModels });
+
+    expect(productSyncConfigRepository.getProductSyncStrategyConfig).toHaveBeenCalledWith({
+      tenantModels,
+    });
+    expect(productSyncStrategyFactory.getStrategy).toHaveBeenCalledWith('oneToMany_Product');
+    expect(productStrategy.execute).toHaveBeenCalledWith(expect.objectContaining({
+      mappedRecords: [{ properties: { hs_sku: 'SKU-1' }, rawSapData: { ItemCode: 'SKU-1' } }],
+      objectType: 'product',
+      strategyConfig: productSyncConfig,
+    }));
+  });
 });
