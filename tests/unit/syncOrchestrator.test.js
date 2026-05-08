@@ -127,7 +127,7 @@ describe('sendToHubSpot', () => {
       credentials
     );
 
-    expect(result).toEqual({ ok: true, sent: 3, failed: 0 });
+    expect(result).toEqual({ ok: true, sent: 3, failed: 0, created: 2, updated: 1 });
     expect(mockGetAccessToken).toHaveBeenCalledTimes(6);
     expect(mockBatchCreateProducts).toHaveBeenNthCalledWith(1, 'hubspot-token', {
       inputs: [items[0]],
@@ -203,7 +203,7 @@ describe('sendToHubSpot', () => {
       credentials
     );
 
-    expect(result).toEqual({ ok: true, sent: 1, failed: 0 });
+    expect(result).toEqual({ ok: true, sent: 1, failed: 0, created: 0, updated: 1 });
     expect(mockContactUpdate).toHaveBeenCalledWith({
       token: 'hubspot-token',
       id: 'hs-contact-1',

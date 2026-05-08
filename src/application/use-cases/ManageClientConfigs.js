@@ -29,7 +29,7 @@ function applyCustomFilterPatch(existingCustomFilters, incomingFilters) {
 }
 
 function isConfigValidationError(error) {
-  return /filters|Custom filter|mode|executionTime|intervalMinutes|ValidationError/.test(error.message);
+  return /filters|Custom filter|mode|executionTime|executionDays|startTime|endTime|intervalMinutes|ValidationError/.test(error.message);
 }
 
 export class ManageClientConfigs {

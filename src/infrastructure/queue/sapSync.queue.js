@@ -19,6 +19,23 @@ export function buildManualJobId({ tenantKey, configId }) {
   return `sap-sync:manual:${tenantKey}:${String(configId)}:${Date.now()}`;
 }
 
+function buildRepeatOptions({ repeatEvery, repeatPattern, repeatTimezone }) {
+  if (Number.isFinite(Number(repeatEvery)) && Number(repeatEvery) > 0) {
+    return { every: Number(repeatEvery) };
+  }
+
+  if (typeof repeatPattern === 'string' && repeatPattern.trim()) {
+    return {
+      pattern: repeatPattern.trim(),
+      ...(typeof repeatTimezone === 'string' && repeatTimezone.trim()
+        ? { tz: repeatTimezone.trim() }
+        : {}),
+    };
+  }
+
+  throw new Error('repeatEvery or repeatPattern is required');
+}
+
 export function getSapSyncQueue() {
   if (sapSyncQueue) {
     return sapSyncQueue;
@@ -51,6 +68,9 @@ export function buildSapSyncPayload({
   mode,
   intervalMinutes,
   executionTime,
+  executionDays,
+  startTime,
+  endTime,
   triggerType = 'scheduled',
 }) {
   const normalizedInterval = Number(intervalMinutes);
@@ -61,6 +81,9 @@ export function buildSapSyncPayload({
     mode: mode || null,
     intervalMinutes: Number.isFinite(normalizedInterval) && normalizedInterval > 0 ? normalizedInterval : null,
     executionTime: executionTime || null,
+    executionDays: Array.isArray(executionDays) ? executionDays : [],
+    startTime: startTime || null,
+    endTime: endTime || null,
     triggerType,
   };
 }
@@ -72,48 +95,71 @@ export async function addManualSapSyncJob(payload) {
   });
 }
 
-export async function addScheduledSapSyncJob({
+export function buildScheduledSapSyncJobTemplate({
   tenantKey,
   configId,
   objectType,
   mode,
   intervalMinutes,
   executionTime,
+  executionDays,
+  startTime,
+  endTime,
   repeatEvery,
   repeatPattern,
   repeatTimezone,
 }) {
+  const schedulerId = buildScheduledJobId({ tenantKey, configId });
+  const repeatOptions = buildRepeatOptions({ repeatEvery, repeatPattern, repeatTimezone });
+
+  return {
+    schedulerId,
+    repeatOptions,
+    jobTemplate: {
+      name: SAP_SYNC_JOB_NAME,
+      data: buildSapSyncPayload({
+        tenantKey,
+        configId,
+        objectType,
+        mode,
+        intervalMinutes,
+        executionTime,
+        executionDays,
+        startTime,
+        endTime,
+        triggerType: 'scheduled',
+      }),
+    },
+  };
+}
+
+export async function addScheduledSapSyncJob(schedule) {
   const queue = getSapSyncQueue();
-  const repeat = {};
-  if (Number.isFinite(Number(repeatEvery)) && Number(repeatEvery) > 0) {
-    repeat.every = Number(repeatEvery);
-  } else if (typeof repeatPattern === 'string' && repeatPattern.trim()) {
-    repeat.pattern = repeatPattern.trim();
-    if (typeof repeatTimezone === 'string' && repeatTimezone.trim()) {
-      repeat.tz = repeatTimezone.trim();
-    }
-  } else {
-    throw new Error('repeatEvery or repeatPattern is required');
+  const { schedulerId, repeatOptions, jobTemplate } = buildScheduledSapSyncJobTemplate(schedule);
+
+  return queue.upsertJobScheduler(schedulerId, repeatOptions, jobTemplate);
+}
+
+export async function removeScheduledSapSyncJobScheduler(schedulerId) {
+  if (!schedulerId) {
+    return false;
   }
 
-  repeat.key = buildScheduledJobId({ tenantKey, configId });
+  const queue = getSapSyncQueue();
+  if (typeof queue.removeJobScheduler !== 'function') {
+    return false;
+  }
 
-  return queue.add(
-    SAP_SYNC_JOB_NAME,
-    buildSapSyncPayload({
-      tenantKey,
-      configId,
-      objectType,
-      mode,
-      intervalMinutes,
-      executionTime,
-      triggerType: 'scheduled',
-    }),
-    {
-      jobId: buildScheduledJobId({ tenantKey, configId }),
-      repeat,
-    }
-  );
+  return queue.removeJobScheduler(schedulerId);
+}
+
+export async function getSapSyncJobSchedulers() {
+  const queue = getSapSyncQueue();
+  if (typeof queue.getJobSchedulers !== 'function') {
+    return [];
+  }
+
+  return queue.getJobSchedulers();
 }
 
 export async function closeSapSyncQueue() {

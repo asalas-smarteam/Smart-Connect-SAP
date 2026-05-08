@@ -48,20 +48,30 @@ export class SyncSapConfigToHubspot {
       });
 
       if (!credentials) {
+        const metrics = {
+          recordsProcessed: 0,
+          hubspotSent: 0,
+          hubspotFailed: 0,
+          hubspotCreated: 0,
+          hubspotUpdated: 0,
+        };
         await this.syncLogRepository.finish(syncLog, {
           status: 'errored',
-          recordsProcessed: 0,
-          sent: 0,
-          failed: 0,
+          recordsProcessed: metrics.recordsProcessed,
+          sent: metrics.hubspotSent,
+          failed: metrics.hubspotFailed,
           errorMessage: 'No HubSpot credentials assigned to this clientConfig',
           finishedAt: this.dateProvider(),
         });
-        return;
+        return {
+          ok: false,
+          status: 'errored',
+          metrics,
+        };
       }
 
       if (!rawData || rawData.length === 0) {
-        await this.finishEmptySync({ syncLog, config });
-        return;
+        return this.finishEmptySync({ syncLog, config });
       }
 
       const objectType = config.objectType;
@@ -83,23 +93,40 @@ export class SyncSapConfigToHubspot {
         tenantModels,
         credentials,
       });
+      const metrics = this.buildMetrics({
+        sapRecords: rawData,
+        mappedRecords: mappedRecordsWithRawSap,
+        hubspotResult,
+      });
 
       await this.syncLogRepository.finish(syncLog, {
         status: 'completed',
-        recordsProcessed: hubspotResult.recordsProcessed ?? mappedRecordsWithRawSap.length,
-        sent: hubspotResult.sent,
-        failed: hubspotResult.failed,
+        recordsProcessed: metrics.recordsProcessed,
+        sent: metrics.hubspotSent,
+        failed: metrics.hubspotFailed,
         finishedAt: this.dateProvider(),
       });
 
       config.lastRun = this.dateProvider();
       await config.save();
+      return {
+        ok: true,
+        status: 'completed',
+        metrics,
+      };
     } catch (error) {
+      const metrics = {
+        recordsProcessed: 0,
+        hubspotSent: 0,
+        hubspotFailed: 0,
+        hubspotCreated: 0,
+        hubspotUpdated: 0,
+      };
       await this.syncLogRepository.finish(syncLog, {
         status: 'errored',
-        recordsProcessed: 0,
-        sent: 0,
-        failed: 0,
+        recordsProcessed: metrics.recordsProcessed,
+        sent: metrics.hubspotSent,
+        failed: metrics.hubspotFailed,
         errorMessage: error.message,
         finishedAt: this.dateProvider(),
       });
@@ -108,20 +135,58 @@ export class SyncSapConfigToHubspot {
         config.lastError = error.message;
         await config.save();
       }
+
+      return {
+        ok: false,
+        status: 'errored',
+        error: error.message,
+        metrics,
+      };
     }
   }
 
+  buildMetrics({ sapRecords, mappedRecords, hubspotResult }) {
+    const recordsProcessed = hubspotResult?.recordsProcessed
+      ?? mappedRecords?.length
+      ?? sapRecords?.length
+      ?? 0;
+    const hubspotSent = hubspotResult?.sent ?? 0;
+    const hubspotFailed = hubspotResult?.failed ?? 0;
+    const hubspotCreated = hubspotResult?.created ?? 0;
+    const hubspotUpdated = hubspotResult?.updated ?? Math.max(hubspotSent - hubspotCreated, 0);
+
+    return {
+      recordsProcessed,
+      hubspotSent,
+      hubspotFailed,
+      hubspotCreated,
+      hubspotUpdated,
+    };
+  }
+
   async finishEmptySync({ syncLog, config }) {
+    const metrics = {
+      recordsProcessed: 0,
+      hubspotSent: 0,
+      hubspotFailed: 0,
+      hubspotCreated: 0,
+      hubspotUpdated: 0,
+    };
     await this.syncLogRepository.finish(syncLog, {
       status: 'completed',
-      recordsProcessed: 0,
-      sent: 0,
-      failed: 0,
+      recordsProcessed: metrics.recordsProcessed,
+      sent: metrics.hubspotSent,
+      failed: metrics.hubspotFailed,
       finishedAt: this.dateProvider(),
     });
 
     config.lastRun = this.dateProvider();
     await config.save();
+    return {
+      ok: true,
+      status: 'completed',
+      metrics,
+    };
   }
 
   async sendMappedRecords({
@@ -161,12 +226,16 @@ export class SyncSapConfigToHubspot {
       return {
         sent: result?.sent ?? 0,
         failed: result?.failed ?? 0,
+        created: result?.created ?? 0,
+        updated: result?.updated ?? Math.max((result?.sent ?? 0) - (result?.created ?? 0), 0),
         recordsProcessed: mappedRecords.length,
       };
     } catch (_error) {
       return {
         sent: 0,
         failed: mappedRecords.length,
+        created: 0,
+        updated: 0,
         recordsProcessed: mappedRecords.length,
       };
     }

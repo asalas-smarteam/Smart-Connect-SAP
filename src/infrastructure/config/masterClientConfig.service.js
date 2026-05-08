@@ -6,6 +6,9 @@ const EDITABLE_FIELDS = [
   'mode',
   'intervalMinutes',
   'executionTime',
+  'executionDays',
+  'startTime',
+  'endTime',
   'serviceLayerPath',
   'syncInTenant',
   'hubspotBatchSize',
@@ -13,6 +16,16 @@ const EDITABLE_FIELDS = [
 
 const ALLOWED_MODES = new Set(['FULL', 'INCREMENTAL']);
 const ALLOWED_INCREMENTAL_INTERVALS = new Set([5, 10, 15, 20, 30]);
+const EXECUTION_DAYS = new Set([
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+]);
+const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 function normalizeServiceLayerPath(value) {
   const trimmed = String(value || '').trim();
@@ -63,8 +76,28 @@ function sanitizeMasterPayload(payload = {}) {
 
   if (Object.prototype.hasOwnProperty.call(sanitized, 'executionTime')) {
     sanitized.executionTime = String(sanitized.executionTime || '').trim();
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(sanitized.executionTime)) {
+    if (!TIME_PATTERN.test(sanitized.executionTime)) {
       throw new Error('executionTime must use HH:mm format');
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'executionDays')) {
+    if (!Array.isArray(sanitized.executionDays)) {
+      throw new Error('executionDays must be an array');
+    }
+
+    sanitized.executionDays = sanitized.executionDays.map((day) => String(day || '').trim());
+    if (sanitized.executionDays.some((day) => !EXECUTION_DAYS.has(day))) {
+      throw new Error('executionDays must contain valid weekday names');
+    }
+  }
+
+  for (const field of ['startTime', 'endTime']) {
+    if (Object.prototype.hasOwnProperty.call(sanitized, field)) {
+      sanitized[field] = String(sanitized[field] || '').trim();
+      if (!TIME_PATTERN.test(sanitized[field])) {
+        throw new Error(`${field} must use HH:mm format`);
+      }
     }
   }
 
@@ -92,6 +125,9 @@ function ensureRequiredForCreate(payload) {
     required.push('executionTime');
   } else {
     required.push('intervalMinutes');
+    if (payload.startTime || payload.endTime) {
+      required.push('startTime', 'endTime');
+    }
   }
 
   const missing = required.filter((field) => !payload[field]);

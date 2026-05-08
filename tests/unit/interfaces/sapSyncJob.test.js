@@ -2,6 +2,7 @@ import { jest } from '@jest/globals';
 import {
   LOCK_RETRY_ERROR_CODE,
   createSapSyncJobProcessor,
+  shouldRunIncrementalScheduleNow,
 } from '../../../src/interfaces/jobs/sap-sync.job.js';
 
 function createJob(data = {}) {
@@ -10,6 +11,7 @@ function createJob(data = {}) {
     name: 'sap-sync-job',
     data,
     updateData: jest.fn().mockResolvedValue(undefined),
+    log: jest.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -27,7 +29,16 @@ describe('sap sync job processor', () => {
       release: jest.fn().mockResolvedValue(true),
     };
     const syncUseCase = {
-      execute: jest.fn().mockResolvedValue(undefined),
+      execute: jest.fn().mockResolvedValue({
+        ok: true,
+        metrics: {
+          recordsProcessed: 3,
+          hubspotCreated: 1,
+          hubspotUpdated: 2,
+          hubspotSent: 3,
+          hubspotFailed: 0,
+        },
+      }),
     };
     const processor = createSapSyncJobProcessor({
       tenantRepository,
@@ -57,7 +68,19 @@ describe('sap sync job processor', () => {
       ok: true,
       duration: 1000,
       status: 'success',
+      metrics: {
+        recordsProcessed: 3,
+        hubspotCreated: 1,
+        hubspotUpdated: 2,
+        hubspotSent: 3,
+        hubspotFailed: 0,
+      },
     }));
+    expect(job.log).toHaveBeenCalledWith(expect.stringContaining('SAP sync job started'));
+    expect(job.log).toHaveBeenCalledWith(expect.stringContaining('SAP sync job completed'));
+    expect(job.log).toHaveBeenCalledWith(expect.stringContaining('"recordsProcessed":3'));
+    expect(job.log).toHaveBeenCalledWith(expect.stringContaining('"hubspotCreated":1'));
+    expect(job.log).toHaveBeenCalledWith(expect.stringContaining('"hubspotUpdated":2'));
   });
 
   it('throws a tenant lock retry error when the lock is already held', async () => {
@@ -78,13 +101,70 @@ describe('sap sync job processor', () => {
       },
     });
 
-    await expect(processor(createJob({
+    const job = createJob({
       tenantKey: 'tenant-a',
       configId: 'cfg-1',
       triggerType: 'manual',
-    }))).rejects.toMatchObject({
+    });
+
+    await expect(processor(job)).rejects.toMatchObject({
       code: LOCK_RETRY_ERROR_CODE,
     });
+    expect(job.log).toHaveBeenCalledWith(expect.stringContaining('SAP sync job failed'));
+  });
+
+  it('skips scheduled incremental jobs outside configured execution window', async () => {
+    const tenantRepository = {
+      loadConfig: jest.fn().mockResolvedValue({
+        tenantModels: {},
+        config: {
+          _id: 'cfg-1',
+          active: true,
+          mode: 'INCREMENTAL',
+          intervalMinutes: 5,
+          startTime: '08:00',
+          endTime: '18:00',
+        },
+      }),
+    };
+    const lockAdapter = {
+      acquire: jest.fn(),
+      extend: jest.fn(),
+      release: jest.fn(),
+    };
+    const syncUseCase = {
+      execute: jest.fn(),
+    };
+    const processor = createSapSyncJobProcessor({
+      tenantRepository,
+      lockAdapter,
+      syncUseCase,
+      dateProvider: jest.fn(() => new Date('2026-05-05T14:03:00.000Z')),
+    });
+    const job = createJob({
+      tenantKey: 'tenant-a',
+      configId: 'cfg-1',
+      triggerType: 'scheduled',
+    });
+
+    const result = await processor(job);
+
+    expect(result).toEqual({ skipped: true, reason: 'outside-incremental-window' });
+    expect(lockAdapter.acquire).not.toHaveBeenCalled();
+    expect(syncUseCase.execute).not.toHaveBeenCalled();
+    expect(job.log).toHaveBeenCalledWith(expect.stringContaining('SAP sync job skipped outside incremental window'));
+  });
+
+  it('matches incremental window using America/Costa_Rica time and interval offset', () => {
+    const config = {
+      mode: 'INCREMENTAL',
+      intervalMinutes: 5,
+      startTime: '08:00',
+      endTime: '18:00',
+    };
+
+    expect(shouldRunIncrementalScheduleNow(config, new Date('2026-05-05T14:05:00.000Z'))).toBe(true);
+    expect(shouldRunIncrementalScheduleNow(config, new Date('2026-05-05T14:03:00.000Z'))).toBe(false);
+    expect(shouldRunIncrementalScheduleNow(config, new Date('2026-05-06T01:00:00.000Z'))).toBe(false);
   });
 });
-

@@ -1,6 +1,16 @@
 import mongoose from 'mongoose';
 
 const { Schema } = mongoose;
+const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+const EXECUTION_DAYS = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+];
 
 const clientFilterSchema = new Schema(
   {
@@ -70,6 +80,37 @@ export const clientConfigSchema = new Schema(
     executionTime: {
       type: String,
       default: null,
+      validate: {
+        validator(value) {
+          return value === null || value === '' || TIME_PATTERN.test(value);
+        },
+        message: 'executionTime must use HH:mm format',
+      },
+    },
+    executionDays: {
+      type: [String],
+      enum: EXECUTION_DAYS,
+      default: [],
+    },
+    startTime: {
+      type: String,
+      default: null,
+      validate: {
+        validator(value) {
+          return value === null || value === '' || TIME_PATTERN.test(value);
+        },
+        message: 'startTime must use HH:mm format',
+      },
+    },
+    endTime: {
+      type: String,
+      default: null,
+      validate: {
+        validator(value) {
+          return value === null || value === '' || TIME_PATTERN.test(value);
+        },
+        message: 'endTime must use HH:mm format',
+      },
     },
     externalDbHost: {
       type: String,
@@ -143,6 +184,22 @@ export const clientConfigSchema = new Schema(
     collection: 'ClientConfigs',
   }
 );
+
+clientConfigSchema.pre('validate', function validateIncrementalWindow(next) {
+  if (this.mode !== 'INCREMENTAL') {
+    next();
+    return;
+  }
+
+  const hasStartTime = Boolean(this.startTime);
+  const hasEndTime = Boolean(this.endTime);
+  if (hasStartTime === hasEndTime) {
+    next();
+    return;
+  }
+
+  next(new Error('startTime and endTime must be provided together'));
+});
 
 export function createClientConfigModel(connection) {
   return connection.models.ClientConfig || connection.model('ClientConfig', clientConfigSchema);

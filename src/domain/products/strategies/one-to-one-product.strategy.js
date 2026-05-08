@@ -46,6 +46,8 @@ export class OneToOneProductStrategy {
       return {
         sent: result?.sent ?? 0,
         failed: result?.failed ?? 0,
+        created: result?.created ?? 0,
+        updated: result?.updated ?? Math.max((result?.sent ?? 0) - (result?.created ?? 0), 0),
         recordsProcessed: totalProducts,
       };
     } catch (error) {
@@ -60,6 +62,8 @@ export class OneToOneProductStrategy {
       return {
         sent: 0,
         failed: totalProducts,
+        created: 0,
+        updated: 0,
         recordsProcessed: totalProducts,
       };
     }

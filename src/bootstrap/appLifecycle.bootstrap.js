@@ -26,7 +26,7 @@ export function registerAppLifecycle(app) {
     });
 
     await startCronJobIfEnabled({
-      enabled: env.WEBHOOK_PROCESSOR_CRON_ENABLED !== 'false',
+      enabled: env.WEBHOOK_PROCESSOR_CRON_ENABLED === 'true',
       createJob: startWebhookProcessor,
     });
   });

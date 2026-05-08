@@ -3,7 +3,7 @@ import { bootstrapScheduledJobs } from '#infrastructure/scheduler/sapSyncSchedul
 
 export async function bootstrapSapSyncScheduler() {
   try {
-    const summary = await bootstrapScheduledJobs();
+    const summary = await bootstrapScheduledJobs({ upsertExisting: true });
     logger.info({
       msg: 'SAP sync scheduler bootstrap summary',
       ...summary,

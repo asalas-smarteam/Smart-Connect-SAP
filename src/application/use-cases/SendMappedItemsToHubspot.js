@@ -140,6 +140,7 @@ export class SendMappedItemsToHubspot {
 
       const existing = await handler.find({ token, item, clientConfig, tenantModels });
       let created;
+      let resultMetrics;
 
       if (existing) {
         await handler.update({
@@ -150,6 +151,7 @@ export class SendMappedItemsToHubspot {
           clientConfig,
           tenantModels,
         });
+        resultMetrics = { created: 0, updated: 1 };
       } else {
         created = await handler.create({ token, item, clientConfig, tenantModels });
 
@@ -168,6 +170,7 @@ export class SendMappedItemsToHubspot {
           created?.id,
           tenantModels
         );
+        resultMetrics = { created: 1, updated: 0 };
       }
 
       await this.associationHandler.handleAssociations({
@@ -179,28 +182,32 @@ export class SendMappedItemsToHubspot {
         hubspotId: existing?.id ?? created?.id,
       });
 
-      return { ok: true };
+      return { ok: true, ...resultMetrics };
     } catch (error) {
       console.error('processSingleItem error:', error);
-      return { ok: false };
+      return { ok: false, created: 0, updated: 0 };
     }
   }
 
   async processItemsSequentially(items, context) {
     let sent = 0;
     let failed = 0;
+    let created = 0;
+    let updated = 0;
 
     for (const item of items) {
       const result = await this.processSingleItem({ ...context, item });
 
       if (result.ok) {
         sent += 1;
+        created += result.created ?? 0;
+        updated += result.updated ?? 0;
       } else {
         failed += 1;
       }
     }
 
-    return { sent, failed };
+    return { sent, failed, created, updated };
   }
 
   async finalizeCreatedProductBatch({ createdResults, createdItems, clientConfig, tenantModels }) {
@@ -238,6 +245,8 @@ export class SendMappedItemsToHubspot {
   async processProductBatch({ items, clientConfig, tenantModels, handler, getToken }) {
     let sent = 0;
     let failed = 0;
+    let created = 0;
+    let updated = 0;
     const createEntries = [];
     const updateEntries = [];
 
@@ -280,6 +289,7 @@ export class SendMappedItemsToHubspot {
         });
 
         sent += createEntries.length;
+        created += createEntries.length;
       } catch (error) {
         console.error('processProductBatch create error:', error);
         const fallbackResult = await this.processItemsSequentially(
@@ -289,6 +299,8 @@ export class SendMappedItemsToHubspot {
 
         sent += fallbackResult.sent;
         failed += fallbackResult.failed;
+        created += fallbackResult.created ?? 0;
+        updated += fallbackResult.updated ?? 0;
       }
     }
 
@@ -303,6 +315,7 @@ export class SendMappedItemsToHubspot {
         });
 
         sent += updateEntries.length;
+        updated += updateEntries.length;
       } catch (error) {
         console.error('processProductBatch update error:', error);
         const fallbackResult = await this.processItemsSequentially(
@@ -312,16 +325,20 @@ export class SendMappedItemsToHubspot {
 
         sent += fallbackResult.sent;
         failed += fallbackResult.failed;
+        created += fallbackResult.created ?? 0;
+        updated += fallbackResult.updated ?? 0;
       }
     }
 
-    return { sent, failed };
+    return { sent, failed, created, updated };
   }
 
   async processProductBatches({ mappedItems, clientConfig, tenantModels, handler, getToken }) {
     const batchSize = Number(clientConfig?.hubspotBatchSize);
     let sent = 0;
     let failed = 0;
+    let created = 0;
+    let updated = 0;
 
     for (let index = 0; index < mappedItems.length; index += batchSize) {
       const batch = mappedItems.slice(index, index + batchSize);
@@ -335,9 +352,11 @@ export class SendMappedItemsToHubspot {
 
       sent += batchResult.sent;
       failed += batchResult.failed;
+      created += batchResult.created ?? 0;
+      updated += batchResult.updated ?? 0;
     }
 
-    return { ok: true, sent, failed };
+    return { ok: true, sent, failed, created, updated };
   }
 }
 

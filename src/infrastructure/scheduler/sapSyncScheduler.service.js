@@ -10,6 +10,31 @@ import {
 } from '../queue/sapSync.queue.js';
 
 const SAP_SYNC_SCHEDULER_TIMEZONE = 'America/Costa_Rica';
+const WEEKDAY_TO_CRON = Object.freeze({
+  sunday: 0,
+  sun: 0,
+  monday: 1,
+  mon: 1,
+  tuesday: 2,
+  tue: 2,
+  wednesday: 3,
+  wed: 3,
+  thursday: 4,
+  thu: 4,
+  friday: 5,
+  fri: 5,
+  saturday: 6,
+  sat: 6,
+});
+const WEEKDAY_NAMES = Object.freeze([
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+]);
 
 function normalizeIntervalMinutes(intervalMinutes) {
   const value = Number(intervalMinutes);
@@ -27,9 +52,9 @@ function normalizeMode(mode) {
   return 'INCREMENTAL';
 }
 
-function buildDailyPattern(executionTime) {
-  const value = String(executionTime || '').trim();
-  const match = /^(\d{2}):(\d{2})$/.exec(value);
+function parseTime(value) {
+  const normalized = String(value || '').trim();
+  const match = /^(\d{2}):(\d{2})$/.exec(normalized);
   if (!match) {
     return null;
   }
@@ -40,22 +65,118 @@ function buildDailyPattern(executionTime) {
     return null;
   }
 
-  if (hours < 0 || hours > 5 || minutes < 0 || minutes > 59) {
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
     return null;
   }
 
-  if (hours === 5 && minutes > 0) {
+  return { value: normalized, hours, minutes, totalMinutes: hours * 60 + minutes };
+}
+
+function normalizeExecutionDays(executionDays) {
+  if (!Array.isArray(executionDays) || executionDays.length === 0) {
+    return [];
+  }
+
+  const days = [];
+  for (const day of executionDays) {
+    const key = String(day || '').trim().toLowerCase();
+    if (!Object.hasOwn(WEEKDAY_TO_CRON, key)) {
+      return null;
+    }
+    days.push(WEEKDAY_TO_CRON[key]);
+  }
+
+  return Array.from(new Set(days)).sort((left, right) => left - right);
+}
+
+function normalizeExecutionDayNames(executionDays) {
+  const days = normalizeExecutionDays(executionDays);
+  if (days === null) {
     return null;
   }
 
-  return `${minutes} ${hours} * * *`;
+  return days.map((day) => WEEKDAY_NAMES[day]);
+}
+
+function buildDailyPattern({ executionTime, executionDays }) {
+  const value = String(executionTime || '').trim();
+  const time = parseTime(value);
+  const days = normalizeExecutionDays(executionDays);
+  if (!time || days === null) {
+    return null;
+  }
+
+  const dayPattern = days.length ? days.join(',') : '*';
+  return `${time.minutes} ${time.hours} * * ${dayPattern}`;
+}
+
+function buildHourField(start, end) {
+  if (!start || !end) {
+    return '*';
+  }
+
+  if (start.hours === end.hours) {
+    return String(start.hours);
+  }
+
+  if (start.totalMinutes < end.totalMinutes) {
+    return `${start.hours}-${end.hours}`;
+  }
+
+  return `${start.hours}-23,0-${end.hours}`;
+}
+
+function buildMinuteField({ intervalMinutes, start }) {
+  if (!Number.isInteger(intervalMinutes) || intervalMinutes <= 0 || intervalMinutes > 60) {
+    return null;
+  }
+
+  const offset = start ? start.minutes % intervalMinutes : 0;
+  const minutes = [];
+  for (let minute = offset; minute < 60; minute += intervalMinutes) {
+    minutes.push(minute);
+  }
+
+  return minutes.join(',');
+}
+
+function buildIncrementalWindowPattern({ intervalMinutes, startTime, endTime }) {
+  const hasStart = Boolean(startTime);
+  const hasEnd = Boolean(endTime);
+  if (!hasStart && !hasEnd) {
+    return null;
+  }
+
+  if (!hasStart || !hasEnd) {
+    return null;
+  }
+
+  const start = parseTime(startTime);
+  const end = parseTime(endTime);
+  if (!start || !end) {
+    return null;
+  }
+
+  const minuteField = buildMinuteField({ intervalMinutes, start });
+  if (!minuteField) {
+    return null;
+  }
+
+  return {
+    startTime: start.value,
+    endTime: end.value,
+    repeatPattern: `${minuteField} ${buildHourField(start, end)} * * *`,
+  };
 }
 
 function resolveSchedulePlan(config) {
   const mode = normalizeMode(config?.mode);
   const intervalMinutes = normalizeIntervalMinutes(config?.intervalMinutes);
   const executionTime = String(config?.executionTime || '').trim() || null;
-  const cronPattern = buildDailyPattern(executionTime);
+  const executionDayNames = normalizeExecutionDayNames(config?.executionDays);
+  const cronPattern = buildDailyPattern({ executionTime, executionDays: config?.executionDays });
+  const startTime = String(config?.startTime || '').trim() || null;
+  const endTime = String(config?.endTime || '').trim() || null;
 
   if (mode === 'FULL') {
     if (!cronPattern) {
@@ -65,6 +186,9 @@ function resolveSchedulePlan(config) {
       mode,
       intervalMinutes: null,
       executionTime,
+      executionDays: executionDayNames || [],
+      startTime: null,
+      endTime: null,
       repeatEvery: null,
       repeatPattern: cronPattern,
       repeatTimezone: SAP_SYNC_SCHEDULER_TIMEZONE,
@@ -75,10 +199,32 @@ function resolveSchedulePlan(config) {
     return null;
   }
 
+  const windowPattern = buildIncrementalWindowPattern({ intervalMinutes, startTime, endTime });
+  if (startTime || endTime) {
+    if (!windowPattern) {
+      return null;
+    }
+
+    return {
+      mode,
+      intervalMinutes,
+      executionTime: null,
+      executionDays: [],
+      startTime: windowPattern.startTime,
+      endTime: windowPattern.endTime,
+      repeatEvery: null,
+      repeatPattern: windowPattern.repeatPattern,
+      repeatTimezone: SAP_SYNC_SCHEDULER_TIMEZONE,
+    };
+  }
+
   return {
     mode,
     intervalMinutes,
     executionTime: null,
+    executionDays: [],
+    startTime: null,
+    endTime: null,
     repeatEvery: intervalMinutes * 60 * 1000,
     repeatPattern: null,
     repeatTimezone: null,
@@ -93,6 +239,33 @@ function isRepeatableScheduledJob(repeatJob) {
       || repeatJob.name === SAP_SYNC_JOB_NAME
     )
   );
+}
+
+function isScheduledJobEntry(job) {
+  return (
+    isRepeatableScheduledJob(job)
+    || typeof job?.id === 'string' && job.id.startsWith('sap-sync:')
+  );
+}
+
+function matchesScheduledJobKeys(job, keys) {
+  return keys.has(job?.key) || (typeof job?.id === 'string' && keys.has(job.id));
+}
+
+async function getCurrentScheduledJobs(queue) {
+  const [repeatableJobs, rawJobSchedulers] = await Promise.all([
+    typeof queue.getRepeatableJobs === 'function' ? queue.getRepeatableJobs() : [],
+    typeof queue.getJobSchedulers === 'function' ? queue.getJobSchedulers() : [],
+  ]);
+  const jobSchedulers = rawJobSchedulers.filter((job) => job?.template);
+  const schedulerKeys = new Set(jobSchedulers.map((job) => job.key).filter(Boolean));
+  const legacyRepeatableJobs = repeatableJobs.filter((job) => !schedulerKeys.has(job?.key));
+
+  return {
+    repeatableJobs: legacyRepeatableJobs,
+    jobSchedulers,
+    all: [...legacyRepeatableJobs, ...jobSchedulers],
+  };
 }
 
 function buildLegacyRepeatableKey({ jobId, repeatEvery, repeatPattern, repeatTimezone = '' }) {
@@ -133,14 +306,17 @@ async function removeScheduledRepeatablesByKeys(keys) {
   }
 
   const queue = getSapSyncQueue();
-  const repeatableJobs = await queue.getRepeatableJobs();
+  const { repeatableJobs, jobSchedulers } = await getCurrentScheduledJobs(queue);
   const knownKeys = new Set(keys.filter(Boolean));
-  const candidates = repeatableJobs.filter(
-    (job) => knownKeys.has(job.key) || (job.id && knownKeys.has(job.id))
-  );
+  const repeatableCandidates = repeatableJobs.filter((job) => matchesScheduledJobKeys(job, knownKeys));
+  const schedulerCandidates = jobSchedulers.filter((job) => matchesScheduledJobKeys(job, knownKeys));
 
-  await Promise.all(candidates.map((job) => queue.removeRepeatableByKey(job.key)));
-  return candidates.length;
+  await Promise.all([
+    ...repeatableCandidates.map((job) => queue.removeRepeatableByKey(job.key)),
+    ...schedulerCandidates.map((job) => queue.removeJobScheduler(job.key || job.id)),
+  ]);
+
+  return repeatableCandidates.length + schedulerCandidates.length;
 }
 
 async function removeKnownScheduledJobs({ tenantKey, configId, config, previousConfig }) {
@@ -177,6 +353,9 @@ async function createScheduledJob({ tenantKey, config }) {
     mode: schedulePlan.mode,
     intervalMinutes: schedulePlan.intervalMinutes,
     executionTime: schedulePlan.executionTime,
+    executionDays: schedulePlan.executionDays,
+    startTime: schedulePlan.startTime,
+    endTime: schedulePlan.endTime,
     repeatEvery: schedulePlan.repeatEvery,
     repeatPattern: schedulePlan.repeatPattern,
     repeatTimezone: schedulePlan.repeatTimezone,
@@ -190,18 +369,16 @@ async function createScheduledJob({ tenantKey, config }) {
   };
 }
 
-function hasScheduledJob({ repeatableJobs, tenantKey, config }) {
+function hasScheduledJob({ scheduledJobs, tenantKey, config }) {
   const configId = String(config?._id || config?.id || '');
-  if (!tenantKey || !configId || !Array.isArray(repeatableJobs)) {
+  if (!tenantKey || !configId || !Array.isArray(scheduledJobs)) {
     return false;
   }
 
   const jobId = buildScheduledJobId({ tenantKey, configId });
   const candidateKeys = new Set(buildRemovalKeyCandidates({ jobId, config }));
 
-  return repeatableJobs.some(
-    (job) => candidateKeys.has(job?.key) || (typeof job?.id === 'string' && candidateKeys.has(job.id))
-  );
+  return scheduledJobs.some((job) => matchesScheduledJobKeys(job, candidateKeys));
 }
 
 export async function registerScheduledJob({ tenantKey, config, previousConfig = null }) {
@@ -222,6 +399,9 @@ export async function registerScheduledJob({ tenantKey, config, previousConfig =
     mode: schedulePlan.mode,
     intervalMinutes: schedulePlan.intervalMinutes,
     executionTime: schedulePlan.executionTime,
+    executionDays: schedulePlan.executionDays,
+    startTime: schedulePlan.startTime,
+    endTime: schedulePlan.endTime,
     repeatEvery: schedulePlan.repeatEvery,
     repeatPattern: schedulePlan.repeatPattern,
     repeatTimezone: schedulePlan.repeatTimezone,
@@ -271,7 +451,7 @@ export async function syncScheduledJob({ tenantKey, config, previousConfig = nul
 
 export async function bootstrapScheduledJobs({ upsertExisting = false } = {}) {
   const queue = getSapSyncQueue();
-  const repeatableJobs = await queue.getRepeatableJobs();
+  const scheduledJobs = await getCurrentScheduledJobs(queue);
   const expectedJobKeys = new Set();
   const activeTenants = await listActiveTenants();
   const summary = {
@@ -306,13 +486,13 @@ export async function bootstrapScheduledJobs({ upsertExisting = false } = {}) {
             continue;
           }
 
-          if (hasScheduledJob({ repeatableJobs, tenantKey, config })) {
+          if (hasScheduledJob({ scheduledJobs: scheduledJobs.all, tenantKey, config })) {
             summary.configsSkippedExisting += 1;
             continue;
           }
 
           await createScheduledJob({ tenantKey, config });
-          repeatableJobs.push({
+          scheduledJobs.all.push({
             key: jobKey,
             id: jobKey,
             name: SAP_SYNC_JOB_NAME,
@@ -340,18 +520,22 @@ export async function bootstrapScheduledJobs({ upsertExisting = false } = {}) {
     }
   }
 
-  if (upsertExisting) {
+  if (upsertExisting && summary.tenantsScanned > 0) {
     try {
-      const latestRepeatableJobs = await queue.getRepeatableJobs();
-      const orphanedJobs = latestRepeatableJobs.filter(
-        (job) => isRepeatableScheduledJob(job) && !expectedJobKeys.has(job.key)
+      const latestScheduledJobs = await getCurrentScheduledJobs(queue);
+      const orphanedJobs = latestScheduledJobs.all.filter(
+        (job) => isScheduledJobEntry(job) && !matchesScheduledJobKeys(job, expectedJobKeys)
       );
 
       for (const job of orphanedJobs) {
-        await queue.removeRepeatableByKey(job.key);
+        if (latestScheduledJobs.jobSchedulers.includes(job)) {
+          await queue.removeJobScheduler(job.key || job.id);
+        } else {
+          await queue.removeRepeatableByKey(job.key);
+        }
         summary.orphanRemoved += 1;
         logger.info({
-          msg: 'Removed orphan SAP sync repeatable job',
+          msg: 'Removed orphan SAP sync scheduled job',
           repeatJobKey: job.key,
           jobId: job.id || null,
         });
@@ -378,10 +562,16 @@ export async function removeTenantScheduledJobs(tenantKey) {
   }
 
   const queue = getSapSyncQueue();
-  const repeatableJobs = await queue.getRepeatableJobs();
+  const { repeatableJobs, jobSchedulers } = await getCurrentScheduledJobs(queue);
   const tenantPrefix = `sap-sync:${tenantKey}:`;
   const tenantJobs = repeatableJobs.filter((job) => job?.key?.startsWith(tenantPrefix));
+  const tenantSchedulers = jobSchedulers.filter(
+    (job) => job?.key?.startsWith(tenantPrefix) || job?.id?.startsWith(tenantPrefix)
+  );
 
-  await Promise.all(tenantJobs.map((job) => queue.removeRepeatableByKey(job.key)));
-  return tenantJobs.length;
+  await Promise.all([
+    ...tenantJobs.map((job) => queue.removeRepeatableByKey(job.key)),
+    ...tenantSchedulers.map((job) => queue.removeJobScheduler(job.key || job.id)),
+  ]);
+  return tenantJobs.length + tenantSchedulers.length;
 }

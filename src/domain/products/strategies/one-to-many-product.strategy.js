@@ -125,7 +125,7 @@ export class OneToManyProductStrategy {
     }
 
     if (expandedRecords.length === 0) {
-      return { sent: 0, failed, recordsProcessed: failed };
+      return { sent: 0, failed, created: 0, updated: 0, recordsProcessed: failed };
     }
 
     try {
@@ -140,6 +140,8 @@ export class OneToManyProductStrategy {
       return {
         sent: result?.sent ?? 0,
         failed: failed + (result?.failed ?? 0),
+        created: result?.created ?? 0,
+        updated: result?.updated ?? Math.max((result?.sent ?? 0) - (result?.created ?? 0), 0),
         recordsProcessed: expandedRecords.length + failed,
       };
     } catch (error) {
@@ -154,6 +156,8 @@ export class OneToManyProductStrategy {
       return {
         sent: 0,
         failed: failed + expandedRecords.length,
+        created: 0,
+        updated: 0,
         recordsProcessed: expandedRecords.length + failed,
       };
     }

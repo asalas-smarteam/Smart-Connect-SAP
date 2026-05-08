@@ -28,7 +28,7 @@ describe('SyncSapConfigToHubspot', () => {
       mapRecords: jest.fn().mockResolvedValue([{ properties: { idsap: 'C1' } }]),
     };
     const hubspotSyncTarget = {
-      send: jest.fn().mockResolvedValue({ sent: 1, failed: 0 }),
+      send: jest.fn().mockResolvedValue({ sent: 1, failed: 0, created: 1, updated: 0 }),
     };
     const syncLogRepository = {
       start: jest.fn().mockResolvedValue(syncLog),
@@ -42,7 +42,7 @@ describe('SyncSapConfigToHubspot', () => {
       dateProvider: () => new Date('2026-05-05T00:00:00.000Z'),
     });
 
-    await useCase.execute({ config, tenantModels });
+    const result = await useCase.execute({ config, tenantModels });
 
     expect(syncLogRepository.start).toHaveBeenCalledWith({
       tenantModels,
@@ -72,6 +72,17 @@ describe('SyncSapConfigToHubspot', () => {
       sent: 1,
       failed: 0,
     }));
+    expect(result).toEqual(expect.objectContaining({
+      ok: true,
+      status: 'completed',
+      metrics: {
+        recordsProcessed: 1,
+        hubspotSent: 1,
+        hubspotFailed: 0,
+        hubspotCreated: 1,
+        hubspotUpdated: 0,
+      },
+    }));
     expect(config.save).toHaveBeenCalled();
   });
 
@@ -95,11 +106,20 @@ describe('SyncSapConfigToHubspot', () => {
       dateProvider: () => new Date('2026-05-05T00:00:00.000Z'),
     });
 
-    await useCase.execute({ config, tenantModels });
+    const result = await useCase.execute({ config, tenantModels });
 
     expect(syncLogRepository.finish).toHaveBeenCalledWith(syncLog, expect.objectContaining({
       status: 'errored',
       errorMessage: 'No HubSpot credentials assigned to this clientConfig',
+    }));
+    expect(result).toEqual(expect.objectContaining({
+      ok: false,
+      status: 'errored',
+      metrics: expect.objectContaining({
+        recordsProcessed: 0,
+        hubspotCreated: 0,
+        hubspotUpdated: 0,
+      }),
     }));
   });
 
@@ -113,7 +133,13 @@ describe('SyncSapConfigToHubspot', () => {
     };
     const productSyncConfig = { strategy: 'oneToMany_Product' };
     const productStrategy = {
-      execute: jest.fn().mockResolvedValue({ sent: 2, failed: 0, recordsProcessed: 2 }),
+      execute: jest.fn().mockResolvedValue({
+        sent: 2,
+        failed: 0,
+        created: 1,
+        updated: 1,
+        recordsProcessed: 2,
+      }),
     };
     const productSyncConfigRepository = {
       getProductSyncStrategyConfig: jest.fn().mockResolvedValue(productSyncConfig),
@@ -140,7 +166,7 @@ describe('SyncSapConfigToHubspot', () => {
       dateProvider: () => new Date('2026-05-05T00:00:00.000Z'),
     });
 
-    await useCase.execute({ config, tenantModels });
+    const result = await useCase.execute({ config, tenantModels });
 
     expect(productSyncConfigRepository.getProductSyncStrategyConfig).toHaveBeenCalledWith({
       tenantModels,
@@ -150,6 +176,11 @@ describe('SyncSapConfigToHubspot', () => {
       mappedRecords: [{ properties: { hs_sku: 'SKU-1' }, rawSapData: { ItemCode: 'SKU-1' } }],
       objectType: 'product',
       strategyConfig: productSyncConfig,
+    }));
+    expect(result.metrics).toEqual(expect.objectContaining({
+      recordsProcessed: 2,
+      hubspotCreated: 1,
+      hubspotUpdated: 1,
     }));
   });
 });

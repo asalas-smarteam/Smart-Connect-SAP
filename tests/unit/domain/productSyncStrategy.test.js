@@ -65,7 +65,7 @@ describe('OneToManyProductStrategy', () => {
       },
     });
 
-    expect(result).toEqual({ sent: 2, failed: 0, recordsProcessed: 2 });
+    expect(result).toEqual({ sent: 2, failed: 0, created: 0, updated: 2, recordsProcessed: 2 });
     expect(hubspotSyncTarget.send).toHaveBeenCalledWith(expect.objectContaining({
       mappedRecords: [
         expect.objectContaining({
@@ -118,7 +118,7 @@ describe('OneToManyProductStrategy', () => {
       },
     });
 
-    expect(result).toEqual({ sent: 0, failed: 0, recordsProcessed: 0 });
+    expect(result).toEqual({ sent: 0, failed: 0, created: 0, updated: 0, recordsProcessed: 0 });
     expect(hubspotSyncTarget.send).not.toHaveBeenCalled();
   });
 });

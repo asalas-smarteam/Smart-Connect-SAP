@@ -15,12 +15,15 @@ function serializeConfig(config) {
     mode: config.mode || 'INCREMENTAL',
     intervalMinutes: config.intervalMinutes || null,
     executionTime: config.executionTime || null,
+    executionDays: Array.isArray(config.executionDays) ? config.executionDays : [],
+    startTime: config.startTime || null,
+    endTime: config.endTime || null,
   };
 }
 
 export async function getQueueDashboardSnapshot() {
   const queue = getSapSyncQueue();
-  const [counts, repeatableJobs, activeJobs, waitingJobs, delayedJobs, failedJobs, completedJobs] =
+  const [counts, repeatableJobs, jobSchedulers, activeJobs, waitingJobs, delayedJobs, failedJobs, completedJobs] =
     await Promise.all([
       queue.getJobCounts(
         'active',
@@ -32,6 +35,7 @@ export async function getQueueDashboardSnapshot() {
         'prioritized'
       ),
       queue.getRepeatableJobs(),
+      typeof queue.getJobSchedulers === 'function' ? queue.getJobSchedulers() : [],
       queue.getJobs(['active'], 0, 20, true),
       queue.getJobs(['waiting'], 0, 20, true),
       queue.getJobs(['delayed'], 0, 20, true),
@@ -58,6 +62,16 @@ export async function getQueueDashboardSnapshot() {
       every: job.every || null,
       pattern: job.pattern || null,
       next: job.next || null,
+    })),
+    jobSchedulers: jobSchedulers.map((scheduler) => ({
+      key: scheduler.key,
+      id: scheduler.id || null,
+      name: scheduler.name,
+      every: scheduler.every || null,
+      pattern: scheduler.pattern || null,
+      tz: scheduler.tz || null,
+      next: scheduler.next || null,
+      template: scheduler.template || null,
     })),
     jobs: {
       active: activeJobs.map(mapJob),
@@ -116,6 +130,9 @@ export async function runConfigManualJob({ tenantKey, configId }) {
     mode: config.mode || 'INCREMENTAL',
     intervalMinutes: config.intervalMinutes || null,
     executionTime: config.executionTime || null,
+    executionDays: Array.isArray(config.executionDays) ? config.executionDays : [],
+    startTime: config.startTime || null,
+    endTime: config.endTime || null,
   });
 
   logger.info({

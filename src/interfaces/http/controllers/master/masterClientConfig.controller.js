@@ -1,7 +1,7 @@
 import { buildMasterClientConfig } from '#composition/master-client-config.composition.js';
 
 function resolveStatusCode(error) {
-  if (/Missing required fields|intervalMinutes|mode|executionTime|ValidationError/.test(error.message)) {
+  if (/Missing required fields|intervalMinutes|mode|executionTime|executionDays|startTime|endTime|ValidationError/.test(error.message)) {
     return 400;
   }
 
