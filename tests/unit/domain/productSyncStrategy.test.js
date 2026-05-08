@@ -19,15 +19,9 @@ describe('ProductSyncStrategyFactory', () => {
 });
 
 describe('OneToManyProductStrategy', () => {
-  it('expands one SAP product into one HubSpot product per configured price list', async () => {
+  it('expands one SAP product into one HubSpot product per SAP item price', async () => {
     const hubspotSyncTarget = {
       send: jest.fn().mockResolvedValue({ sent: 2, failed: 0 }),
-    };
-    const sapPriceProvider = {
-      getItemPricesByPriceLists: jest.fn().mockResolvedValue(new Map([
-        ['1', { Price: 120, Currency: 'USD', PriceList: 1 }],
-        ['2', { Price: 150, Currency: 'USD', PriceList: 2 }],
-      ])),
     };
     const logger = {
       info: jest.fn(),
@@ -36,7 +30,6 @@ describe('OneToManyProductStrategy', () => {
     };
     const strategy = new OneToManyProductStrategy({
       hubspotSyncTarget,
-      sapPriceProvider,
       logger,
     });
 
@@ -51,6 +44,10 @@ describe('OneToManyProductStrategy', () => {
           rawSapData: {
             ItemCode: 'MANZANA001',
             ItemName: 'Manzana',
+            ItemPrices: [
+              { Price: 120, Currency: 'USD', PriceList: 1 },
+              { Price: 150, Currency: 'USD', PriceList: 2 },
+            ],
           },
         },
       ],
@@ -63,15 +60,12 @@ describe('OneToManyProductStrategy', () => {
         strategy: PRODUCT_SYNC_STRATEGIES.ONE_TO_MANY_PRODUCT,
         priceLists: [
           { name: 'VIP', value: '1' },
-          { name: 'Publico', value: '2' },
+          { name: 'Al publico', value: '2' },
         ],
       },
     });
 
     expect(result).toEqual({ sent: 2, failed: 0, recordsProcessed: 2 });
-    expect(sapPriceProvider.getItemPricesByPriceLists).toHaveBeenCalledWith(expect.objectContaining({
-      itemCode: 'MANZANA001',
-    }));
     expect(hubspotSyncTarget.send).toHaveBeenCalledWith(expect.objectContaining({
       mappedRecords: [
         expect.objectContaining({
@@ -79,7 +73,6 @@ describe('OneToManyProductStrategy', () => {
             hs_sku: 'MANZANA001__PL_1',
             name: 'Manzana - VIP',
             sap_base_item_code: 'MANZANA001',
-            price_list_name: 'VIP',
             price_list_value: '1',
             price: 120,
           }),
@@ -87,26 +80,25 @@ describe('OneToManyProductStrategy', () => {
         expect.objectContaining({
           properties: expect.objectContaining({
             hs_sku: 'MANZANA001__PL_2',
-            name: 'Manzana - Publico',
+            name: 'Manzana - Al publico',
             sap_base_item_code: 'MANZANA001',
-            price_list_name: 'Publico',
             price_list_value: '2',
             price: 150,
           }),
         }),
       ],
     }));
+    const sentRecords = hubspotSyncTarget.send.mock.calls[0][0].mappedRecords;
+    expect(sentRecords[0].properties).not.toHaveProperty('price_list_name');
+    expect(sentRecords[1].properties).not.toHaveProperty('price_list_name');
   });
 
-  it('uses zero when SAP does not return a configured price list by default', async () => {
+  it('does not send HubSpot products when SAP item has no item prices', async () => {
     const hubspotSyncTarget = {
-      send: jest.fn().mockResolvedValue({ sent: 1, failed: 0 }),
+      send: jest.fn(),
     };
     const strategy = new OneToManyProductStrategy({
       hubspotSyncTarget,
-      sapPriceProvider: {
-        getItemPricesByPriceLists: jest.fn().mockResolvedValue(new Map()),
-      },
       logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
     });
 
@@ -122,20 +114,11 @@ describe('OneToManyProductStrategy', () => {
       tenantModels: {},
       credentials: {},
       strategyConfig: {
-        priceLists: [{ name: 'VIP', value: '1' }],
+        strategy: PRODUCT_SYNC_STRATEGIES.ONE_TO_MANY_PRODUCT,
       },
     });
 
-    expect(result).toEqual({ sent: 1, failed: 0, recordsProcessed: 1 });
-    expect(hubspotSyncTarget.send).toHaveBeenCalledWith(expect.objectContaining({
-      mappedRecords: [
-        expect.objectContaining({
-          properties: expect.objectContaining({
-            hs_sku: 'SKU-1__PL_1',
-            price: 0,
-          }),
-        }),
-      ],
-    }));
+    expect(result).toEqual({ sent: 0, failed: 0, recordsProcessed: 0 });
+    expect(hubspotSyncTarget.send).not.toHaveBeenCalled();
   });
 });

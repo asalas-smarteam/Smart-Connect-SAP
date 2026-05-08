@@ -18,7 +18,6 @@ export const DEFAULT_PRODUCT_SYNC_ON_MISSING_PRICE = PRODUCT_SYNC_ON_MISSING_PRI
 export const DEFAULT_PRODUCT_SYNC_HUBSPOT_FIELDS = Object.freeze({
   uniqueItemCode: 'hs_sku',
   baseItemCode: 'sap_base_item_code',
-  priceListName: 'price_list_name',
   priceListValue: 'price_list_value',
   price: 'price',
   name: 'name',

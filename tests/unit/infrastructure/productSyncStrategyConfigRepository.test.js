@@ -17,6 +17,7 @@ describe('ProductSyncStrategyConfigRepository', () => {
     const lean = jest.fn().mockResolvedValue({
       value: JSON.stringify({
         strategy: PRODUCT_SYNC_STRATEGIES.ONE_TO_MANY_PRODUCT,
+        uniqueCodePattern: '{itemCode}__PL_{priceListValue}',
         priceLists: [{ name: 'VIP', value: '1' }],
       }),
     });
@@ -29,6 +30,7 @@ describe('ProductSyncStrategyConfigRepository', () => {
     await expect(repository.getProductSyncStrategyConfig({ tenantModels }))
       .resolves.toEqual({
         strategy: PRODUCT_SYNC_STRATEGIES.ONE_TO_MANY_PRODUCT,
+        uniqueCodePattern: '{itemCode}__PL_{priceListValue}',
         priceLists: [{ name: 'VIP', value: '1' }],
       });
   });

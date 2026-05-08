@@ -1,8 +1,6 @@
 import {
   DEFAULT_PRODUCT_SYNC_HUBSPOT_FIELDS,
-  DEFAULT_PRODUCT_SYNC_ON_MISSING_PRICE,
   DEFAULT_PRODUCT_SYNC_PATTERNS,
-  PRODUCT_SYNC_ON_MISSING_PRICE,
   PRODUCT_SYNC_STRATEGIES,
 } from '../product-sync-strategy.constants.js';
 
@@ -14,14 +12,15 @@ function toNonEmptyString(value) {
 }
 
 function normalizePriceList(priceList) {
-  const name = toNonEmptyString(priceList?.name ?? priceList?.label);
   const value = toNonEmptyString(priceList?.value ?? priceList?.PriceList);
+  const name = toNonEmptyString(priceList?.name ?? priceList?.label ?? priceList?.PriceListName)
+    || value;
 
-  if (!name || !value) {
+  if (!value) {
     return null;
   }
 
-  return { name, value };
+  return { name, value, priceData: priceList };
 }
 
 function normalizePriceLists(value) {
@@ -62,19 +61,9 @@ function mergeHubspotFields(strategyConfig = {}) {
   };
 }
 
-function resolveOnMissingPrice(strategyConfig = {}) {
-  const normalized = toNonEmptyString(strategyConfig.onMissingPrice)
-    || DEFAULT_PRODUCT_SYNC_ON_MISSING_PRICE;
-
-  return Object.values(PRODUCT_SYNC_ON_MISSING_PRICE).includes(normalized)
-    ? normalized
-    : DEFAULT_PRODUCT_SYNC_ON_MISSING_PRICE;
-}
-
 export class OneToManyProductStrategy {
-  constructor({ hubspotSyncTarget, sapPriceProvider, logger = console }) {
+  constructor({ hubspotSyncTarget, logger = console }) {
     this.hubspotSyncTarget = hubspotSyncTarget;
-    this.sapPriceProvider = sapPriceProvider;
     this.logger = logger;
   }
 
@@ -89,11 +78,10 @@ export class OneToManyProductStrategy {
     strategyConfig = {},
   }) {
     const products = Array.isArray(mappedRecords) ? mappedRecords : [];
-    const priceLists = normalizePriceLists(strategyConfig.priceLists);
-
-    if (priceLists.length === 0) {
-      throw new Error('productSyncStrategy.priceLists must be a non-empty array for oneToMany_Product');
-    }
+    const configuredPriceListNames = new Map(
+      normalizePriceLists(strategyConfig.priceLists)
+        .map((priceList) => [priceList.value, priceList.name])
+    );
 
     this.logger.info?.({
       msg: 'Starting product sync strategy',
@@ -101,7 +89,6 @@ export class OneToManyProductStrategy {
       tenantKey,
       strategy: PRODUCT_SYNC_STRATEGIES.ONE_TO_MANY_PRODUCT,
       totalProducts: products.length,
-      priceLists,
     });
 
     const expandedRecords = [];
@@ -109,6 +96,11 @@ export class OneToManyProductStrategy {
 
     for (const product of products) {
       const itemCode = resolveSapItemCode(product);
+      const priceLists = normalizePriceLists(product?.rawSapData?.ItemPrices)
+        .map((priceList) => ({
+          ...priceList,
+          name: configuredPriceListNames.get(priceList.value) || priceList.name,
+        }));
 
       if (!itemCode) {
         failed += priceLists.length;
@@ -123,11 +115,7 @@ export class OneToManyProductStrategy {
       const productRecords = await this.buildRecordsForProduct({
         product,
         itemCode,
-        config,
-        tenantModels,
-        credentials,
         tenantId,
-        tenantKey,
         strategyConfig,
         priceLists,
       });
@@ -174,85 +162,26 @@ export class OneToManyProductStrategy {
   async buildRecordsForProduct({
     product,
     itemCode,
-    config,
-    tenantModels,
-    credentials,
     tenantId,
-    tenantKey,
     strategyConfig,
     priceLists,
   }) {
-    const onMissingPrice = resolveOnMissingPrice(strategyConfig);
     const itemName = resolveSapItemName(product, itemCode);
-    const pricesByList = await this.sapPriceProvider.getItemPricesByPriceLists({
-      clientConfig: config,
-      tenantModels,
-      credentials,
-      itemCode,
-      priceLists,
-      tenantKey,
-    });
     const records = [];
-    let failed = 0;
 
     for (const priceList of priceLists) {
-      const selectedPrice = pricesByList.get(priceList.value);
-
-      if (!selectedPrice) {
-        const missingResult = this.handleMissingPrice({
-          itemCode,
-          priceList,
-          onMissingPrice,
-          tenantId,
-        });
-
-        if (missingResult.skip) {
-          failed += 1;
-          continue;
-        }
-
-        records.push(this.buildRecord({
-          product,
-          itemCode,
-          itemName,
-          priceList,
-          priceData: { Price: 0, Currency: null, PriceList: priceList.value },
-          strategyConfig,
-          tenantId,
-        }));
-        continue;
-      }
-
       records.push(this.buildRecord({
         product,
         itemCode,
         itemName,
         priceList,
-        priceData: selectedPrice,
+        priceData: priceList.priceData,
         strategyConfig,
         tenantId,
       }));
     }
 
-    return { records, failed };
-  }
-
-  handleMissingPrice({ itemCode, priceList, onMissingPrice, tenantId }) {
-    this.logger.warn?.({
-      msg: 'SAP price list not found for product',
-      tenantId,
-      strategy: PRODUCT_SYNC_STRATEGIES.ONE_TO_MANY_PRODUCT,
-      itemCode,
-      priceListName: priceList.name,
-      priceListValue: priceList.value,
-      onMissingPrice,
-    });
-
-    if (onMissingPrice === PRODUCT_SYNC_ON_MISSING_PRICE.THROW_ERROR) {
-      throw new Error(`Price list ${priceList.value} not found for item ${itemCode}`);
-    }
-
-    return { skip: onMissingPrice === PRODUCT_SYNC_ON_MISSING_PRICE.SKIP_PRODUCT };
+    return { records, failed: 0 };
   }
 
   buildRecord({
@@ -286,7 +215,6 @@ export class OneToManyProductStrategy {
       ...(product?.properties ?? {}),
       [UPSERT_PRODUCT_SKU_FIELD]: uniqueItemCode,
       [fields.baseItemCode]: itemCode,
-      [fields.priceListName]: priceList.name,
       [fields.priceListValue]: priceList.value,
       [fields.price]: price,
       [fields.name]: name,
