@@ -5,7 +5,7 @@ const mockResolveTenantKey = jest.fn();
 const mockInvalidateSession = jest.fn();
 const mockAxiosGet = jest.fn();
 
-jest.unstable_mockModule('../../src/services/sapSessionManager.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/sap/sapSessionManager.js', () => ({
   default: {
     getSessionCookie: mockGetSessionCookie,
     resolveTenantKey: mockResolveTenantKey,
@@ -20,7 +20,7 @@ jest.unstable_mockModule('axios', () => ({
   },
 }));
 
-const serviceLayerService = (await import('../../src/services/serviceLayer.service.js')).default;
+const serviceLayerService = (await import('../../src/infrastructure/sap/serviceLayer.service.js')).default;
 
 describe('serviceLayerService.execute', () => {
   beforeEach(() => {
@@ -53,9 +53,9 @@ describe('serviceLayerService.execute', () => {
     expect(result).toEqual([{ CardCode: 'C1' }, { CardCode: 'C2' }]);
     expect(mockGetSessionCookie).toHaveBeenCalledTimes(1);
     expect(mockAxiosGet).toHaveBeenCalledTimes(2);
-    expect(mockAxiosGet.mock.calls[0][0]).toBe('https://sap.example.com:50000/b1s/v2/BusinessPartners?$select=CardCode');
+    expect(mockAxiosGet.mock.calls[0][0]).toBe('https://sap.example.com:50000/b1s/v2/BusinessPartners?$select=CardCode&$top=20');
     expect(mockAxiosGet.mock.calls[0][1].headers.Cookie).toBe('B1SESSION=abc');
-    expect(mockAxiosGet.mock.calls[1][0]).toBe('https://sap.example.com:50000/b1s/v2/b1s/v2/BusinessPartners?$skip=20');
+    expect(mockAxiosGet.mock.calls[1][0]).toBe('https://sap.example.com:50000/b1s/v2/BusinessPartners?$skip=20');
   });
 
   it('invalidates and retries once when session is invalid', async () => {

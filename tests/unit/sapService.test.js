@@ -6,27 +6,27 @@ const mockApiExecute = jest.fn();
 const mockGetMappingsByObjectType = jest.fn();
 const mockServiceLayerExecute = jest.fn();
 
-jest.unstable_mockModule('../../src/integrations/sap/modes/spMode.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/sap/modes/spMode.js', () => ({
   default: { execute: mockSpExecute },
 }));
 
-jest.unstable_mockModule('../../src/integrations/sap/modes/scriptMode.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/sap/modes/scriptMode.js', () => ({
   default: { execute: mockScriptExecute },
 }));
 
-jest.unstable_mockModule('../../src/integrations/sap/modes/apiMode.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/sap/modes/apiMode.js', () => ({
   default: { execute: mockApiExecute },
 }));
 
-jest.unstable_mockModule('../../src/services/mapping.service.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/database/repositories/mapping.service.js', () => ({
   default: { getMappingsByObjectType: mockGetMappingsByObjectType },
 }));
 
-jest.unstable_mockModule('../../src/services/serviceLayer.service.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/sap/serviceLayer.service.js', () => ({
   default: { execute: mockServiceLayerExecute },
 }));
 
-const sapService = (await import('../../src/integrations/sap/sapService.js')).default;
+const sapService = (await import('../../src/infrastructure/sap/sapService.js')).default;
 
 describe('sapService.fetchData', () => {
   beforeEach(() => {

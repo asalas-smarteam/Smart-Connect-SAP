@@ -16,25 +16,25 @@ jest.unstable_mockModule('axios', () => ({
   default: mockAxios,
 }));
 
-jest.unstable_mockModule('../../src/services/mapping.service.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/database/repositories/mapping.service.js', () => ({
   default: {
     getMappingsByObjectType: mockGetMappingsByObjectType,
   },
 }));
 
-jest.unstable_mockModule('../../src/services/hubspotAuthService.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/hubspot/hubspotAuthService.js', () => ({
   default: {
     getAccessToken: mockGetAccessToken,
   },
 }));
 
-jest.unstable_mockModule('../../src/services/hubspotClient.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/hubspot/hubspotClient.js', () => ({
   updateDeal: mockUpdateDeal,
   updateCompany: mockUpdateCompany,
   updateContact: mockUpdateContact,
 }));
 
-jest.unstable_mockModule('../../src/services/sapSessionManager.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/sap/sapSessionManager.js', () => ({
   default: {
     getSessionCookie: mockGetSessionCookie,
     invalidateSession: mockInvalidateSession,
@@ -43,14 +43,14 @@ jest.unstable_mockModule('../../src/services/sapSessionManager.js', () => ({
   isSessionInvalidError: (error) => [401, 403].includes(error?.response?.status),
 }));
 
-jest.unstable_mockModule('../../src/core/logger.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/logger/logger.js', () => ({
   default: {
     info: mockLoggerInfo,
     error: mockLoggerError,
   },
 }));
 
-const webhookProcessor = (await import('../../src/services/webhookProcessor.js')).default;
+const webhookProcessor = (await import('../../src/infrastructure/webhook/webhookProcessor.js')).default;
 
 function createLeanQuery(value) {
   return {

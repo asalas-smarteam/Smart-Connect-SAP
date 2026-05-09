@@ -23,17 +23,17 @@ beforeAll(async () => {
   process.env.WEBHOOK_PROCESSOR_CRON_ENABLED = 'false';
   process.env.TENANT_DB_PREFIX = TENANT_PREFIX;
 
-  const dbModule = await import('../../src/config/database.js');
+  const dbModule = await import('../../src/infrastructure/database/master/database.js');
   connect = dbModule.connect;
   disconnect = dbModule.disconnect;
   SaaSClient = dbModule.SaaSClient;
   Subscription = dbModule.Subscription;
   GlobalAuditLog = dbModule.GlobalAuditLog;
 
-  const tenantDbModule = await import('../../src/config/tenantDatabase.js');
+  const tenantDbModule = await import('../../src/infrastructure/database/tenant/tenantDatabase.js');
   disconnectTenantConnections = tenantDbModule.disconnectTenantConnections;
 
-  const appModule = await import('../../src/app.js');
+  const appModule = await import('../../src/main/app.js');
   app = appModule.default;
 
   await connect();
@@ -56,9 +56,9 @@ afterAll(async () => {
     await app.close();
   }
   const [{ closeWebhookQueue }, { closeSapSyncQueue }, { closeSharedBullMQConnection }] = await Promise.all([
-    import('../../src/queues/webhook.queue.js'),
-    import('../../src/queues/sapSync.queue.js'),
-    import('../../src/lib/bullmqRedis.js'),
+    import('../../src/infrastructure/queue/webhook.queue.js'),
+    import('../../src/infrastructure/queue/sapSync.queue.js'),
+    import('../../src/infrastructure/queue/bullmqRedis.js'),
   ]);
   await closeWebhookQueue();
   await closeSapSyncQueue();

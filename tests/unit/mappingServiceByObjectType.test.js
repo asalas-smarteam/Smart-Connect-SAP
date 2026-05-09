@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import mappingService from '../../src/services/mapping.service.js';
+import mappingService from '../../src/infrastructure/database/repositories/mapping.service.js';
 
 describe('mappingService.getMappingsByObjectType', () => {
   it('returns active mappings by object type and source context sorted by _id', async () => {

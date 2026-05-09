@@ -2,11 +2,11 @@ import { jest } from '@jest/globals';
 
 const mockGetHubspotWarehouseStockPropertiesForTenant = jest.fn();
 
-jest.unstable_mockModule('../../src/utils/warehouseStock.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/hubspot/warehouseStock.js', () => ({
   getHubspotWarehouseStockPropertiesForTenant: mockGetHubspotWarehouseStockPropertiesForTenant,
 }));
 
-const { preprocess, resolveHubspotPriceFields } = await import('../../src/services/hubspot/handlers/product.handler.js');
+const { preprocess, resolveHubspotPriceFields } = await import('../../src/infrastructure/hubspot/handlers/product.handler.js');
 
 describe('product.handler preprocess', () => {
   beforeEach(() => {
@@ -73,5 +73,34 @@ describe('product.handler preprocess', () => {
     const fields = await resolveHubspotPriceFields(tenantModels);
 
     expect(fields).toEqual(['hs_price_usd']);
+  });
+
+  it('preserves strategy price fields when product has a selected SAP price', async () => {
+    const tenantModels = {
+      Configuration: {
+        findOneAndUpdate: jest.fn().mockResolvedValue({
+          key: 'fieldsPricesHS',
+          value: ['price'],
+          userUpdated: 'admin',
+        }),
+      },
+    };
+    const item = {
+      properties: {
+        price: 120,
+      },
+      rawSapData: {
+        selectedPrice: { Price: 120, PriceList: 1 },
+        ItemWarehouseInfoCollection: [],
+      },
+    };
+
+    await preprocess({ item, tenantModels });
+
+    expect(item.properties).toEqual({
+      A01_stock: 11,
+      B10_stock: 4,
+      price: 120,
+    });
   });
 });

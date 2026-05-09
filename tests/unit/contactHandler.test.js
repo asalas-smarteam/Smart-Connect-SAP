@@ -3,13 +3,13 @@ import { jest } from '@jest/globals';
 const mockFindContactByEmail = jest.fn();
 const mockUpdateContact = jest.fn();
 
-jest.unstable_mockModule('../../src/services/hubspotClient.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/hubspot/hubspotClient.js', () => ({
   findContactByEmail: mockFindContactByEmail,
   updateContact: mockUpdateContact,
   createContact: jest.fn(),
 }));
 
-const { find, update } = await import('../../src/services/hubspot/handlers/contact.handler.js');
+const { find, update } = await import('../../src/infrastructure/hubspot/handlers/contact.handler.js');
 
 describe('contact.handler', () => {
   beforeEach(() => {

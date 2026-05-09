@@ -17,36 +17,36 @@ const mockCompanyFind = jest.fn();
 const mockCompanyCreate = jest.fn();
 const mockCompanyUpdate = jest.fn();
 
-jest.unstable_mockModule('../../src/services/hubspotAuthService.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/hubspot/hubspotAuthService.js', () => ({
   default: {
     getAccessToken: mockGetAccessToken,
   },
 }));
 
-jest.unstable_mockModule('../../src/services/hubspotClient.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/hubspot/hubspotClient.js', () => ({
   batchCreateProducts: mockBatchCreateProducts,
   batchUpdateProducts: mockBatchUpdateProducts,
 }));
 
-jest.unstable_mockModule('../../src/services/associationRegistryService.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/hubspot/associationRegistryService.js', () => ({
   default: {
     registerBaseObjectMapping: mockRegisterBaseObjectMapping,
   },
 }));
 
-jest.unstable_mockModule('../../src/services/hubspot/associationOrchestrator.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/hubspot/associationOrchestrator.js', () => ({
   default: {
     handleAssociations: mockHandleAssociations,
   },
 }));
 
-jest.unstable_mockModule('../../src/services/hubspot/sapSyncAdapter.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/hubspot/sapSyncAdapter.js', () => ({
   default: {
     updateHubspotIdInSap: mockUpdateHubspotIdInSap,
   },
 }));
 
-jest.unstable_mockModule('../../src/services/hubspot/handlers/contact.handler.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/hubspot/handlers/contact.handler.js', () => ({
   default: {
     find: mockContactFind,
     create: mockContactCreate,
@@ -54,7 +54,7 @@ jest.unstable_mockModule('../../src/services/hubspot/handlers/contact.handler.js
   },
 }));
 
-jest.unstable_mockModule('../../src/services/hubspot/handlers/company.handler.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/hubspot/handlers/company.handler.js', () => ({
   default: {
     find: mockCompanyFind,
     create: mockCompanyCreate,
@@ -62,11 +62,11 @@ jest.unstable_mockModule('../../src/services/hubspot/handlers/company.handler.js
   },
 }));
 
-jest.unstable_mockModule('../../src/services/hubspot/handlers/deal.handler.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/hubspot/handlers/deal.handler.js', () => ({
   default: {},
 }));
 
-jest.unstable_mockModule('../../src/services/hubspot/handlers/product.handler.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/hubspot/handlers/product.handler.js', () => ({
   default: {
     find: mockProductFind,
     create: mockProductCreate,
@@ -75,7 +75,7 @@ jest.unstable_mockModule('../../src/services/hubspot/handlers/product.handler.js
   },
 }));
 
-const { sendToHubSpot } = await import('../../src/services/hubspot/syncOrchestrator.js');
+const { sendToHubSpot } = await import('../../src/infrastructure/hubspot/syncOrchestrator.js');
 
 describe('sendToHubSpot', () => {
   beforeEach(() => {
@@ -127,7 +127,7 @@ describe('sendToHubSpot', () => {
       credentials
     );
 
-    expect(result).toEqual({ ok: true, sent: 3, failed: 0 });
+    expect(result).toEqual({ ok: true, sent: 3, failed: 0, created: 2, updated: 1 });
     expect(mockGetAccessToken).toHaveBeenCalledTimes(6);
     expect(mockBatchCreateProducts).toHaveBeenNthCalledWith(1, 'hubspot-token', {
       inputs: [items[0]],
@@ -203,7 +203,7 @@ describe('sendToHubSpot', () => {
       credentials
     );
 
-    expect(result).toEqual({ ok: true, sent: 1, failed: 0 });
+    expect(result).toEqual({ ok: true, sent: 1, failed: 0, created: 0, updated: 1 });
     expect(mockContactUpdate).toHaveBeenCalledWith({
       token: 'hubspot-token',
       id: 'hs-contact-1',

@@ -9,13 +9,14 @@ Capacidades clave:
 - **Opciones de ingesta SAP:** llamada API externa, ejecución de procedimiento almacenado, script SQL crudo contra una base externa o consumo de SAP Business One Service Layer con autenticación de sesión.
 - **OAuth de HubSpot por cliente** con pares de `accessToken`/`refreshToken` almacenados.
 - **Capa de mapeo** (Field, Pipeline, Stage, Owner) para transformar los datos SAP en propiedades y IDs de HubSpot.
-- **Motor de sincronización** programado cada minuto; también admite disparo manual.
+- **Motor de sincronización** con schedules BullMQ por `ClientConfig`; también admite disparo manual.
+- **Ventanas de ejecución** para `ClientConfig`: `FULL` puede limitarse por `executionDays`; `INCREMENTAL` puede limitarse con `startTime`/`endTime`.
 - **Configuración impulsada por base de datos** para ingesta, mapeo, tokens OAuth y bitácoras de sincronización.
 
 ## 2. Arquitectura de alto nivel
 La plataforma se compone de las siguientes piezas en tiempo de ejecución:
 - **Backend Fastify (`src/app.js`, `src/server.js`)**: expone rutas REST para salud, mapeos, inicio/retorno de OAuth, disparador de sincronización SAP y utilidades de prueba.
-- **Programador cron (`src/tasks/sapSyncTask.js`)**: trabajo de node-cron que corre `*/1 * * * *` para ejecutar `runSapSyncOnce()` (solo se desactiva si `SAP_SYNC_CRON_ENABLED` es `false`).
+- **Programador SAP sync (`src/infrastructure/queue/sapSync.queue.js`)**: registra cada `ClientConfig` activo como job scheduler de BullMQ en la cola `sap-sync`.
 - **Capa de ingesta SAP (`src/integrations/sap`)**: selecciona un modo basado en `IntegrationMode` ligado a cada `ClientConfig`:
   - **Modo API (`apiMode.js`)**: realiza un HTTP GET con token Bearer opcional.
   - **Modo Procedimiento almacenado (`spMode.js`)**: ejecuta el procedimiento configurado mediante conexión externa a BD.
@@ -205,6 +206,7 @@ Todos los esquemas principales usan **Mongoose/MongoDB**; los nombres de colecci
 - `HUBSPOT_SCOPES` – Scopes opcionales separados por coma/espacio agregados a la URL de autorización.
 - `MONGODB_URI` – Cadena de conexión MongoDB para metadatos de la aplicación.
 - `SAP_SYNC_CRON_ENABLED` – Si es `false`, desactiva el cron; el disparo manual sigue disponible.
+- `WEBHOOK_PROCESSOR_CRON_ENABLED` – Si es `true`, habilita el dispatcher cron que encola procesamiento de webhooks por tenant; por defecto permanece apagado.
 - Las credenciales de BD externa SAP se guardan por `ClientConfig` (`externalDbHost`, `externalDbPort`, `externalDbUser`, `externalDbPassword`, `externalDbName`, `externalDbDialect`) y solo aplican si se habilitan conexiones SQL externas.
 - `PORT` – Puerto del servidor HTTP (por defecto 3000).
 
@@ -217,6 +219,7 @@ Todos los esquemas principales usan **Mongoose/MongoDB**; los nombres de colecci
 | `HUBSPOT_SCOPES` | Lista opcional de scopes separados por coma o espacio para la URL de autorización. |
 | `MONGODB_URI` | URI de MongoDB que almacena configuraciones, mapeos, credenciales y logs. |
 | `SAP_SYNC_CRON_ENABLED` | Si está en `false`, evita que el cron arranque; permite solo disparo manual. |
+| `WEBHOOK_PROCESSOR_CRON_ENABLED` | Si está en `true`, habilita el cron que encola jobs en `webhook-events`; por defecto no arranca. |
 | `PORT` | Puerto en el que se levanta Fastify (3000 por defecto). |
 
 ## 14. Migraciones de base de datos (MongoDB)

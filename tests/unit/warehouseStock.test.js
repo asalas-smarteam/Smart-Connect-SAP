@@ -5,7 +5,7 @@ import {
   getHubspotWarehouseStockPropertiesForTenant,
   normalizeHubspotWarehouseFields,
   resolveHubspotWarehouseFields,
-} from '../../src/utils/warehouseStock.js';
+} from '../../src/infrastructure/hubspot/warehouseStock.js';
 
 describe('warehouseStock utils', () => {
   it('normalizes tenant warehouse config and preserves property key from config value', async () => {

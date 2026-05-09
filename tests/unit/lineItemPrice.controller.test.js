@@ -1,4 +1,5 @@
 import { jest } from '@jest/globals';
+import { createLineItemPriceController } from '../../src/interfaces/http/controllers/lineItemPrice.controller.js';
 
 const mockSyncPrices = jest.fn();
 const mockPreparePayload = jest.fn();
@@ -7,34 +8,33 @@ const mockMarkAsError = jest.fn();
 const mockStartSyncLog = jest.fn();
 const mockFinishSyncLog = jest.fn();
 
-jest.unstable_mockModule('../../src/services/lineItemPrice.service.js', () => ({
-  default: {
-    syncPrices: mockSyncPrices,
-  },
-}));
-
-jest.unstable_mockModule('../../src/services/lineItemPriceWebhook.service.js', () => ({
-  default: {
-    preparePayload: mockPreparePayload,
-    markAsSent: mockMarkAsSent,
-    markAsError: mockMarkAsError,
-  },
-}));
-
-jest.unstable_mockModule('../../src/services/syncLog.service.js', () => ({
-  buildErrorResponseSnapshot: jest.fn((error) => ({ message: error.message })),
-  buildWebhookSyncErrorEntry: jest.fn((value) => value),
-  finishSyncLog: mockFinishSyncLog,
-  startSyncLog: mockStartSyncLog,
-}));
-
-const lineItemPriceController = (await import('../../src/controllers/lineItemPrice.controller.js')).default;
-
 function buildReply() {
   return {
     code: jest.fn().mockReturnThis(),
     send: jest.fn((payload) => payload),
   };
+}
+
+function buildController() {
+  return createLineItemPriceController({
+    tenantModelsResolver: {
+      resolve: (req) => req.tenantModels,
+    },
+    webhookPayload: {
+      preparePayload: mockPreparePayload,
+      markAsSent: mockMarkAsSent,
+      markAsError: mockMarkAsError,
+    },
+    syncLogGateway: {
+      start: mockStartSyncLog,
+      finish: mockFinishSyncLog,
+      buildErrorResponseSnapshot: (error) => ({ message: error.message }),
+      buildWebhookSyncErrorEntry: (value) => value,
+    },
+    syncLineItemPrices: {
+      execute: mockSyncPrices,
+    },
+  });
 }
 
 describe('lineItemPrice.controller syncPrices', () => {
@@ -87,8 +87,12 @@ describe('lineItemPrice.controller syncPrices', () => {
       },
     });
 
-    await lineItemPriceController.syncPrices(req, reply);
+    await buildController().syncPrices(req, reply);
 
+    expect(mockStartSyncLog).toHaveBeenCalledWith({
+      tenantModels: req.tenantModels,
+      objectType: 'Product',
+    });
     expect(mockPreparePayload).toHaveBeenCalledWith(req.body[0], {
       tenantModels: req.tenantModels,
       tenant: req.tenant,
@@ -141,7 +145,7 @@ describe('lineItemPrice.controller syncPrices', () => {
 
     mockSyncPrices.mockRejectedValue(new Error('lineItems must be a non-empty array'));
 
-    await lineItemPriceController.syncPrices(req, reply);
+    await buildController().syncPrices(req, reply);
 
     expect(reply.code).toHaveBeenCalledWith(400);
     expect(mockMarkAsError).not.toHaveBeenCalled();
@@ -184,7 +188,7 @@ describe('lineItemPrice.controller syncPrices', () => {
       },
     });
 
-    await lineItemPriceController.syncPrices(req, reply);
+    await buildController().syncPrices(req, reply);
 
     expect(mockSyncPrices).not.toHaveBeenCalled();
     expect(reply.send).toHaveBeenCalledWith({
@@ -244,7 +248,7 @@ describe('lineItemPrice.controller syncPrices', () => {
       },
     });
 
-    await lineItemPriceController.syncPrices(req, reply);
+    await buildController().syncPrices(req, reply);
 
     expect(mockSyncPrices).toHaveBeenCalledWith(
       {

@@ -20,20 +20,20 @@ jest.unstable_mockModule('axios', () => ({
   },
 }));
 
-jest.unstable_mockModule('../../src/services/hubspotAuthService.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/hubspot/hubspotAuthService.js', () => ({
   default: {
     getAccessToken: mockGetAccessToken,
   },
 }));
 
-jest.unstable_mockModule('../../src/services/hubspotClient.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/hubspot/hubspotClient.js', () => ({
   batchUpdateLineItems: mockBatchUpdateLineItems,
   batchUpdateProducts: mockBatchUpdateProducts,
   findProductBySKU: mockFindProductBySKU,
   updateDeal: mockUpdateDeal,
 }));
 
-jest.unstable_mockModule('../../src/services/sapSessionManager.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/sap/sapSessionManager.js', () => ({
   default: {
     getSessionCookie: mockGetSessionCookie,
     invalidateSession: mockInvalidateSession,
@@ -42,14 +42,14 @@ jest.unstable_mockModule('../../src/services/sapSessionManager.js', () => ({
   isSessionInvalidError: (error) => [401, 403].includes(error?.response?.status),
 }));
 
-jest.unstable_mockModule('../../src/core/logger.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/logger/logger.js', () => ({
   default: {
     info: mockLoggerInfo,
     warn: mockLoggerWarn,
   },
 }));
 
-const lineItemPriceService = (await import('../../src/services/lineItemPrice.service.js')).default;
+const lineItemPriceService = (await import('../../src/infrastructure/external-services/lineItemPrice.service.js')).default;
 
 describe('lineItemPrice.service syncPrices', () => {
   beforeEach(() => {
@@ -74,7 +74,7 @@ describe('lineItemPrice.service syncPrices', () => {
     jest.useRealTimers();
   });
 
-  function buildTenantModels() {
+  function buildTenantModels({ taxCodesConfig = null } = {}) {
     const configurationFindOneAndUpdate = jest.fn().mockImplementation(async (filter) => {
       if (filter?.key === 'priceList') {
         return {
@@ -93,6 +93,13 @@ describe('lineItemPrice.service syncPrices', () => {
           ],
           userUpdated: 'admin',
         };
+      }
+
+      return null;
+    });
+    const configurationFindOne = jest.fn().mockImplementation(async (filter) => {
+      if (filter?.key === 'taxCodes') {
+        return taxCodesConfig;
       }
 
       return null;
@@ -118,6 +125,7 @@ describe('lineItemPrice.service syncPrices', () => {
           }),
       },
       Configuration: {
+        findOne: configurationFindOne,
         findOneAndUpdate: configurationFindOneAndUpdate,
       },
     };
@@ -244,11 +252,11 @@ describe('lineItemPrice.service syncPrices', () => {
       inputs: [
         {
           id: '53747313682',
-          properties: { price: '704.35', quantity: '2', A01_stock: 8, B02_stock: 5 },
+          properties: { price: '704.35', quantity: '2', discount: '0', A01_stock: 8, B02_stock: 5 },
         },
         {
           id: '54118679348',
-          properties: { price: '825.1', quantity: '1', A01_stock: 2, B02_stock: 10 },
+          properties: { price: '825.1', quantity: '1', discount: '5', A01_stock: 2, B02_stock: 10 },
         },
       ],
     });
@@ -266,6 +274,73 @@ describe('lineItemPrice.service syncPrices', () => {
     });
     expect(mockUpdateDeal).toHaveBeenCalledWith('hubspot-token', 'deal-1', {
       properties: { amount: '2233.8' },
+    });
+  });
+
+  it('maps configured SAP item tax code to HubSpot line item discount', async () => {
+    const tenantModels = buildTenantModels({
+      taxCodesConfig: {
+        key: 'taxCodes',
+        FieldItem: 'U_SalesTaxCode',
+        value: [
+          { Rate: 15, Name: 'Impuesto al Valor', Code: 'IVA' },
+          { Rate: 0, Name: 'Exento de Impuesto', Code: 'EXE' },
+        ],
+      },
+    });
+
+    mockGetSessionCookie.mockResolvedValue({ cookie: 'B1SESSION=abc' });
+    mockAxiosPost.mockResolvedValueOnce({
+      data: { Price: 704.35, Currency: 'C$', Discount: 0.0 },
+    });
+    mockAxiosGet.mockResolvedValueOnce({
+      data: {
+        U_SalesTaxCode: 'IVA',
+        ItemPrices: [],
+        ItemWarehouseInfoCollection: [],
+      },
+    });
+    mockGetAccessToken.mockResolvedValue('hubspot-token');
+    mockFindProductBySKU.mockResolvedValueOnce({ id: 'product-1' });
+    mockBatchUpdateLineItems.mockResolvedValue({
+      results: [{ id: '53747313682' }],
+    });
+    mockBatchUpdateProducts.mockResolvedValue({
+      results: [{ id: 'product-1' }],
+    });
+
+    await lineItemPriceService.syncPrices(
+      {
+        cardCode: 'C20000',
+        lineItems: [{ itemCode: 'A0001', id: '53747313682', quantity: 2 }],
+      },
+      {
+        tenantModels,
+        tenant: { client: { hubspot: { portalId: '12345' } } },
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    expect(mockAxiosGet).toHaveBeenCalledWith(
+      "https://sap.example.com:50000/b1s/v2/Items('A0001')?$select=ItemPrices,ItemWarehouseInfoCollection,U_SalesTaxCode",
+      expect.objectContaining({
+        timeout: 15000,
+        headers: { Cookie: 'B1SESSION=abc' },
+      })
+    );
+    expect(mockBatchUpdateLineItems).toHaveBeenCalledWith('hubspot-token', {
+      inputs: [
+        {
+          id: '53747313682',
+          properties: {
+            price: '704.35',
+            quantity: '2',
+            discount: '15',
+            A01_stock: 0,
+            B02_stock: 0,
+          },
+        },
+      ],
     });
   });
 
@@ -514,11 +589,11 @@ describe('lineItemPrice.service syncPrices', () => {
       inputs: [
         {
           id: '53747313682',
-          properties: { price: '704.35', quantity: '3', A01_stock: 8, B02_stock: 5 },
+          properties: { price: '704.35', quantity: '3', discount: '0', A01_stock: 8, B02_stock: 5 },
         },
         {
           id: '54118679348',
-          properties: { price: '825.1', quantity: '1', A01_stock: 2, B02_stock: 10 },
+          properties: { price: '825.1', quantity: '1', discount: '0', A01_stock: 2, B02_stock: 10 },
         },
       ],
     });

@@ -8,7 +8,7 @@ jest.unstable_mockModule('axios', () => ({
   },
 }));
 
-const hubspotAuthService = (await import('../../src/services/hubspotAuthService.js')).default;
+const hubspotAuthService = (await import('../../src/infrastructure/hubspot/hubspotAuthService.js')).default;
 
 describe('hubspotAuthService.getAccessToken', () => {
   beforeEach(() => {

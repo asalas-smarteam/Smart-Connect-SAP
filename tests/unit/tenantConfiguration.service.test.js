@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import tenantConfigurationService from '../../src/services/tenantConfiguration.service.js';
+import tenantConfigurationService from '../../src/infrastructure/config/tenantConfiguration.service.js';
 
 describe('tenantConfiguration.service', () => {
   it('preserves array values for tenant configuration', async () => {

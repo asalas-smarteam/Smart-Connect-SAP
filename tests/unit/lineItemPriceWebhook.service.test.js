@@ -3,18 +3,18 @@ import { jest } from '@jest/globals';
 const mockGetAccessToken = jest.fn();
 const mockHubspotGet = jest.fn();
 
-jest.unstable_mockModule('../../src/services/hubspotAuthService.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/hubspot/hubspotAuthService.js', () => ({
   default: {
     getAccessToken: mockGetAccessToken,
   },
 }));
 
-jest.unstable_mockModule('../../src/services/hubspotClient.js', () => ({
+jest.unstable_mockModule('../../src/infrastructure/hubspot/hubspotClient.js', () => ({
   hubspotGet: mockHubspotGet,
 }));
 
 const lineItemPriceWebhookService = (
-  await import('../../src/services/lineItemPriceWebhook.service.js')
+  await import('../../src/infrastructure/webhook/lineItemPriceWebhook.service.js')
 ).default;
 
 function buildTenantModels() {

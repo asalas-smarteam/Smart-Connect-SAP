@@ -1,7 +1,7 @@
 import {
   sanitizeMongoCollectionName,
   validateProvisioningPayload,
-} from '../../src/utils/provisioningValidation.js';
+} from '../../src/shared/utils/provisioningValidation.js';
 
 describe('provisioningValidation', () => {
   it('sanitizes collection names by normalizing casing and separators', () => {

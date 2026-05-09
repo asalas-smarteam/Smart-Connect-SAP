@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import mappingService from '../../src/services/mapping.service.js';
+import mappingService from '../../src/infrastructure/database/repositories/mapping.service.js';
 
 describe('mappingService.mapRecords', () => {
   it('maps nested array fields using the first array element', async () => {

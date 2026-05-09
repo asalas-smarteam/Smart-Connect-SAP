@@ -1,36 +1,9 @@
 import { jest } from '@jest/globals';
+import { ApplicationError } from '../../src/shared/errors/index.js';
+import { createWebhookController } from '../../src/interfaces/http/controllers/webhook.controller.js';
 
-const mockGetTenantModels = jest.fn();
-const mockResolveActiveTenant = jest.fn();
-const mockQueueCreateDealEvent = jest.fn();
-const mockAddWebhookTenantJob = jest.fn();
-const mockLoggerInfo = jest.fn();
+const mockExecute = jest.fn();
 const mockLoggerError = jest.fn();
-
-jest.unstable_mockModule('../../src/config/tenantDatabase.js', () => ({
-  getTenantModels: mockGetTenantModels,
-}));
-
-jest.unstable_mockModule('../../src/utils/tenantSubscriptions.js', () => ({
-  resolveActiveTenant: mockResolveActiveTenant,
-}));
-
-jest.unstable_mockModule('../../src/services/webhookEvent.service.js', () => ({
-  queueCreateDealEvent: mockQueueCreateDealEvent,
-}));
-
-jest.unstable_mockModule('../../src/queues/webhook.queue.js', () => ({
-  addWebhookTenantJob: mockAddWebhookTenantJob,
-}));
-
-jest.unstable_mockModule('../../src/core/logger.js', () => ({
-  default: {
-    info: mockLoggerInfo,
-    error: mockLoggerError,
-  },
-}));
-
-const { receiveHubspotWebhook } = await import('../../src/controllers/webhook.controller.js');
 
 function buildReply() {
   return {
@@ -39,44 +12,70 @@ function buildReply() {
   };
 }
 
+function buildController() {
+  return createWebhookController({
+    queueHubspotCreateDealWebhook: {
+      execute: mockExecute,
+    },
+    logger: {
+      error: mockLoggerError,
+    },
+  });
+}
+
 describe('webhook.controller receiveHubspotWebhook', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it('returns 400 when tenantId is missing', async () => {
+  it('returns the use case validation status when tenantId is missing', async () => {
+    mockExecute.mockRejectedValue(new ApplicationError('tenantId is required', {
+      statusCode: 400,
+    }));
+
     const req = {
       body: {
         portalId: '123',
         deal: { hs_object_id: '456' },
       },
+      headers: {},
     };
     const reply = buildReply();
 
-    await receiveHubspotWebhook(req, reply);
+    await buildController()(req, reply);
 
     expect(reply.code).toHaveBeenCalledWith(400);
     expect(reply.send).toHaveBeenCalledWith({ success: false, message: 'tenantId is required' });
-    expect(mockResolveActiveTenant).not.toHaveBeenCalled();
+    expect(mockExecute).toHaveBeenCalledWith({
+      payload: req.body,
+      tenantId: undefined,
+    });
   });
 
-  it('returns 400 when deal.hs_object_id is missing', async () => {
+  it('returns the use case validation status when deal.hs_object_id is missing', async () => {
+    mockExecute.mockRejectedValue(new ApplicationError('deal.hs_object_id is required', {
+      statusCode: 400,
+    }));
+
     const req = {
       body: {
         tenantId: 'tenant-1',
         portalId: '123',
         deal: {},
       },
+      headers: {},
     };
     const reply = buildReply();
 
-    await receiveHubspotWebhook(req, reply);
+    await buildController()(req, reply);
 
     expect(reply.code).toHaveBeenCalledWith(400);
     expect(reply.send).toHaveBeenCalledWith({ success: false, message: 'deal.hs_object_id is required' });
   });
 
   it('queues event and returns success', async () => {
+    mockExecute.mockResolvedValue({ duplicated: false, message: 'Event queued' });
+
     const req = {
       body: {
         tenantId: 'tenant-1',
@@ -84,61 +83,38 @@ describe('webhook.controller receiveHubspotWebhook', () => {
         deal: { hs_object_id: '456' },
         company: { name: 'Acme' },
       },
+      headers: {},
     };
 
     const reply = buildReply();
-    mockResolveActiveTenant.mockResolvedValue({
-      client: {
-        _id: 'tenant-1',
-        tenantKey: 'tenant_key_1',
-        hubspot: { portalId: '123' },
-      },
-    });
 
-    const WebhookEvent = {};
-    mockGetTenantModels.mockResolvedValue({ WebhookEvent });
-    mockQueueCreateDealEvent.mockResolvedValue({ duplicated: false, eventId: 'evt-1' });
+    await buildController()(req, reply);
 
-    await receiveHubspotWebhook(req, reply);
-
-    expect(mockResolveActiveTenant).toHaveBeenCalledWith({ tenantId: 'tenant-1' });
-    expect(mockGetTenantModels).toHaveBeenCalledWith('tenant_key_1');
-    expect(mockQueueCreateDealEvent).toHaveBeenCalledWith({ WebhookEvent, payload: req.body });
-    expect(mockAddWebhookTenantJob).toHaveBeenCalledWith({
+    expect(mockExecute).toHaveBeenCalledWith({
+      payload: req.body,
       tenantId: 'tenant-1',
-      tenantKey: 'tenant_key_1',
-      portalId: '123',
-      triggerType: 'webhook',
     });
     expect(reply.code).toHaveBeenCalledWith(200);
     expect(reply.send).toHaveBeenCalledWith({ success: true, message: 'Event queued' });
   });
 
   it('returns success when duplicate event is detected', async () => {
+    mockExecute.mockResolvedValue({ duplicated: true, message: 'Duplicate event ignored' });
+
     const req = {
       body: {
         tenantId: 'tenant-1',
         portalId: '123',
         deal: { hs_object_id: '456' },
       },
+      headers: {},
     };
 
     const reply = buildReply();
-    mockResolveActiveTenant.mockResolvedValue({
-      client: {
-        _id: 'tenant-1',
-        tenantKey: 'tenant_key_1',
-        hubspot: { portalId: '123' },
-      },
-    });
 
-    mockGetTenantModels.mockResolvedValue({ WebhookEvent: {} });
-    mockQueueCreateDealEvent.mockResolvedValue({ duplicated: true, eventId: 'evt-2' });
-
-    await receiveHubspotWebhook(req, reply);
+    await buildController()(req, reply);
 
     expect(reply.code).toHaveBeenCalledWith(200);
     expect(reply.send).toHaveBeenCalledWith({ success: true, message: 'Duplicate event ignored' });
-    expect(mockAddWebhookTenantJob).not.toHaveBeenCalled();
   });
 });
