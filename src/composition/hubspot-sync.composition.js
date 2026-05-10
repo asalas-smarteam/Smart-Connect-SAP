@@ -1,6 +1,7 @@
 import { appendFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import SendMappedItemsToHubspot from '#application/use-cases/SendMappedItemsToHubspot.js';
+import MainDataInUpdateConfigRepository from '#infrastructure/config/MainDataInUpdateConfigRepository.js';
 import associationOrchestrator from '#infrastructure/hubspot/associationOrchestrator.js';
 import associationRegistryService from '#infrastructure/hubspot/associationRegistryService.js';
 import companyHandler from '#infrastructure/hubspot/handlers/company.handler.js';
@@ -36,6 +37,7 @@ export function buildSendMappedItemsToHubspot() {
     associationHandler: associationOrchestrator,
     sapHubspotIdUpdater: sapSyncAdapter,
     validationFailureWriter,
+    mainDataInUpdateConfigRepository: new MainDataInUpdateConfigRepository(),
     handlers: {
       contact: contactHandler,
       company: companyHandler,

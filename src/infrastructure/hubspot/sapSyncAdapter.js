@@ -16,6 +16,23 @@ export async function updateHubspotIdInSap({
   );
 }
 
+export async function updateBusinessPartnerInSapFromHubspot({
+  clientConfig,
+  objectType,
+  item,
+  existing,
+  tenantModels,
+}) {
+  return sapUpdateService.updateBusinessPartnerInSapFromHubspot(
+    clientConfig,
+    objectType,
+    item,
+    existing,
+    tenantModels
+  );
+}
+
 export default {
   updateHubspotIdInSap,
+  updateBusinessPartnerInSapFromHubspot,
 };

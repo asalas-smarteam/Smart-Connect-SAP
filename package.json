@@ -1,6 +1,6 @@
 {
   "name": "sap-hubspot-connector",
-  "version": "2.1.13",
+  "version": "2.1.14",
   "description": "Conector bidireccional entre SAP y HubSpot ",
   "main": "src/main/app.js",
   "type": "module",

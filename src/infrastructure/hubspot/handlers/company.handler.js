@@ -3,6 +3,7 @@ import {
   buildIdentifierOnlyPayload,
   shouldUpdateByKeyFields,
 } from './utils/updateDecision.utils.js';
+import { buildMappedSearchProperties } from './utils/searchProperties.utils.js';
 
 const COMPANY_SEARCH_PROPERTIES = [
   'email',
@@ -12,15 +13,22 @@ const COMPANY_SEARCH_PROPERTIES = [
   'idSap',
 ];
 
-export async function find({ token, item }) {
+export async function find({ token, item, clientConfig, tenantModels }) {
   const email = item?.properties?.email;
 
   if (!email) {
     return null;
   }
 
+  const properties = await buildMappedSearchProperties({
+    tenantModels,
+    clientConfig,
+    objectType: 'company',
+    defaults: COMPANY_SEARCH_PROPERTIES,
+  });
+
   return hubspotClient.findCompanyByEmail(token, email, {
-    properties: COMPANY_SEARCH_PROPERTIES,
+    properties,
   });
 }
 

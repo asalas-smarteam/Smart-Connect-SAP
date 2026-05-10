@@ -1,3 +1,8 @@
+import {
+  DEFAULT_MAIN_DATA_IN_UPDATE,
+  shouldUpdateSapFromHubspot,
+} from '#domain/sync/main-data-in-update.constants.js';
+
 function getHandler(handlers, objectType) {
   return handlers[objectType] ?? null;
 }
@@ -27,6 +32,7 @@ export class SendMappedItemsToHubspot {
     sapHubspotIdUpdater,
     handlers,
     validationFailureWriter,
+    mainDataInUpdateConfigRepository = null,
     sleeper = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   }) {
     this.tokenProvider = tokenProvider;
@@ -36,6 +42,7 @@ export class SendMappedItemsToHubspot {
     this.sapHubspotIdUpdater = sapHubspotIdUpdater;
     this.handlers = handlers;
     this.validationFailureWriter = validationFailureWriter;
+    this.mainDataInUpdateConfigRepository = mainDataInUpdateConfigRepository;
     this.sleeper = sleeper;
   }
 
@@ -62,15 +69,29 @@ export class SendMappedItemsToHubspot {
       });
     }
 
+    const mainDataInUpdate = await this.getMainDataInUpdate(tenantModels);
     const result = await this.processItemsSequentially(mappedItems, {
       objectType,
       clientConfig,
       tenantModels,
       handler,
       getToken,
+      mainDataInUpdate,
     });
 
     return { ok: true, ...result };
+  }
+
+  async getMainDataInUpdate(tenantModels) {
+    if (!this.mainDataInUpdateConfigRepository) {
+      return DEFAULT_MAIN_DATA_IN_UPDATE;
+    }
+
+    try {
+      return await this.mainDataInUpdateConfigRepository.getMainDataInUpdate({ tenantModels });
+    } catch (_error) {
+      return DEFAULT_MAIN_DATA_IN_UPDATE;
+    }
   }
 
   async retryRequest(fn, retries = 5) {
@@ -117,7 +138,15 @@ export class SendMappedItemsToHubspot {
     await this.validationFailureWriter.write(line);
   }
 
-  async processSingleItem({ getToken, objectType, item, clientConfig, tenantModels, handler }) {
+  async processSingleItem({
+    getToken,
+    objectType,
+    item,
+    clientConfig,
+    tenantModels,
+    handler,
+    mainDataInUpdate = DEFAULT_MAIN_DATA_IN_UPDATE,
+  }) {
     try {
       if (handler.preprocess) {
         await handler.preprocess({ item, clientConfig, tenantModels });
@@ -143,14 +172,24 @@ export class SendMappedItemsToHubspot {
       let resultMetrics;
 
       if (existing) {
-        await handler.update({
-          token,
-          id: existing.id,
-          existing,
-          item,
-          clientConfig,
-          tenantModels,
-        });
+        if (shouldUpdateSapFromHubspot({ mainDataInUpdate, objectType })) {
+          await this.sapHubspotIdUpdater.updateBusinessPartnerInSapFromHubspot({
+            clientConfig,
+            objectType,
+            item,
+            existing,
+            tenantModels,
+          });
+        } else {
+          await handler.update({
+            token,
+            id: existing.id,
+            existing,
+            item,
+            clientConfig,
+            tenantModels,
+          });
+        }
         resultMetrics = { created: 0, updated: 1 };
       } else {
         created = await handler.create({ token, item, clientConfig, tenantModels });
