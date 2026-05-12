@@ -15,7 +15,14 @@ export const webhookEventSchema = new Schema(
     },
     status: {
       type: String,
-      enum: ['waiting', 'inprocess', 'completed', 'errored'],
+      enum: [
+        'waiting',
+        'inprocess',
+        'sap_order_created',
+        'sap_created_hubspot_error',
+        'completed',
+        'errored',
+      ],
       default: 'waiting',
       index: true,
     },

@@ -13,6 +13,8 @@ function resolveLastErrorMessage(error) {
   return error?.response?.data?.error?.message || error.message;
 }
 
+const POST_SAP_FAILURE_STATUS = 'sap_created_hubspot_error';
+
 export class ProcessWebhookDealEventBatch {
   constructor({
     webhookEventRepository,
@@ -92,6 +94,32 @@ export class ProcessWebhookDealEventBatch {
 
   async handleProcessingError({ error, event, tenantId, tenantKey, summary }) {
     const currentRetries = Number(event?.retries || 0);
+    const lastError = resolveLastErrorMessage(error);
+
+    if (error?.sapOrderCreated) {
+      await this.webhookEventRepository.markFailed(event, {
+        status: POST_SAP_FAILURE_STATUS,
+        retries: currentRetries,
+        lastError,
+        sapResult: error.sapOrderResult,
+      });
+
+      summary.errored += 1;
+      this.appendErrorDetails(summary, event, error);
+      this.logger.error({
+        msg: 'Webhook event failed after SAP order creation',
+        tenantId: tenantId || null,
+        tenantKey: tenantKey || null,
+        eventId: String(event._id),
+        retries: currentRetries,
+        nextStatus: POST_SAP_FAILURE_STATUS,
+        docEntry: error.sapOrderResult?.docEntry ?? null,
+        docNum: error.sapOrderResult?.docNum ?? null,
+        error: error.message,
+      });
+      return;
+    }
+
     const configuredMaxRetries = Math.max(
       1,
       Number(event?.maxRetries || 0) || this.maxRetries
@@ -104,7 +132,7 @@ export class ProcessWebhookDealEventBatch {
     await this.webhookEventRepository.markFailed(event, {
       status: nextStatus,
       retries: nextRetries,
-      lastError: resolveLastErrorMessage(error),
+      lastError,
     });
 
     if (shouldRetry) {

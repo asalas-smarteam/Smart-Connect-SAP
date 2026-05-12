@@ -47,14 +47,24 @@ export class MongooseWebhookEventRepository {
   }
 
   async markFailed(event, failure) {
+    const updates = {
+      status: failure.status,
+      retries: failure.retries,
+      lastError: failure.lastError,
+    };
+
+    if (failure.sapResult) {
+      updates['payload.sapResult'] = {
+        docEntry: failure.sapResult.docEntry ?? null,
+        docNum: failure.sapResult.docNum ?? null,
+        cardCode: failure.sapResult.cardCode ?? null,
+      };
+    }
+
     await this.WebhookEvent.updateOne(
       { _id: event._id },
       {
-        $set: {
-          status: failure.status,
-          retries: failure.retries,
-          lastError: failure.lastError,
-        },
+        $set: updates,
       }
     );
   }

@@ -61,6 +61,7 @@ function createLeanQuery(value) {
 
 function buildTenantModels({
   configurationValue = '4',
+  taxCodesValue = [],
   portalId = '12345',
   company = null,
   contact = null,
@@ -108,10 +109,24 @@ function buildTenantModels({
       })),
     },
     Configuration: {
-      findOneAndUpdate: jest.fn().mockResolvedValue({
-        key: 'priceList',
-        value: configurationValue,
-        userUpdated: 'admin',
+      findOneAndUpdate: jest.fn().mockImplementation(async (filter) => {
+        if (filter?.key === 'priceList') {
+          return {
+            key: 'priceList',
+            value: configurationValue,
+            userUpdated: 'admin',
+          };
+        }
+
+        if (filter?.key === 'taxCodes') {
+          return {
+            key: 'taxCodes',
+            value: taxCodesValue,
+            userUpdated: 'admin',
+          };
+        }
+
+        return null;
       }),
     },
     WebhookEvent: {
@@ -245,6 +260,73 @@ describe('webhookProcessor flow', () => {
         upsert: true,
         setDefaultsOnInsert: true,
       }
+    );
+  });
+
+  it('sends TaxCode in SAP order lines using tenant taxCodes config and hs_tax_rate', async () => {
+    setupMappings();
+    const tenantModels = buildTenantModels({
+      taxCodesValue: [
+        { Rate: 15, Name: 'Impuesto al Valor', Code: 'IVA', HSCode: '17493851' },
+        { Rate: 0, Name: 'Exento de Impuesto', Code: 'EXE', HSCode: '17571233' },
+      ],
+      contact: {
+        hs_object_id: 'contact-1',
+        firstname: 'Cliente Mostrador',
+        idsap: 'CL99999',
+      },
+      lineItems: [
+        {
+          hs_sku: 'A56010004',
+          quantity: '1',
+          price: '19.21',
+          hs_tax_rate: '15.0000',
+          warehouses: 'B04',
+        },
+      ],
+    });
+
+    mockAxios
+      .mockResolvedValueOnce({
+        data: {
+          CardCode: 'CL99999',
+          CardName: 'Cliente Mostrador',
+          PriceListNum: 4,
+          ContactEmployees: [],
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          DocEntry: 10,
+          DocNum: 20,
+        },
+      });
+
+    const result = await webhookProcessor.processPendingEvents({
+      tenantModels,
+      tenantId: 'tenant-1',
+      tenantKey: 'tenant_1',
+      portalId: '12345',
+    });
+
+    expect(result.completed).toBe(1);
+    expect(mockAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'post',
+        url: 'https://sap.example.com:50000/b1s/v2/Orders',
+        data: expect.objectContaining({
+          CardCode: 'CL99999',
+          DocumentLines: [
+            {
+              ItemCode: 'A56010004',
+              Quantity: 1,
+              UnitPrice: 19.21,
+              WarehouseCode: 'B04',
+              TaxCode: 'IVA',
+            },
+          ],
+        }),
+      })
     );
   });
 
@@ -523,5 +605,79 @@ describe('webhookProcessor flow', () => {
         idsap: expect.stringMatching(/^CL/),
       },
     });
+  });
+
+  it('keeps SAP order creation from being retried when HubSpot update fails afterward', async () => {
+    setupMappings();
+    const tenantModels = buildTenantModels({
+      contact: {
+        hs_object_id: 'contact-1',
+        firstname: 'Cliente Mostrador',
+        idsap: 'CL99999',
+      },
+    });
+
+    mockAxios
+      .mockResolvedValueOnce({
+        data: {
+          CardCode: 'CL99999',
+          CardName: 'Cliente Mostrador',
+          PriceListNum: 4,
+          ContactEmployees: [],
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          DocEntry: 99,
+          DocNum: 199,
+        },
+      });
+    mockUpdateDeal.mockRejectedValue(new Error('HubSpot update failed'));
+
+    const result = await webhookProcessor.processPendingEvents({
+      tenantModels,
+      tenantId: 'tenant-1',
+      tenantKey: 'tenant_1',
+      portalId: '12345',
+    });
+
+    expect(result.completed).toBe(0);
+    expect(result.retried).toBe(0);
+    expect(result.errored).toBe(1);
+    expect(mockAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'post',
+        url: 'https://sap.example.com:50000/b1s/v2/Orders',
+      })
+    );
+    expect(tenantModels.WebhookEvent.updateOne).toHaveBeenCalledWith(
+      { _id: 'evt-1' },
+      {
+        $set: expect.objectContaining({
+          status: 'sap_order_created',
+          lastError: null,
+          'payload.sapResult': {
+            cardCode: 'CL99999',
+            docEntry: 99,
+            docNum: 199,
+          },
+        }),
+      }
+    );
+    expect(tenantModels.WebhookEvent.updateOne).toHaveBeenCalledWith(
+      { _id: 'evt-1' },
+      {
+        $set: {
+          status: 'sap_created_hubspot_error',
+          retries: 0,
+          lastError: 'HubSpot update failed',
+          'payload.sapResult': {
+            cardCode: 'CL99999',
+            docEntry: 99,
+            docNum: 199,
+          },
+        },
+      }
+    );
   });
 });

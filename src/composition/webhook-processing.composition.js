@@ -1,5 +1,6 @@
 import ProcessHubspotWebhookEvent from '#application/use-cases/ProcessHubspotWebhookEvent.js';
 import ProcessWebhookDealEventBatch from '#application/use-cases/ProcessWebhookDealEventBatch.js';
+import MongooseWebhookEventProgressRepository from '#infrastructure/database/repositories/MongooseWebhookEventProgressRepository.js';
 import MongooseWebhookReferenceRepository from '#infrastructure/database/repositories/MongooseWebhookReferenceRepository.js';
 import TenantWebhookRuntimeRepository from '#infrastructure/database/repositories/TenantWebhookRuntimeRepository.js';
 import HubspotWebhookAdapter from '#infrastructure/hubspot/HubspotWebhookAdapter.js';
@@ -17,6 +18,7 @@ export function buildProcessHubspotWebhookEventUseCase() {
     sapOrderAdapter: new SapWebhookOrderAdapter(),
     hubspotWebhookAdapter: new HubspotWebhookAdapter(),
     webhookReferenceRepository: new MongooseWebhookReferenceRepository(),
+    webhookEventProgressRepository: new MongooseWebhookEventProgressRepository(),
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
   });

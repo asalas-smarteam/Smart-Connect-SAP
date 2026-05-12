@@ -69,7 +69,31 @@ export function buildDefaultBusinessPartnerCardCode({ company, contact, companyE
   return `CL${dynamicPart}`.slice(0, 15);
 }
 
-export function mapDocumentLines({ lineItems, productMappings }) {
+function resolveTaxCodeByRate(taxCodes, taxRate) {
+  const rawRate = toNonEmptyString(taxRate);
+  if (!rawRate) {
+    return null;
+  }
+
+  const normalizedRate = normalizeNumber(rawRate, null);
+  if (!Number.isFinite(normalizedRate)) {
+    throw new PermanentWebhookError(`Invalid hs_tax_rate ${rawRate}`);
+  }
+
+  const match = (Array.isArray(taxCodes) ? taxCodes : []).find((taxCode) => {
+    const configuredRate = normalizeNumber(taxCode?.Rate, null);
+    return Number.isFinite(configuredRate) && configuredRate === normalizedRate;
+  });
+  const taxCode = toNonEmptyString(match?.Code);
+
+  if (!taxCode) {
+    throw new PermanentWebhookError(`TaxCode is not configured for hs_tax_rate ${rawRate}`);
+  }
+
+  return taxCode;
+}
+
+export function mapDocumentLines({ lineItems, productMappings, taxCodes = [] }) {
   const lines = [];
 
   for (const lineItem of lineItems) {
@@ -89,12 +113,19 @@ export function mapDocumentLines({ lineItems, productMappings }) {
       throw new PermanentWebhookError(`Invalid quantity for item ${itemCode}`);
     }
 
-    lines.push({
+    const line = {
       ItemCode: itemCode,
       Quantity: quantity,
       UnitPrice: Number.isFinite(unitPrice) ? unitPrice : 0,
       WarehouseCode: lineItem.warehouses,
-    });
+    };
+    const taxCode = resolveTaxCodeByRate(taxCodes, lineItem?.hs_tax_rate);
+
+    if (taxCode) {
+      line.TaxCode = taxCode;
+    }
+
+    lines.push(line);
   }
 
   return lines;
@@ -111,4 +142,3 @@ export function buildOrderPayload({ cardCode, documentLines }) {
     DocumentLines: documentLines,
   };
 }
-

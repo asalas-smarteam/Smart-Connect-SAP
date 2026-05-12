@@ -123,4 +123,45 @@ describe('ProcessWebhookDealEventBatch', () => {
       },
     ]);
   });
+
+  it('does not retry when SAP order was already created before a later failure', async () => {
+    const event = { _id: 'event-1', retries: 1, maxRetries: 3, payload: { deal: {} } };
+    const error = new Error('HubSpot update failed');
+    error.sapOrderCreated = true;
+    error.sapOrderResult = {
+      cardCode: 'C20000',
+      docEntry: 10,
+      docNum: 20,
+    };
+    const repository = {
+      claimWaiting: jest.fn().mockResolvedValue([event]),
+      markCompleted: jest.fn(),
+      markFailed: jest.fn(),
+    };
+
+    const useCase = new ProcessWebhookDealEventBatch({
+      webhookEventRepository: repository,
+      processWebhookDealEvent: jest.fn().mockRejectedValue(error),
+      logger: { info: jest.fn(), error: jest.fn() },
+      maxRetries: 3,
+      buildWebhookSyncErrorEntry: jest.fn((entry) => entry),
+      buildErrorResponseSnapshot: jest.fn(() => ({ message: error.message })),
+    });
+
+    const summary = await useCase.execute({ tenantModels: { WebhookEvent: {} } });
+
+    expect(repository.markFailed).toHaveBeenCalledWith(event, {
+      status: 'sap_created_hubspot_error',
+      retries: 1,
+      lastError: 'HubSpot update failed',
+      sapResult: {
+        cardCode: 'C20000',
+        docEntry: 10,
+        docNum: 20,
+      },
+    });
+    expect(repository.markCompleted).not.toHaveBeenCalled();
+    expect(summary.retried).toBe(0);
+    expect(summary.errored).toBe(1);
+  });
 });

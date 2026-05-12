@@ -31,12 +31,14 @@ export class TenantWebhookRuntimeRepository {
       contactEmployeeMappings,
       productMappings,
       dealMappings,
+      taxCodes,
     ] = await Promise.all([
       mappingService.getMappingsByObjectType(hubspotCredentialId, 'company', 'businessPartner', tenantModels),
       mappingService.getMappingsByObjectType(hubspotCredentialId, 'contact', 'businessPartner', tenantModels),
       mappingService.getMappingsByObjectType(hubspotCredentialId, 'contact', 'contactEmployee', tenantModels),
       mappingService.getMappingsByObjectType(hubspotCredentialId, 'product', 'product', tenantModels),
       mappingService.getMappingsByObjectType(hubspotCredentialId, 'deal', 'businessPartner', tenantModels),
+      tenantConfigurationService.getValue(tenantModels, 'taxCodes', []),
     ]);
 
     return {
@@ -53,6 +55,7 @@ export class TenantWebhookRuntimeRepository {
         productMappings,
         dealMappings,
       },
+      taxCodes,
     };
   }
 
@@ -75,4 +78,3 @@ export class TenantWebhookRuntimeRepository {
 }
 
 export default TenantWebhookRuntimeRepository;
-

@@ -15,6 +15,7 @@ export class ProcessHubspotWebhookEvent {
     sapOrderAdapter,
     hubspotWebhookAdapter,
     webhookReferenceRepository,
+    webhookEventProgressRepository,
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
   }) {
@@ -22,6 +23,7 @@ export class ProcessHubspotWebhookEvent {
     this.sapOrderAdapter = sapOrderAdapter;
     this.hubspotWebhookAdapter = hubspotWebhookAdapter;
     this.webhookReferenceRepository = webhookReferenceRepository;
+    this.webhookEventProgressRepository = webhookEventProgressRepository;
     this.buildWebhookSyncErrorEntry = buildWebhookSyncErrorEntry;
     this.buildErrorResponseSnapshot = buildErrorResponseSnapshot;
   }
@@ -32,6 +34,8 @@ export class ProcessHubspotWebhookEvent {
     const companyExists = Boolean(company);
     const contactExists = Boolean(contact);
     const auditTrail = this.createAuditTrail(payload);
+    let orderResponse = null;
+    let cardCode = null;
 
     try {
       const context = await this.runtimeRepository.resolveRuntimeContext({
@@ -42,7 +46,7 @@ export class ProcessHubspotWebhookEvent {
         portalId,
       });
 
-      const { mappings, sapConfig, hubspotCredentials } = context;
+      const { mappings, sapConfig, hubspotCredentials, taxCodes } = context;
       const mappedCompany = mapHubspotToSapFields(company || {}, mappings.companyMappings);
       const mappedContact = mapHubspotToSapFields(contact || {}, mappings.contactBusinessPartnerMappings);
       const businessPartnerResult = await this.sapOrderAdapter.findOrCreateBusinessPartner({
@@ -60,7 +64,7 @@ export class ProcessHubspotWebhookEvent {
       auditTrail.payload_SAP.businessPartner = businessPartnerResult.requestPayload;
       auditTrail.response_SAP.businessPartner = businessPartnerResult.responsePayload;
 
-      const cardCode = businessPartnerResult.cardCode;
+      cardCode = businessPartnerResult.cardCode;
       const syncPlan = this.resolveBusinessPartnerSyncPlan({
         businessPartnerResult,
         company,
@@ -128,6 +132,7 @@ export class ProcessHubspotWebhookEvent {
       const documentLines = mapDocumentLines({
         lineItems,
         productMappings: mappings.productMappings,
+        taxCodes,
       });
       const orderPayload = buildOrderPayload({
         cardCode,
@@ -135,11 +140,20 @@ export class ProcessHubspotWebhookEvent {
       });
       auditTrail.payload_SAP.order = orderPayload;
 
-      const orderResponse = await this.sapOrderAdapter.createOrder({
+      orderResponse = await this.sapOrderAdapter.createOrder({
         sapConfig,
         orderPayload,
       });
       auditTrail.response_SAP.order = orderResponse;
+      await this.webhookEventProgressRepository?.markOrderCreated({
+        WebhookEvent,
+        eventId: event?._id,
+        result: {
+          cardCode,
+          docEntry: orderResponse?.DocEntry ?? null,
+          docNum: orderResponse?.DocNum ?? null,
+        },
+      });
 
       const hubspotFinalResponses = await this.hubspotWebhookAdapter.updateAfterSap({
         tenantModels,
@@ -165,6 +179,15 @@ export class ProcessHubspotWebhookEvent {
         dealId: toNonEmptyString(deal?.hs_object_id),
       };
     } catch (error) {
+      if (orderResponse) {
+        error.sapOrderCreated = true;
+        error.sapOrderResult = {
+          cardCode,
+          docEntry: orderResponse?.DocEntry ?? null,
+          docNum: orderResponse?.DocNum ?? null,
+        };
+      }
+
       error.syncLogWebhookErrors = [
         this.buildWebhookSyncErrorEntry({
           payloadHubspot: auditTrail.payload_Hubspot,
