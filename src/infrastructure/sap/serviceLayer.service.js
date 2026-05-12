@@ -48,12 +48,11 @@ async function fetchAllPages(baseUrl, initialUrl, headers) {
       items.push(data);
     }
 
-    nextUrl = normalizeNextLink(baseUrl, data?.['@odata.nextLink']);
+    nextUrl = normalizeNextLink(`${baseUrl}/b1s/v2`, data?.['@odata.nextLink']);
   }
 
   return items;
 }
-
 const serviceLayerService = {
   async execute(config, mappings, options = {}) {
     const baseUrl = String(config?.serviceLayerBaseUrl || '').trim().replace(/\/+$/, '');
@@ -64,10 +63,10 @@ const serviceLayerService = {
 
     const requestOptions = {
       ...options,
-      top: options?.top || config?.serviceLayerTopFilter || 20,
+      /*top: options?.top || config?.serviceLayerTopFilter || 20,*/
     };
 
-    const dataUrl = withTopParam(buildServiceLayerUrl(config, mappings, requestOptions), requestOptions.top); //, requestOptions.top
+    const dataUrl = withTopParam(buildServiceLayerUrl(config, mappings, requestOptions)); //, requestOptions.top
 
     const requestWithSession = async () => {
       const { cookie } = await sapSessionManager.getSessionCookie(config);
