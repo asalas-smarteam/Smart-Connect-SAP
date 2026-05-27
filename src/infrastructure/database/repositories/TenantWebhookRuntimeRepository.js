@@ -75,6 +75,16 @@ export class TenantWebhookRuntimeRepository {
 
     return priceListNum;
   }
+
+  async resolveRequireRandCardCode(tenantModels) {
+    const value = await tenantConfigurationService.getValue(
+      tenantModels,
+      'requireRandCardCode',
+      true
+    );
+
+    return value;
+  }
 }
 
 export default TenantWebhookRuntimeRepository;

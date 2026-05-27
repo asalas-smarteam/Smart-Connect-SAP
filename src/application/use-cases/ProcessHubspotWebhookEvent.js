@@ -59,6 +59,8 @@ export class ProcessHubspotWebhookEvent {
         companyExists: companyExists || !contactExists,
         resolveDefaultPriceListNum: (models) =>
           this.runtimeRepository.resolveDefaultPriceListNum(models),
+        resolveRequireRandCardCode: (models) =>
+          this.runtimeRepository.resolveRequireRandCardCode(models),
       });
 
       auditTrail.payload_SAP.businessPartner = businessPartnerResult.requestPayload;

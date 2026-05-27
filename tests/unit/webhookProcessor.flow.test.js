@@ -61,6 +61,7 @@ function createLeanQuery(value) {
 
 function buildTenantModels({
   configurationValue = '4',
+  requireRandCardCodeValue = true,
   taxCodesValue = [],
   portalId = '12345',
   company = null,
@@ -122,6 +123,14 @@ function buildTenantModels({
           return {
             key: 'taxCodes',
             value: taxCodesValue,
+            userUpdated: 'admin',
+          };
+        }
+
+        if (filter?.key === 'requireRandCardCode') {
+          return {
+            key: 'requireRandCardCode',
+            value: requireRandCardCodeValue,
             userUpdated: 'admin',
           };
         }
@@ -478,6 +487,64 @@ describe('webhookProcessor flow', () => {
     expect(mockUpdateContact).toHaveBeenCalledWith('hubspot-token', 'contact-1', {
       properties: {
         idsap: expect.stringMatching(/^CL/),
+      },
+    });
+  });
+
+  it('omits CardCode when tenant disables generated card codes and writes SAP response CardCode to HubSpot', async () => {
+    setupMappings();
+    const tenantModels = buildTenantModels({
+      requireRandCardCodeValue: false,
+      contact: {
+        hs_object_id: 'contact-1',
+        firstname: 'Lucia',
+      },
+    });
+
+    mockAxios.mockImplementation(async (config) => {
+      if (config.method === 'post' && config.url.endsWith('/b1s/v2/BusinessPartners')) {
+        return { data: { CardCode: 'AUTO100' } };
+      }
+
+      if (config.method === 'get' && config.url.includes("/b1s/v2/BusinessPartners('AUTO100')")) {
+        return {
+          data: {
+            CardCode: 'AUTO100',
+            CardName: 'Lucia',
+            PriceListNum: 4,
+            ContactEmployees: [],
+          },
+        };
+      }
+
+      if (config.method === 'post' && config.url.endsWith('/b1s/v2/Orders')) {
+        return {
+          data: {
+            DocEntry: 14,
+            DocNum: 24,
+          },
+        };
+      }
+
+      throw new Error(`Unexpected axios call: ${config.method} ${config.url}`);
+    });
+
+    const result = await webhookProcessor.processPendingEvents({
+      tenantModels,
+      tenantId: 'tenant-1',
+      tenantKey: 'tenant_1',
+      portalId: '12345',
+    });
+
+    const businessPartnerRequest = mockAxios.mock.calls
+      .map(([config]) => config)
+      .find((config) => config.method === 'post' && config.url.endsWith('/b1s/v2/BusinessPartners'));
+
+    expect(result.completed).toBe(1);
+    expect(businessPartnerRequest.data).not.toHaveProperty('CardCode');
+    expect(mockUpdateContact).toHaveBeenCalledWith('hubspot-token', 'contact-1', {
+      properties: {
+        idsap: 'AUTO100',
       },
     });
   });

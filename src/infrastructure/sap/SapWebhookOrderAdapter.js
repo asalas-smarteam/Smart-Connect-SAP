@@ -134,6 +134,7 @@ export class SapWebhookOrderAdapter {
     mappedContact,
     companyExists,
     resolveDefaultPriceListNum,
+    resolveRequireRandCardCode = async () => true,
   }) {
     const mappedCardCode = toNonEmptyString(mappedCompany?.CardCode || mappedContact?.CardCode);
     const mappedEmail = toNonEmptyString(mappedCompany?.EmailAddress || mappedContact?.EmailAddress);
@@ -141,11 +142,18 @@ export class SapWebhookOrderAdapter {
       mappedCompany?.PriceListNum ?? mappedContact?.PriceListNum,
       null
     );
-    const resolvedCardCode = mappedCardCode || buildDefaultBusinessPartnerCardCode({
-      company,
-      contact,
-      companyExists,
-    });
+    const shouldGenerateDefaultCardCode = mappedCardCode
+      ? false
+      : await resolveRequireRandCardCode(tenantModels);
+    const resolvedCardCode = mappedCardCode || (
+      shouldGenerateDefaultCardCode
+        ? buildDefaultBusinessPartnerCardCode({
+          company,
+          contact,
+          companyExists,
+        })
+        : null
+    );
     const resolvedPriceListNum = Number.isFinite(mappedPriceListNum)
       ? mappedPriceListNum
       : await resolveDefaultPriceListNum(tenantModels);
@@ -199,9 +207,12 @@ export class SapWebhookOrderAdapter {
       EmailAddress: mappedEmail || '',
       Phone1: toNonEmptyString(mappedCompany?.Phone1 || mappedContact?.Phone1) || undefined,
       PriceListNum: resolvedPriceListNum,
-      CardCode: resolvedCardCode,
       FederalTaxID: toNonEmptyString(federalTaxId) || undefined,
     };
+
+    if (resolvedCardCode) {
+      payload.CardCode = resolvedCardCode;
+    }
 
     const created = await this.request(sapConfig, {
       method: 'post',
@@ -209,7 +220,7 @@ export class SapWebhookOrderAdapter {
       data: payload,
     });
 
-    const cardCode = created?.CardCode || resolvedCardCode || null;
+    const cardCode = toNonEmptyString(created?.CardCode || resolvedCardCode);
     if (!cardCode) {
       throw new Error('SAP BusinessPartner creation did not return CardCode');
     }
@@ -305,4 +316,3 @@ export class SapWebhookOrderAdapter {
 }
 
 export default SapWebhookOrderAdapter;
-

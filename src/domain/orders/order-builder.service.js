@@ -101,7 +101,7 @@ export function mapDocumentLines({ lineItems, productMappings, taxCodes = [] }) 
     const itemCode = toNonEmptyString(mapped?.ItemCode || lineItem?.hs_sku || lineItem?.itemCode);
     const quantity = normalizeNumber(mapped?.Quantity ?? lineItem?.quantity, 1);
     const unitPrice = normalizeNumber(
-      mapped?.UnitPrice ?? mapped?.Price ?? lineItem?.price ?? lineItem?.amount,
+      lineItem?.hs_effective_unit_price,
       0
     );
 
