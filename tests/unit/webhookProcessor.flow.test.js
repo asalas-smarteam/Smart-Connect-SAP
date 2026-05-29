@@ -62,6 +62,8 @@ function createLeanQuery(value) {
 function buildTenantModels({
   configurationValue = '4',
   requireRandCardCodeValue = true,
+  defaultSeriesValue = null,
+  defaultFindSAPValue = 'EmailAddress',
   taxCodesValue = [],
   portalId = '12345',
   company = null,
@@ -131,6 +133,22 @@ function buildTenantModels({
           return {
             key: 'requireRandCardCode',
             value: requireRandCardCodeValue,
+            userUpdated: 'admin',
+          };
+        }
+
+        if (filter?.key === 'defaultSeries') {
+          return {
+            key: 'defaultSeries',
+            value: defaultSeriesValue,
+            userUpdated: 'admin',
+          };
+        }
+
+        if (filter?.key === 'defaultFindSAP') {
+          return {
+            key: 'defaultFindSAP',
+            value: defaultFindSAPValue,
             userUpdated: 'admin',
           };
         }
@@ -495,6 +513,7 @@ describe('webhookProcessor flow', () => {
     setupMappings();
     const tenantModels = buildTenantModels({
       requireRandCardCodeValue: false,
+      defaultSeriesValue: 73,
       contact: {
         hs_object_id: 'contact-1',
         firstname: 'Lucia',
@@ -542,9 +561,67 @@ describe('webhookProcessor flow', () => {
 
     expect(result.completed).toBe(1);
     expect(businessPartnerRequest.data).not.toHaveProperty('CardCode');
+    expect(businessPartnerRequest.data).toHaveProperty('Series', 73);
     expect(mockUpdateContact).toHaveBeenCalledWith('hubspot-token', 'contact-1', {
       properties: {
         idsap: 'AUTO100',
+      },
+    });
+  });
+
+  it('finds existing SAP partner with configured defaultFindSAP field and writes idsap back to HubSpot', async () => {
+    setupMappings();
+    const tenantModels = buildTenantModels({
+      defaultFindSAPValue: 'Phone1',
+      contact: {
+        hs_object_id: 'contact-1',
+        firstname: 'Mario',
+        phone: '+50587365564',
+      },
+    });
+
+    mockAxios
+      .mockResolvedValueOnce({
+        data: {
+          value: [
+            {
+              CardCode: 'C30001',
+              CardName: 'Mario',
+              Phone1: '+50587365564',
+              PriceListNum: 4,
+              ContactEmployees: [],
+            },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          DocEntry: 15,
+          DocNum: 25,
+        },
+      });
+
+    const result = await webhookProcessor.processPendingEvents({
+      tenantModels,
+      tenantId: 'tenant-1',
+      tenantKey: 'tenant_1',
+      portalId: '12345',
+    });
+
+    expect(result.completed).toBe(1);
+    expect(mockAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'get',
+        url: 'https://sap.example.com:50000/b1s/v2/BusinessPartners',
+        params: expect.objectContaining({
+          $select: 'CardCode,CardName,EmailAddress,Phone1,PriceListNum,ContactEmployees',
+          $filter: "Phone1 eq '+50587365564'",
+        }),
+      })
+    );
+    expect(mockUpdateContact).toHaveBeenCalledWith('hubspot-token', 'contact-1', {
+      properties: {
+        idsap: 'C30001',
       },
     });
   });

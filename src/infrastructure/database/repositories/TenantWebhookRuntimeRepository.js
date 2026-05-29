@@ -85,6 +85,24 @@ export class TenantWebhookRuntimeRepository {
 
     return value;
   }
+
+  async resolveDefaultSeries(tenantModels) {
+    const value = await tenantConfigurationService.getValue(
+      tenantModels,
+      'defaultSeries',
+      null
+    );
+
+    return normalizePositiveInteger(value);
+  }
+
+  async resolveDefaultFindSAP(tenantModels) {
+    return tenantConfigurationService.getValue(
+      tenantModels,
+      'defaultFindSAP',
+      'EmailAddress'
+    );
+  }
 }
 
 export default TenantWebhookRuntimeRepository;

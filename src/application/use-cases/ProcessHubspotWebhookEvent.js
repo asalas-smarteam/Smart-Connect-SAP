@@ -61,6 +61,10 @@ export class ProcessHubspotWebhookEvent {
           this.runtimeRepository.resolveDefaultPriceListNum(models),
         resolveRequireRandCardCode: (models) =>
           this.runtimeRepository.resolveRequireRandCardCode(models),
+        resolveDefaultSeries: (models) =>
+          this.runtimeRepository.resolveDefaultSeries(models),
+        resolveDefaultFindSAP: (models) =>
+          this.runtimeRepository.resolveDefaultFindSAP(models),
       });
 
       auditTrail.payload_SAP.businessPartner = businessPartnerResult.requestPayload;
@@ -232,14 +236,16 @@ export class ProcessHubspotWebhookEvent {
   }) {
     const companyHasSapId = Boolean(resolveHubspotSapId(company));
     const contactHasSapId = Boolean(resolveHubspotSapId(contact));
-    const matchedByEmail = businessPartnerResult.matchedBy === 'email';
+    const matchedByExistingSearch = Boolean(
+      businessPartnerResult.matchedBy && businessPartnerResult.matchedBy !== 'cardCode'
+    );
     const shouldSyncCompanySapId = companyExists && (
       businessPartnerResult.created
-      || (matchedByEmail && !companyHasSapId)
+      || (matchedByExistingSearch && !companyHasSapId)
     );
     const shouldSyncContactSapId = contactExists && (
       businessPartnerResult.created
-      || (matchedByEmail && !contactHasSapId)
+      || (matchedByExistingSearch && !contactHasSapId)
     );
 
     return {

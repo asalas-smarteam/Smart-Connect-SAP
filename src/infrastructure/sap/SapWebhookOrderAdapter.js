@@ -105,24 +105,41 @@ export class SapWebhookOrderAdapter {
     }
   }
 
-  async findBusinessPartnerByEmail(sapConfig, email) {
-    if (!toNonEmptyString(email)) {
+  async findBusinessPartnerByField(sapConfig, fieldName, fieldValue) {
+    const resolvedFieldName = toNonEmptyString(fieldName);
+    const resolvedFieldValue = toNonEmptyString(fieldValue);
+
+    if (!resolvedFieldName || !resolvedFieldValue) {
       return null;
     }
+
+    const selectFields = [
+      'CardCode',
+      'CardName',
+      'EmailAddress',
+      'Phone1',
+      'PriceListNum',
+      'ContactEmployees',
+      resolvedFieldName,
+    ];
 
     const response = await this.request(sapConfig, {
       method: 'get',
       path: '/BusinessPartners',
       params: {
         $top: 1,
-        $select: 'CardCode,CardName,EmailAddress,PriceListNum,ContactEmployees',
-        $filter: `EmailAddress eq '${escapeODataString(email)}'`,
+        $select: [...new Set(selectFields)].join(','),
+        $filter: `${resolvedFieldName} eq '${escapeODataString(resolvedFieldValue)}'`,
       },
     });
 
     return Array.isArray(response?.value) && response.value.length > 0
       ? response.value[0]
       : null;
+  }
+
+  async findBusinessPartnerByEmail(sapConfig, email) {
+    return this.findBusinessPartnerByField(sapConfig, 'EmailAddress', email);
   }
 
   async findOrCreateBusinessPartner({
@@ -135,6 +152,8 @@ export class SapWebhookOrderAdapter {
     companyExists,
     resolveDefaultPriceListNum,
     resolveRequireRandCardCode = async () => true,
+    resolveDefaultSeries = async () => null,
+    resolveDefaultFindSAP = async () => 'EmailAddress',
   }) {
     const mappedCardCode = toNonEmptyString(mappedCompany?.CardCode || mappedContact?.CardCode);
     const mappedEmail = toNonEmptyString(mappedCompany?.EmailAddress || mappedContact?.EmailAddress);
@@ -157,6 +176,10 @@ export class SapWebhookOrderAdapter {
     const resolvedPriceListNum = Number.isFinite(mappedPriceListNum)
       ? mappedPriceListNum
       : await resolveDefaultPriceListNum(tenantModels);
+    const defaultFindSAP = await resolveDefaultFindSAP(tenantModels);
+    const defaultFindSAPValue = toNonEmptyString(
+      mappedCompany?.[defaultFindSAP] || mappedContact?.[defaultFindSAP]
+    );
 
     const byCardCode = await this.findBusinessPartnerByCardCode(sapConfig, mappedCardCode);
     if (byCardCode?.CardCode) {
@@ -173,17 +196,21 @@ export class SapWebhookOrderAdapter {
       };
     }
 
-    const byEmail = await this.findBusinessPartnerByEmail(sapConfig, mappedEmail);
-    if (byEmail?.CardCode) {
+    const byDefaultField = await this.findBusinessPartnerByField(
+      sapConfig,
+      defaultFindSAP,
+      defaultFindSAPValue
+    );
+    if (byDefaultField?.CardCode) {
       return {
-        cardCode: byEmail.CardCode,
+        cardCode: byDefaultField.CardCode,
         created: false,
-        matchedBy: 'email',
-        businessPartner: byEmail,
+        matchedBy: defaultFindSAP,
+        businessPartner: byDefaultField,
         requestPayload: null,
         responsePayload: {
-          matchedBy: 'email',
-          businessPartner: byEmail,
+          matchedBy: defaultFindSAP,
+          businessPartner: byDefaultField,
         },
       };
     }
@@ -212,6 +239,12 @@ export class SapWebhookOrderAdapter {
 
     if (resolvedCardCode) {
       payload.CardCode = resolvedCardCode;
+    } else {
+      const resolvedDefaultSeries = await resolveDefaultSeries(tenantModels);
+
+      if (resolvedDefaultSeries) {
+        payload.Series = resolvedDefaultSeries;
+      }
     }
 
     const created = await this.request(sapConfig, {
