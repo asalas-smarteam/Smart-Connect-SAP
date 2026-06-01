@@ -277,6 +277,62 @@ describe('SyncLineItemPrices', () => {
     ]);
   });
 
+  it('stores SAP price in configured property and updates price with percentage miscellaneous', async () => {
+    const { useCase, credentialRepository, sapPriceClient, hubspotPriceClient } = createUseCase();
+
+    credentialRepository.resolveMiscPriceCalculationConfig = jest.fn().mockResolvedValue({
+      enableMiscPriceCalculation: true,
+      originalPriceTargetProperty: 'safe_amount',
+      miscSourceProperty: 'misc',
+      miscCalculationType: 'porcentual',
+    });
+    sapPriceClient.fetchBusinessPartnerPrice.mockResolvedValue({
+      Price: 100,
+      Currency: 'USD',
+      Discount: 0,
+    });
+
+    const result = await useCase.execute(
+      {
+        dealId: 'deal-1',
+        cardCode: 'C20000',
+        lineItems: [{ itemCode: 'A0001', id: 'line-1', quantity: 2, misc: '15' }],
+      },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    expect(credentialRepository.resolveMiscPriceCalculationConfig).toHaveBeenCalledWith({
+      tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+    });
+    expect(hubspotPriceClient.updateLineItems).toHaveBeenCalledWith({
+      token: 'hubspot-token',
+      enrichedLineItems: [
+        expect.objectContaining({
+          id: 'line-1',
+          Price: 115,
+          originalPrice: 100,
+          originalPriceTargetProperty: 'safe_amount',
+          lineTotal: 230,
+        }),
+      ],
+      tenantKey: 'tenant_1',
+    });
+    expect(result.data).toMatchObject({
+      totalAmount: 230,
+      lineItems: [
+        expect.objectContaining({
+          Price: 115,
+          originalPrice: 100,
+          originalPriceTargetProperty: 'safe_amount',
+        }),
+      ],
+    });
+  });
+
   it('attaches sync log details when an injected adapter fails', async () => {
     const hubspotError = new Error('HubSpot API request failed');
     const hubspotPriceClient = {

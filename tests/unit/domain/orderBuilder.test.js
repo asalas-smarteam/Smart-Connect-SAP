@@ -67,4 +67,32 @@ describe('order-builder.service mapDocumentLines', () => {
       ],
     })).toThrow('TaxCode is not configured for hs_tax_rate 15.0000');
   });
+
+  it('uses configured original price property as SAP UnitPrice when misc calculation is active', () => {
+    const lines = mapDocumentLines({
+      productMappings,
+      taxCodes: [],
+      miscPriceCalculationConfig: {
+        enableMiscPriceCalculation: true,
+        originalPriceTargetProperty: 'safe_amount',
+      },
+      lineItems: [
+        {
+          hs_sku: 'A56010004',
+          quantity: '2',
+          price: '115',
+          safe_amount: '100',
+        },
+      ],
+    });
+
+    expect(lines).toEqual([
+      {
+        ItemCode: 'A56010004',
+        Quantity: 2,
+        UnitPrice: 100,
+        WarehouseCode: undefined,
+      },
+    ]);
+  });
 });

@@ -37,6 +37,11 @@ function buildTenantModels() {
       create: jest.fn().mockResolvedValue({ _id: 'event-1' }),
       updateOne: jest.fn().mockResolvedValue({ acknowledged: true }),
     },
+    Configuration: {
+      findOne: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue(null),
+      }),
+    },
   };
 }
 
@@ -240,6 +245,82 @@ describe('lineItemPriceWebhook.service', () => {
       'hubspot-token',
       '/crm/v3/objects/deals/58986911596',
       { associations: 'companies,contacts,line_items' }
+    );
+  });
+
+  it('includes configured misc line item property in the legacy payload', async () => {
+    const tenantModels = buildTenantModels();
+
+    tenantModels.Configuration.findOne = jest.fn().mockReturnValue({
+      lean: jest.fn().mockResolvedValue({
+        key: 'requireExtraValueInUnitPrice',
+        value: {
+          enableMiscPriceCalculation: true,
+          originalPriceTargetProperty: 'safe_amount',
+          miscSourceProperty: 'misc',
+          miscCalculationType: 'porcentual',
+        },
+      }),
+    });
+
+    mockGetAccessToken.mockResolvedValue('hubspot-token');
+    mockHubspotGet.mockImplementation(async (_token, path) => {
+      if (path === '/crm/v3/objects/deals/58986911596') {
+        return {
+          id: '58986911596',
+          associations: {
+            companies: { results: [{ id: '201' }] },
+            contacts: { results: [] },
+            line_items: { results: [{ id: '54118822955' }] },
+          },
+        };
+      }
+
+      if (path === '/crm/v3/objects/companies/201') {
+        return {
+          id: '201',
+          properties: { idsap: 'CL00129' },
+        };
+      }
+
+      if (path === '/crm/v3/objects/line_items/54118822955') {
+        return {
+          id: '54118822955',
+          properties: {
+            hs_sku: 'A01050211',
+            quantity: '2',
+            misc: '15',
+          },
+        };
+      }
+
+      return null;
+    });
+
+    const result = await lineItemPriceWebhookService.preparePayload(
+      {
+        eventId: 797713315,
+        subscriptionId: 6174090,
+        portalId: 50564010,
+        appId: 31481725,
+        occurredAt: 1775764313528,
+        associationType: 'DEAL_TO_LINE_ITEM',
+        changeSource: 'USER',
+        fromObjectId: 58986911596,
+      },
+      {
+        tenantModels,
+        tenant: { client: { hubspot: { portalId: '50564010' } } },
+      }
+    );
+
+    expect(result.payload.lineItems).toEqual([
+      { id: '54118822955', itemCode: 'A01050211', quantity: '2', misc: '15' },
+    ]);
+    expect(mockHubspotGet).toHaveBeenCalledWith(
+      'hubspot-token',
+      '/crm/v3/objects/line_items/54118822955',
+      { properties: 'hs_sku,quantity,misc' }
     );
   });
 

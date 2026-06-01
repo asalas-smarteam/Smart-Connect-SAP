@@ -113,6 +113,25 @@ export class TenantLineItemPriceConfigRepository {
     return normalizeTaxSettings(configuration);
   }
 
+  async resolveMiscPriceCalculationConfig({ tenantModels }) {
+    const Configuration = tenantModels?.Configuration;
+
+    if (typeof Configuration?.findOne !== 'function') {
+      return null;
+    }
+
+    const query = Configuration.findOne({ key: 'requireExtraValueInUnitPrice' });
+    const configuration = typeof query?.lean === 'function'
+      ? await query.lean()
+      : await query;
+
+    const rawConfiguration = typeof configuration?.toObject === 'function'
+      ? configuration.toObject()
+      : configuration;
+
+    return rawConfiguration?.value ?? null;
+  }
+
   async resolveWarehouseStockProperties({ tenantModels, itemWarehouseInfoCollection }) {
     return getHubspotWarehouseStockPropertiesForTenant(
       tenantModels,

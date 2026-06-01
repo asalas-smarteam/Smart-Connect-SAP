@@ -2,6 +2,7 @@ import SyncLineItemPrices from '#application/use-cases/SyncLineItemPrices.js';
 import HubspotLineItemPriceClient from '#infrastructure/external-services/HubspotLineItemPriceClient.js';
 import SapLineItemPriceClient from '#infrastructure/external-services/SapLineItemPriceClient.js';
 import TenantLineItemPriceConfigRepository from '#infrastructure/repositories/TenantLineItemPriceConfigRepository.js';
+import logger from '#infrastructure/logger/logger.js';
 import syncLogAdapter from '#infrastructure/sync/SyncLogAdapter.js';
 import requestTenantModelsAdapter from '#infrastructure/tenants/RequestTenantModelsAdapter.js';
 import lineItemPriceWebhookPayloadAdapter from '#infrastructure/webhook/LineItemPriceWebhookPayloadAdapter.js';
@@ -25,6 +26,7 @@ export function buildSyncLineItemPrices({
     buildWebhookSyncErrorEntry: syncLogGateway
       ? (entry) => syncLogGateway.buildWebhookSyncErrorEntry(entry)
       : buildWebhookErrorEntry,
+    logger,
   });
 }
 

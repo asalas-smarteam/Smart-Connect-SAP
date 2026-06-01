@@ -1,3 +1,5 @@
+import { calculateUnitPriceWithMisc } from '#domain/prices/misc-price-calculation.service.js';
+
 const SAP_ITEM_PRICES_SELECT_PATH = '/b1s/v2/Items';
 const DEFAULT_SAP_ITEM_SELECT_FIELDS = ['ItemPrices', 'ItemWarehouseInfoCollection'];
 
@@ -110,6 +112,7 @@ export class SyncLineItemPrices {
     buildErrorResponseSnapshot,
     buildWebhookSyncErrorEntry,
     dateProvider = () => new Date(),
+    logger = { warn: () => {} },
   }) {
     this.credentialRepository = credentialRepository;
     this.sapPriceClient = sapPriceClient;
@@ -117,6 +120,7 @@ export class SyncLineItemPrices {
     this.buildErrorResponseSnapshot = buildErrorResponseSnapshot;
     this.buildWebhookSyncErrorEntry = buildWebhookSyncErrorEntry;
     this.dateProvider = dateProvider;
+    this.logger = logger;
   }
 
   async execute(payload, { tenantModels, tenant, tenantKey }) {
@@ -148,6 +152,9 @@ export class SyncLineItemPrices {
       const taxSettings = typeof this.credentialRepository.resolveTenantTaxSettings === 'function'
         ? await this.credentialRepository.resolveTenantTaxSettings({ tenantModels })
         : { fieldItem: null, taxCodes: [] };
+      const miscPriceCalculationConfig = typeof this.credentialRepository.resolveMiscPriceCalculationConfig === 'function'
+        ? await this.credentialRepository.resolveMiscPriceCalculationConfig({ tenantModels })
+        : null;
       const itemSelectFields = buildItemSelectFields(taxSettings?.fieldItem);
       const sapCredentialsData = typeof sapCredentials?.toObject === 'function'
         ? sapCredentials.toObject()
@@ -231,18 +238,44 @@ export class SyncLineItemPrices {
           itemWarehouseInfoCollection: sapItemStockData?.ItemWarehouseInfoCollection,
         });
         const tax = taxSettings?.taxCodes?.find((entry) => toNonEmptyString(entry?.Code) === toNonEmptyString(sapItemStockData?.[taxSettings.fieldItem])) || {};
+        const discount = resolveTaxRate({
+          sapItemData: sapItemStockData,
+          taxSettings,
+          fallbackDiscount: normalizeNumber(priceData?.Discount, 0),
+        });
         const quantity = normalizeQuantity(lineItem.quantity ?? lineItem.Quantity);
-        const price = roundCurrency(priceData?.Price ?? 0);
+        const priceCalculation = calculateUnitPriceWithMisc({
+          sapPrice: priceData?.Price ?? 0,
+          lineItem,
+          config: miscPriceCalculationConfig,
+        });
+        const price = priceCalculation.price;
         const lineTotal = roundCurrency(quantity * price);
+
+        if (priceCalculation.warning) {
+          this.logger.warn({
+            msg: priceCalculation.warning,
+            tenantKey,
+            itemCode,
+            lineItemId: id,
+          });
+        }
 
         enrichedLineItems.push({
           itemCode,
           id,
           quantity,
           Price: price,
+          ...(priceCalculation.originalPriceTargetProperty
+            ? {
+              originalPrice: priceCalculation.originalPrice,
+              originalPriceTargetProperty: priceCalculation.originalPriceTargetProperty,
+            }
+            : {}),
           Currency: priceData?.Currency ?? null,
+          Discount: discount,
           lineTotal,
-          tax: tax.HSCode,
+          ...(toNonEmptyString(tax.HSCode) ? { tax: tax.HSCode } : {}),
           warehouseStockProperties,
         });
       }

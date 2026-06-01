@@ -74,7 +74,7 @@ describe('lineItemPrice.service syncPrices', () => {
     jest.useRealTimers();
   });
 
-  function buildTenantModels({ taxCodesConfig = null } = {}) {
+  function buildTenantModels({ taxCodesConfig = null, miscPriceConfig = null } = {}) {
     const configurationFindOneAndUpdate = jest.fn().mockImplementation(async (filter) => {
       if (filter?.key === 'priceList') {
         return {
@@ -100,6 +100,10 @@ describe('lineItemPrice.service syncPrices', () => {
     const configurationFindOne = jest.fn().mockImplementation(async (filter) => {
       if (filter?.key === 'taxCodes') {
         return taxCodesConfig;
+      }
+
+      if (filter?.key === 'requireExtraValueInUnitPrice') {
+        return miscPriceConfig;
       }
 
       return null;
@@ -336,6 +340,68 @@ describe('lineItemPrice.service syncPrices', () => {
             price: '704.35',
             quantity: '2',
             discount: '15',
+            A01_stock: 0,
+            B02_stock: 0,
+          },
+        },
+      ],
+    });
+  });
+
+  it('updates line item price with misc percentage and stores original SAP price in configured property', async () => {
+    const tenantModels = buildTenantModels({
+      miscPriceConfig: {
+        key: 'requireExtraValueInUnitPrice',
+        value: {
+          enableMiscPriceCalculation: true,
+          originalPriceTargetProperty: 'safe_amount',
+          miscSourceProperty: 'misc',
+          miscCalculationType: 'porcentual',
+        },
+      },
+    });
+
+    mockGetSessionCookie.mockResolvedValue({ cookie: 'B1SESSION=abc' });
+    mockAxiosPost.mockResolvedValueOnce({
+      data: { Price: 100, Currency: 'USD', Discount: 0 },
+    });
+    mockAxiosGet.mockResolvedValueOnce({
+      data: {
+        ItemPrices: [],
+        ItemWarehouseInfoCollection: [],
+      },
+    });
+    mockGetAccessToken.mockResolvedValue('hubspot-token');
+    mockFindProductBySKU.mockResolvedValueOnce({ id: 'product-1' });
+    mockBatchUpdateLineItems.mockResolvedValue({
+      results: [{ id: '53747313682' }],
+    });
+    mockBatchUpdateProducts.mockResolvedValue({
+      results: [{ id: 'product-1' }],
+    });
+
+    const result = await lineItemPriceService.syncPrices(
+      {
+        cardCode: 'C20000',
+        lineItems: [{ itemCode: 'A0001', id: '53747313682', quantity: 2, misc: '15' }],
+      },
+      {
+        tenantModels,
+        tenant: { client: { hubspot: { portalId: '12345' } } },
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    expect(result.data.totalAmount).toBe(230);
+    expect(mockBatchUpdateLineItems).toHaveBeenCalledWith('hubspot-token', {
+      inputs: [
+        {
+          id: '53747313682',
+          properties: {
+            price: '115',
+            safe_amount: '100',
+            quantity: '2',
+            discount: '0',
             A01_stock: 0,
             B02_stock: 0,
           },

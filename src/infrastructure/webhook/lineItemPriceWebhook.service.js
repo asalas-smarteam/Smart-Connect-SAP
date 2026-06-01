@@ -67,6 +67,21 @@ async function fetchHubspotObject(token, objectType, objectId, { properties = []
   );
 }
 
+async function resolveMiscPriceCalculationConfig(tenantModels) {
+  const Configuration = tenantModels?.Configuration;
+
+  if (typeof Configuration?.findOne !== 'function') {
+    return null;
+  }
+
+  const query = Configuration.findOne({ key: 'requireExtraValueInUnitPrice' });
+  const configuration = typeof query?.lean === 'function'
+    ? await query.lean()
+    : await query;
+
+  return configuration?.value ?? null;
+}
+
 function extractAssociationIds(record, associationName) {
   const results = Array.isArray(record?.associations?.[associationName]?.results)
     ? record.associations[associationName].results
@@ -117,7 +132,7 @@ async function resolveCardCode(token, deal) {
   return null;
 }
 
-async function resolveLineItems(token, deal) {
+async function resolveLineItems(token, deal, miscPriceCalculationConfig = null) {
   const lineItemIds = [
     ...extractAssociationIds(deal, 'line_items'),
     ...extractAssociationIds(deal, 'lineItems'),
@@ -129,10 +144,16 @@ async function resolveLineItems(token, deal) {
     throw new Error('Deal has no associated line items');
   }
 
+  const miscSourceProperty = miscPriceCalculationConfig?.enableMiscPriceCalculation === true
+    ? toNonEmptyString(miscPriceCalculationConfig?.miscSourceProperty)
+    : null;
+  const lineItemProperties = ['hs_sku', 'quantity', miscSourceProperty]
+    .filter((value, index, values) => value && values.indexOf(value) === index);
+
   const lineItems = await Promise.all(
     lineItemIds.map(async (lineItemId, index) => {
       const lineItem = await fetchHubspotObject(token, 'line_items', lineItemId, {
-        properties: ['hs_sku', 'quantity'],
+        properties: lineItemProperties,
       });
       const itemCode = toNonEmptyString(lineItem?.properties?.hs_sku || lineItem?.properties?.itemCode);
 
@@ -144,6 +165,9 @@ async function resolveLineItems(token, deal) {
         id: toNonEmptyString(lineItem?.id) || lineItemId,
         itemCode,
         quantity: lineItem?.properties?.quantity ?? null,
+        ...(miscSourceProperty
+          ? { [miscSourceProperty]: lineItem?.properties?.[miscSourceProperty] ?? null }
+          : {}),
       };
     })
   );
@@ -151,7 +175,7 @@ async function resolveLineItems(token, deal) {
   return lineItems;
 }
 
-async function buildLegacyPayload(payload, token) {
+async function buildLegacyPayload(payload, token, miscPriceCalculationConfig = null) {
   const dealId = toNonEmptyString(payload?.fromObjectId);
 
   if (!dealId) {
@@ -165,7 +189,7 @@ async function buildLegacyPayload(payload, token) {
   return {
     dealId,
     cardCode: await resolveCardCode(token, deal),
-    lineItems: await resolveLineItems(token, deal),
+    lineItems: await resolveLineItems(token, deal, miscPriceCalculationConfig),
   };
 }
 
@@ -258,10 +282,11 @@ const lineItemPriceWebhookService = {
         hubspotCredentials,
         tenantModels
       );
+      const miscPriceCalculationConfig = await resolveMiscPriceCalculationConfig(tenantModels);
 
       return {
         skip: false,
-        payload: await buildLegacyPayload(payload, token),
+        payload: await buildLegacyPayload(payload, token, miscPriceCalculationConfig),
         executionId: createdEvent._id,
       };
     } catch (error) {

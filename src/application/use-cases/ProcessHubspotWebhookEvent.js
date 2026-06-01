@@ -46,7 +46,13 @@ export class ProcessHubspotWebhookEvent {
         portalId,
       });
 
-      const { mappings, sapConfig, hubspotCredentials, taxCodes } = context;
+      const {
+        mappings,
+        sapConfig,
+        hubspotCredentials,
+        taxCodes,
+        miscPriceCalculationConfig,
+      } = context;
       const mappedCompany = mapHubspotToSapFields(company || {}, mappings.companyMappings);
       const mappedContact = mapHubspotToSapFields(contact || {}, mappings.contactBusinessPartnerMappings);
       const businessPartnerResult = await this.sapOrderAdapter.findOrCreateBusinessPartner({
@@ -139,6 +145,7 @@ export class ProcessHubspotWebhookEvent {
         lineItems,
         productMappings: mappings.productMappings,
         taxCodes,
+        miscPriceCalculationConfig,
       });
       const orderPayload = buildOrderPayload({
         cardCode,

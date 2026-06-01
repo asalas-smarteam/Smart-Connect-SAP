@@ -93,17 +93,37 @@ function resolveTaxCodeByRate(taxCodes, taxRate) {
   return taxCode;
 }
 
-export function mapDocumentLines({ lineItems, productMappings, taxCodes = [] }) {
+function resolveUnitPrice({ mapped, lineItem, miscPriceCalculationConfig }) {
+  const originalPriceTargetProperty = toNonEmptyString(
+    miscPriceCalculationConfig?.originalPriceTargetProperty
+  );
+  const configuredOriginalPrice = originalPriceTargetProperty
+    ? normalizeNumber(pickByPath(lineItem, originalPriceTargetProperty), null)
+    : null;
+
+  if (miscPriceCalculationConfig?.enableMiscPriceCalculation) {
+    return configuredOriginalPrice;
+  }
+
+  return normalizeNumber(
+    mapped?.UnitPrice ?? lineItem?.hs_effective_unit_price,
+    0
+  );
+}
+
+export function mapDocumentLines({
+  lineItems,
+  productMappings,
+  taxCodes = [],
+  miscPriceCalculationConfig = null,
+}) {
   const lines = [];
 
   for (const lineItem of lineItems) {
     const mapped = mapHubspotToSapFields(lineItem, productMappings);
     const itemCode = toNonEmptyString(mapped?.ItemCode || lineItem?.hs_sku || lineItem?.itemCode);
     const quantity = normalizeNumber(mapped?.Quantity ?? lineItem?.quantity, 1);
-    const unitPrice = normalizeNumber(
-      mapped?.UnitPrice ?? lineItem?.hs_effective_unit_price,
-      0
-    );
+    const unitPrice = resolveUnitPrice({ mapped, lineItem, miscPriceCalculationConfig });
 
     if (!itemCode) {
       throw new PermanentWebhookError('ItemCode/hs_sku is required in line_items mapping');

@@ -24,15 +24,26 @@ function roundCurrency(value) {
 
 function buildHubspotBatchPayload(enrichedLineItems) {
   return {
-    inputs: enrichedLineItems.map((lineItem) => ({
-      id: String(lineItem.id),
-      properties: {
-        price: String(roundCurrency(lineItem.Price ?? 0)),
-        quantity: String(normalizeQuantity(lineItem.quantity ?? lineItem.Quantity)),
-        hs_tax_rate_group_id: String(lineItem.tax ?? lineItem.HSCode),
-        ...(lineItem.warehouseStockProperties || {}),
-      },
-    })),
+    inputs: enrichedLineItems.map((lineItem) => {
+      const taxRateGroupId = toNonEmptyString(lineItem.tax ?? lineItem.HSCode);
+
+      return {
+        id: String(lineItem.id),
+        properties: {
+          price: String(roundCurrency(lineItem.Price ?? 0)),
+          ...(toNonEmptyString(lineItem.originalPriceTargetProperty)
+            ? {
+              [lineItem.originalPriceTargetProperty]: String(roundCurrency(lineItem.originalPrice ?? 0)),
+            }
+            : {}),
+          quantity: String(normalizeQuantity(lineItem.quantity ?? lineItem.Quantity)),
+          ...(taxRateGroupId
+            ? { hs_tax_rate_group_id: taxRateGroupId }
+            : { discount: String(normalizeNumber(lineItem.Discount ?? lineItem.discount, 0)) }),
+          ...(lineItem.warehouseStockProperties || {}),
+        },
+      };
+    }),
   };
 }
 

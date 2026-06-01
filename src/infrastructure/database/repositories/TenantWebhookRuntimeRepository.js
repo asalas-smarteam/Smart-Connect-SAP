@@ -32,6 +32,7 @@ export class TenantWebhookRuntimeRepository {
       productMappings,
       dealMappings,
       taxCodes,
+      miscPriceCalculationConfig,
     ] = await Promise.all([
       mappingService.getMappingsByObjectType(hubspotCredentialId, 'company', 'businessPartner', tenantModels),
       mappingService.getMappingsByObjectType(hubspotCredentialId, 'contact', 'businessPartner', tenantModels),
@@ -39,6 +40,7 @@ export class TenantWebhookRuntimeRepository {
       mappingService.getMappingsByObjectType(hubspotCredentialId, 'product', 'product', tenantModels),
       mappingService.getMappingsByObjectType(hubspotCredentialId, 'deal', 'businessPartner', tenantModels),
       tenantConfigurationService.getValue(tenantModels, 'taxCodes', []),
+      this.resolveMiscPriceCalculationConfig(tenantModels),
     ]);
 
     return {
@@ -56,7 +58,23 @@ export class TenantWebhookRuntimeRepository {
         dealMappings,
       },
       taxCodes,
+      miscPriceCalculationConfig,
     };
+  }
+
+  async resolveMiscPriceCalculationConfig(tenantModels) {
+    const Configuration = tenantModels?.Configuration;
+
+    if (typeof Configuration?.findOne !== 'function') {
+      return null;
+    }
+
+    const query = Configuration.findOne({ key: 'requireExtraValueInUnitPrice' });
+    const configuration = typeof query?.lean === 'function'
+      ? await query.lean()
+      : await query;
+
+    return configuration?.value ?? null;
   }
 
   async resolveDefaultPriceListNum(tenantModels) {
