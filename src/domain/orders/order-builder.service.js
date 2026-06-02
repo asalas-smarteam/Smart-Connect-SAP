@@ -123,6 +123,7 @@ export function mapDocumentLines({
     const mapped = mapHubspotToSapFields(lineItem, productMappings);
     const itemCode = toNonEmptyString(mapped?.ItemCode || lineItem?.hs_sku || lineItem?.itemCode);
     const quantity = normalizeNumber(mapped?.Quantity ?? lineItem?.quantity, 1);
+    const discount = normalizeNumber(lineItem?.hs_discount_percentage, 0);
     const unitPrice = resolveUnitPrice({ mapped, lineItem, miscPriceCalculationConfig });
 
     if (!itemCode) {
@@ -137,6 +138,7 @@ export function mapDocumentLines({
       ItemCode: itemCode,
       Quantity: quantity,
       UnitPrice: Number.isFinite(unitPrice) ? unitPrice : 0,
+      DiscountPercent: discount,
       WarehouseCode: lineItem.warehouses,
     };
     const taxCode = resolveTaxCodeByRate(taxCodes, lineItem?.hs_tax_rate);
