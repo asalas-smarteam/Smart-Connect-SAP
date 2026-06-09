@@ -1,4 +1,19 @@
 import TenantContextService from '#application/services/tenant-context.service.js';
+import {
+  buildSapSyncAdmin,
+  buildSapSyncTenantRepository,
+  buildSyncSapConfigToHubspot,
+  buildTenantSapSyncLockAdapter,
+} from '#composition/sap-sync.composition.js';
+import {
+  buildLineItemPriceControllerDependencies,
+  buildSyncLineItemPrices,
+} from '#composition/line-item-prices.composition.js';
+import {
+  buildProcessHubspotWebhookEventUseCase,
+  buildProcessWebhookDealEventBatch,
+  buildWebhookEventRepository,
+} from '#composition/webhook-processing.composition.js';
 import { HubspotLineItemPriceClient } from '#infrastructure/external-services/HubspotLineItemPriceClient.js';
 import { SapLineItemPriceClient } from '#infrastructure/external-services/SapLineItemPriceClient.js';
 import MongooseTenantConfigRepository from '#infrastructure/database/repositories/MongooseTenantConfigRepository.js';
@@ -26,6 +41,28 @@ export function createApplicationContainer() {
     },
     services: {
       tenantContext: new TenantContextService({ tenantConfigRepository }),
+    },
+    useCases: {
+      sapSync: buildSyncSapConfigToHubspot(),
+      syncLineItemPrices: buildSyncLineItemPrices(),
+      processHubspotWebhookEvent: buildProcessHubspotWebhookEventUseCase(),
+    },
+    builders: {
+      sapSync: {
+        syncConfigToHubspot: buildSyncSapConfigToHubspot,
+        tenantRepository: buildSapSyncTenantRepository,
+        tenantLock: buildTenantSapSyncLockAdapter,
+        admin: buildSapSyncAdmin,
+      },
+      lineItemPrice: {
+        sync: buildSyncLineItemPrices,
+        controllerDependencies: buildLineItemPriceControllerDependencies,
+      },
+      webhook: {
+        processEvent: buildProcessHubspotWebhookEventUseCase,
+        processBatch: buildProcessWebhookDealEventBatch,
+        eventRepository: buildWebhookEventRepository,
+      },
     },
     externalServices: {
       hubspot: hubspotClientAdapter,

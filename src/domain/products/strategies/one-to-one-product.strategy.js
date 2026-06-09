@@ -12,7 +12,7 @@ export class OneToOneProductStrategy {
     mappedRecords,
     config,
     objectType,
-    tenantModels,
+    tenantContext,
     credentials,
     tenantId,
   }) {
@@ -30,7 +30,7 @@ export class OneToOneProductStrategy {
         mappedRecords,
         config,
         objectType,
-        tenantModels,
+        tenantContext,
         credentials,
       });
 

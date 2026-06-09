@@ -138,9 +138,13 @@ export function mapDocumentLines({
       ItemCode: itemCode,
       Quantity: quantity,
       UnitPrice: Number.isFinite(unitPrice) ? unitPrice : 0,
-      DiscountPercent: discount,
       WarehouseCode: lineItem.warehouses,
     };
+
+    if (discount !== 0) {
+      line.DiscountPercent = discount;
+    }
+
     const taxCode = resolveTaxCodeByRate(taxCodes, lineItem?.hs_tax_rate);
 
     if (taxCode) {

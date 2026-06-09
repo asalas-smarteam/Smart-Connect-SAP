@@ -2,7 +2,6 @@ import { appendFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import SendMappedItemsToHubspot from '#application/use-cases/SendMappedItemsToHubspot.js';
 import MainDataInUpdateConfigRepository from '#infrastructure/config/MainDataInUpdateConfigRepository.js';
-import associationOrchestrator from '#infrastructure/hubspot/associationOrchestrator.js';
 import associationRegistryService from '#infrastructure/hubspot/associationRegistryService.js';
 import companyHandler from '#infrastructure/hubspot/handlers/company.handler.js';
 import contactHandler from '#infrastructure/hubspot/handlers/contact.handler.js';
@@ -11,6 +10,7 @@ import productHandler from '#infrastructure/hubspot/handlers/product.handler.js'
 import hubspotAuthService from '#infrastructure/hubspot/hubspotAuthService.js';
 import * as hubspotClient from '#infrastructure/hubspot/hubspotClient.js';
 import sapSyncAdapter from '#infrastructure/hubspot/sapSyncAdapter.js';
+import { buildHandleHubspotAssociations } from './hubspot-associations.composition.js';
 
 const validationFailuresFile = path.resolve(
   process.cwd(),
@@ -30,11 +30,15 @@ export const validationFailureWriter = {
 };
 
 export function buildSendMappedItemsToHubspot() {
+  const handleHubspotAssociations = buildHandleHubspotAssociations();
+
   return new SendMappedItemsToHubspot({
     tokenProvider: hubspotAuthService,
     productBatchClient: hubspotClient,
     associationRegistry: associationRegistryService,
-    associationHandler: associationOrchestrator,
+    associationHandler: {
+      handleAssociations: (input) => handleHubspotAssociations.execute(input),
+    },
     sapHubspotIdUpdater: sapSyncAdapter,
     validationFailureWriter,
     mainDataInUpdateConfigRepository: new MainDataInUpdateConfigRepository(),

@@ -194,13 +194,13 @@ export class SendMappedItemsToHubspot {
       } else {
         created = await handler.create({ token, item, clientConfig, tenantModels });
 
-        await this.sapHubspotIdUpdater.updateHubspotIdInSap({
+        /*await this.sapHubspotIdUpdater.updateHubspotIdInSap({
           clientConfig,
           objectType,
           sapRecord: item?.properties ?? {},
           hubspotId: created?.id,
           tenantModels,
-        });
+        });*/
 
         await this.registerBaseMapping(
           clientConfig,

@@ -2,13 +2,13 @@ import logger from '../logger/logger.adapter.js';
 import spMode from './modes/spMode.js';
 import scriptMode from './modes/scriptMode.js';
 import apiMode from './modes/apiMode.js';
-import mappingService from '../database/repositories/mapping.service.js';
 import serviceLayerService from './serviceLayer.service.js';
-import { ensureDefaultProductMappings } from '#application/services/defaultClientConfigMappings.service.js';
 
 export class SapSyncDataAdapter {
-  async fetchData({ clientConfigId, tenantModels, fetchOptions = {} }) {
+  async fetchData({ clientConfigId, clientConfig = null, tenantContext, fetchOptions = {} }) {
     try {
+      const tenantModels = tenantContext?.tenantModels;
+
       if (!tenantModels) {
         throw new Error('Tenant models are required to fetch SAP data');
       }
@@ -31,39 +31,27 @@ export class SapSyncDataAdapter {
         case 'API':
           return apiMode.execute(config);
         case 'SERVICE_LAYER':
-          return this.fetchServiceLayerData({ config, tenantModels, SapCredentials, fetchOptions });
+          return this.fetchServiceLayerData({ config, SapCredentials, fetchOptions });
         default:
           return null;
       }
     } catch (error) {
       logger.error('Error fetching SAP data', { error });
-      return null;
+      throw new Error(`Failed to fetch SAP data: ${error.message}`);
     }
   }
 
-  async fetchServiceLayerData({ config, tenantModels, SapCredentials, fetchOptions }) {
+  async fetchServiceLayerData({ config, SapCredentials, fetchOptions }) {
     const sapCredentials = await SapCredentials.find().lean();
 
     if (!sapCredentials || sapCredentials.length === 0) {
       throw new Error('SAP credentials not found for SERVICE_LAYER mode');
     }
 
-    if (config.objectType === 'product') {
-      await ensureDefaultProductMappings({
-        FieldMapping: tenantModels.FieldMapping,
-        clientConfig: config,
-      });
-    }
-
-    const mappings = await mappingService.getMappingsByObjectType(
-      config.hubspotCredentialId,
-      config.objectType,
-      'businessPartner',
-      tenantModels
-    );
+    const mappings = Array.isArray(fetchOptions.mappings) ? fetchOptions.mappings : [];
     const mergedConfig = {
       ...sapCredentials[0],
-      ...config.toObject(),
+      ...(typeof config.toObject === 'function' ? config.toObject() : config),
     };
 
     return serviceLayerService.execute(mergedConfig, mappings, fetchOptions);
@@ -71,4 +59,3 @@ export class SapSyncDataAdapter {
 }
 
 export default SapSyncDataAdapter;
-

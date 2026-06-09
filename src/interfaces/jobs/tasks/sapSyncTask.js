@@ -16,7 +16,13 @@ export async function runSapSyncOnce({
     const { tenantModels, configs } = await tenantRepository.findActiveConfigs(client.tenantKey);
 
     for (const config of configs) {
-      await syncUseCase.execute({ config, tenantModels });
+      await syncUseCase.execute({
+        config,
+        tenantContext: {
+          tenantKey: client.tenantKey,
+          tenantModels,
+        },
+      });
     }
   }
 }

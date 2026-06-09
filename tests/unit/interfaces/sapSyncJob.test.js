@@ -62,7 +62,13 @@ describe('sap sync job processor', () => {
       configId: 'cfg-1',
     });
     expect(lockAdapter.acquire).toHaveBeenCalledWith('tenant-a');
-    expect(syncUseCase.execute).toHaveBeenCalledWith({ config, tenantModels });
+    expect(syncUseCase.execute).toHaveBeenCalledWith({
+      config,
+      tenantContext: {
+        tenantKey: 'tenant-a',
+        tenantModels,
+      },
+    });
     expect(lockAdapter.release).toHaveBeenCalledWith(lock);
     expect(result).toEqual(expect.objectContaining({
       ok: true,

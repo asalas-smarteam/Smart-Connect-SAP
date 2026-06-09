@@ -6,6 +6,8 @@ export class SyncSapConfigToHubspot {
     mappingRepository,
     hubspotSyncTarget,
     syncLogRepository,
+    clientConfigRepository,
+    hubspotCredentialRepository,
     productSyncConfigRepository = null,
     productSyncStrategyFactory = null,
     dateProvider = () => new Date(),
@@ -14,36 +16,66 @@ export class SyncSapConfigToHubspot {
     this.mappingRepository = mappingRepository;
     this.hubspotSyncTarget = hubspotSyncTarget;
     this.syncLogRepository = syncLogRepository;
+    this.clientConfigRepository = clientConfigRepository;
+    this.hubspotCredentialRepository = hubspotCredentialRepository;
     this.productSyncConfigRepository = productSyncConfigRepository;
     this.productSyncStrategyFactory = productSyncStrategyFactory;
     this.dateProvider = dateProvider;
   }
 
-  async execute({ config, tenantModels }) {
+  async execute({ config = null, configId = null, tenantContext }) {
     const startedAt = this.dateProvider();
-    const clientConfigId = config?.id;
+    let activeConfig = config;
+    const clientConfigId = configId ?? activeConfig?.id ?? activeConfig?._id ?? null;
     let syncLog = null;
 
     try {
+      if (!activeConfig && clientConfigId) {
+        activeConfig = await this.clientConfigRepository.findById({
+          tenantContext,
+          configId: clientConfigId,
+        });
+      }
+
       syncLog = await this.syncLogRepository.start({
-        tenantModels,
+        tenantContext,
         clientConfigId,
-        objectType: config?.objectType,
+        objectType: activeConfig?.objectType,
         startedAt,
       });
 
-      if (!config) {
+      if (!activeConfig) {
         throw new Error('Client configuration not found');
       }
 
-      const credentials = await tenantModels.HubspotCredentials.findById(
-        config.hubspotCredentialId
-      );
+      const credentials = await this.hubspotCredentialRepository.findByClientConfig({
+        tenantContext,
+        clientConfig: activeConfig,
+      });
 
-      const fetchOptions = buildSapFetchOptions(config, this.dateProvider);
+      await this.mappingRepository.ensureDefaultMappings({
+        tenantContext,
+        hubspotCredentialId: activeConfig.hubspotCredentialId,
+        objectType: activeConfig.objectType,
+        clientConfig: activeConfig,
+      });
+
+      const sourceContext = activeConfig.objectType === 'product' ? 'product' : 'businessPartner';
+      const sapMappings = await this.mappingRepository.findMappings({
+        tenantContext,
+        hubspotCredentialId: activeConfig.hubspotCredentialId,
+        objectType: activeConfig.objectType,
+        sourceContext,
+      });
+
+      const fetchOptions = {
+        ...buildSapFetchOptions(activeConfig, this.dateProvider),
+        mappings: sapMappings,
+      };
       const rawData = await this.sapDataSource.fetchData({
         clientConfigId,
-        tenantModels,
+        clientConfig: activeConfig,
+        tenantContext,
         fetchOptions,
       });
 
@@ -71,15 +103,15 @@ export class SyncSapConfigToHubspot {
       }
 
       if (!rawData || rawData.length === 0) {
-        return this.finishEmptySync({ syncLog, config });
+        return this.finishEmptySync({ syncLog, config: activeConfig, tenantContext });
       }
 
-      const objectType = config.objectType;
+      const objectType = activeConfig.objectType;
       const mappedRecords = await this.mappingRepository.mapRecords({
         sapRecords: rawData,
-        hubspotCredentialId: config.hubspotCredentialId,
+        hubspotCredentialId: activeConfig.hubspotCredentialId,
         objectType,
-        tenantModels,
+        tenantContext,
       });
       const mappedRecordsWithRawSap = mappedRecords.map((record, index) => ({
         ...record,
@@ -88,9 +120,9 @@ export class SyncSapConfigToHubspot {
 
       const hubspotResult = await this.sendMappedRecords({
         mappedRecords: mappedRecordsWithRawSap,
-        config,
+        config: activeConfig,
         objectType,
-        tenantModels,
+        tenantContext,
         credentials,
       });
       const metrics = this.buildMetrics({
@@ -107,8 +139,11 @@ export class SyncSapConfigToHubspot {
         finishedAt: this.dateProvider(),
       });
 
-      config.lastRun = this.dateProvider();
-      await config.save();
+      await this.clientConfigRepository.markSyncSucceeded({
+        tenantContext,
+        configId: activeConfig.id ?? activeConfig._id,
+        lastRun: this.dateProvider(),
+      });
       return {
         ok: true,
         status: 'completed',
@@ -131,9 +166,12 @@ export class SyncSapConfigToHubspot {
         finishedAt: this.dateProvider(),
       });
 
-      if (config) {
-        config.lastError = error.message;
-        await config.save();
+      if (activeConfig) {
+        await this.clientConfigRepository.markSyncFailed({
+          tenantContext,
+          configId: activeConfig.id ?? activeConfig._id,
+          errorMessage: error.message,
+        });
       }
 
       return {
@@ -164,7 +202,7 @@ export class SyncSapConfigToHubspot {
     };
   }
 
-  async finishEmptySync({ syncLog, config }) {
+  async finishEmptySync({ syncLog, config, tenantContext }) {
     const metrics = {
       recordsProcessed: 0,
       hubspotSent: 0,
@@ -180,8 +218,11 @@ export class SyncSapConfigToHubspot {
       finishedAt: this.dateProvider(),
     });
 
-    config.lastRun = this.dateProvider();
-    await config.save();
+    await this.clientConfigRepository.markSyncSucceeded({
+      tenantContext,
+      configId: config.id ?? config._id,
+      lastRun: this.dateProvider(),
+    });
     return {
       ok: true,
       status: 'completed',
@@ -193,12 +234,12 @@ export class SyncSapConfigToHubspot {
     mappedRecords,
     config,
     objectType,
-    tenantModels,
+    tenantContext,
     credentials,
   }) {
     if (objectType === 'product' && this.productSyncConfigRepository && this.productSyncStrategyFactory) {
       const strategyConfig = await this.productSyncConfigRepository.getProductSyncStrategyConfig({
-        tenantModels,
+        tenantContext,
       });
       const strategy = this.productSyncStrategyFactory.getStrategy(strategyConfig.strategy);
 
@@ -206,7 +247,7 @@ export class SyncSapConfigToHubspot {
         mappedRecords,
         config,
         objectType,
-        tenantModels,
+        tenantContext,
         credentials,
         tenantId: config?.tenantId ?? config?.tenantKey ?? null,
         tenantKey: config?.tenantKey ?? null,
@@ -219,7 +260,7 @@ export class SyncSapConfigToHubspot {
         mappedRecords,
         config,
         objectType,
-        tenantModels,
+        tenantContext,
         credentials,
       });
 

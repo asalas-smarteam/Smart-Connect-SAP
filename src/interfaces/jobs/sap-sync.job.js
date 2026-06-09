@@ -242,7 +242,10 @@ export function createSapSyncJobProcessor({
         triggerType,
       });
 
-      const syncResult = await syncUseCase.execute({ config, tenantModels });
+      const syncResult = await syncUseCase.execute({
+        config,
+        tenantContext: { tenantKey, tenantModels },
+      });
       const metrics = normalizeSyncMetrics(syncResult);
 
       const finishedAt = dateProvider();

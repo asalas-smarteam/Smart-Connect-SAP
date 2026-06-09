@@ -37,8 +37,8 @@ function normalizeStrategyConfig(value) {
 }
 
 export class ProductSyncStrategyConfigRepository {
-  async getProductSyncStrategyConfig({ tenantModels }) {
-    const Configuration = tenantModels?.Configuration;
+  async getProductSyncStrategyConfig({ tenantContext, tenantModels }) {
+    const Configuration = (tenantContext?.tenantModels ?? tenantModels)?.Configuration;
 
     if (typeof Configuration?.findOne !== 'function') {
       return { strategy: DEFAULT_PRODUCT_SYNC_STRATEGY };

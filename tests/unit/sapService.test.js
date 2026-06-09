@@ -3,7 +3,6 @@ import { jest } from '@jest/globals';
 const mockSpExecute = jest.fn();
 const mockScriptExecute = jest.fn();
 const mockApiExecute = jest.fn();
-const mockGetMappingsByObjectType = jest.fn();
 const mockServiceLayerExecute = jest.fn();
 
 jest.unstable_mockModule('../../src/infrastructure/sap/modes/spMode.js', () => ({
@@ -18,10 +17,6 @@ jest.unstable_mockModule('../../src/infrastructure/sap/modes/apiMode.js', () => 
   default: { execute: mockApiExecute },
 }));
 
-jest.unstable_mockModule('../../src/infrastructure/database/repositories/mapping.service.js', () => ({
-  default: { getMappingsByObjectType: mockGetMappingsByObjectType },
-}));
-
 jest.unstable_mockModule('../../src/infrastructure/sap/serviceLayer.service.js', () => ({
   default: { execute: mockServiceLayerExecute },
 }));
@@ -33,7 +28,7 @@ describe('sapService.fetchData', () => {
     jest.clearAllMocks();
   });
 
-  it('retrieves service-layer mappings by hubspotCredentialId and objectType', async () => {
+  it('passes service-layer mappings from fetch options to SAP transport', async () => {
     const config = {
       integrationModeId: { name: 'SERVICE_LAYER' },
       hubspotCredentialId: 'cred-1',
@@ -60,25 +55,18 @@ describe('sapService.fetchData', () => {
       },
     };
 
-    mockGetMappingsByObjectType.mockResolvedValue([{ sourceField: 'CardName', targetField: 'name' }]);
     mockServiceLayerExecute.mockResolvedValue([{ CardName: 'Acme' }]);
+    const mappings = [{ sourceField: 'CardName', targetField: 'name' }];
 
-    const result = await sapService.fetchData('client-config-1', tenantModels);
-
-    expect(mockGetMappingsByObjectType).toHaveBeenCalledWith(
-      'cred-1',
-      'company',
-      'businessPartner',
-      tenantModels
-    );
+    const result = await sapService.fetchData('client-config-1', tenantModels, { mappings });
     expect(mockServiceLayerExecute).toHaveBeenCalledWith(
       expect.objectContaining({
         serviceLayerBaseUrl: 'https://sap.example.com',
         hubspotCredentialId: 'cred-1',
         objectType: 'company',
       }),
-      [{ sourceField: 'CardName', targetField: 'name' }],
-      {}
+      mappings,
+      { mappings }
     );
     expect(result).toEqual([{ CardName: 'Acme' }]);
   });

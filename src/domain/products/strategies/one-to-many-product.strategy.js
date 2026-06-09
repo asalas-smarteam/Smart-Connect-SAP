@@ -71,7 +71,7 @@ export class OneToManyProductStrategy {
     mappedRecords,
     config,
     objectType,
-    tenantModels,
+    tenantContext,
     credentials,
     tenantId,
     tenantKey,
@@ -133,7 +133,7 @@ export class OneToManyProductStrategy {
         mappedRecords: expandedRecords,
         config,
         objectType,
-        tenantModels,
+        tenantContext,
         credentials,
       });
 

@@ -1,9 +1,13 @@
-import { buildSapSyncDataAdapter } from '#composition/sap-data.composition.js';
+import SapSyncDataAdapter from './SapSyncDataAdapter.js';
 
 const sapService = {
   async fetchData(clientConfigId, tenantModels, fetchOptions = {}) {
-    const adapter = buildSapSyncDataAdapter();
-    return adapter.fetchData({ clientConfigId, tenantModels, fetchOptions });
+    const adapter = new SapSyncDataAdapter();
+    return adapter.fetchData({
+      clientConfigId,
+      tenantContext: { tenantModels },
+      fetchOptions,
+    });
   },
 };
 
