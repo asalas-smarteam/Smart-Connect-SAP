@@ -1,3 +1,4 @@
+import { calculateUnitPriceWithMisc } from '#domain/prices/misc-price-calculation.service.js';
 import { PermanentWebhookError } from '#shared/errors/index.js';
 import { pickByPath } from '#shared/utils/object-path.utils.js';
 import { normalizeNumber, toNonEmptyString } from '#shared/utils/string.utils.js';
@@ -102,13 +103,25 @@ function resolveUnitPrice({ mapped, lineItem, miscPriceCalculationConfig }) {
     : null;
 
   if (miscPriceCalculationConfig?.enableMiscPriceCalculation) {
-    return configuredOriginalPrice;
+    const priceCalculation = calculateUnitPriceWithMisc({
+      sapPrice: configuredOriginalPrice,
+      lineItem,
+      config: miscPriceCalculationConfig,
+    });
+
+    return {
+      unitPrice: priceCalculation.price,
+      warning: priceCalculation.warning,
+    };
   }
 
-  return normalizeNumber(
-    mapped?.UnitPrice ?? lineItem?.hs_effective_unit_price,
-    0
-  );
+  return {
+    unitPrice: normalizeNumber(
+      mapped?.UnitPrice ?? lineItem?.hs_effective_unit_price,
+      0
+    ),
+    warning: null,
+  };
 }
 
 export function mapDocumentLines({
@@ -116,6 +129,7 @@ export function mapDocumentLines({
   productMappings,
   taxCodes = [],
   miscPriceCalculationConfig = null,
+  logger = null,
 }) {
   const lines = [];
 
@@ -124,7 +138,7 @@ export function mapDocumentLines({
     const itemCode = toNonEmptyString(mapped?.ItemCode || lineItem?.hs_sku || lineItem?.itemCode);
     const quantity = normalizeNumber(mapped?.Quantity ?? lineItem?.quantity, 1);
     const discount = normalizeNumber(lineItem?.hs_discount_percentage, 0);
-    const unitPrice = resolveUnitPrice({ mapped, lineItem, miscPriceCalculationConfig });
+    const { unitPrice, warning } = resolveUnitPrice({ mapped, lineItem, miscPriceCalculationConfig });
 
     if (!itemCode) {
       throw new PermanentWebhookError('ItemCode/hs_sku is required in line_items mapping');
@@ -132,6 +146,13 @@ export function mapDocumentLines({
 
     if (!Number.isFinite(quantity) || quantity <= 0) {
       throw new PermanentWebhookError(`Invalid quantity for item ${itemCode}`);
+    }
+
+    if (warning) {
+      logger?.warn?.({
+        msg: warning,
+        itemCode,
+      });
     }
 
     const line = {

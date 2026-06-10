@@ -21,6 +21,7 @@ export function buildProcessHubspotWebhookEventUseCase() {
     webhookEventProgressRepository: new MongooseWebhookEventProgressRepository(),
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
+    logger,
   });
 }
 

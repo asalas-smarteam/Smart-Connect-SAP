@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import { mapDocumentLines } from '../../../src/domain/orders/order-builder.service.js';
 
 describe('order-builder.service mapDocumentLines', () => {
@@ -94,5 +95,79 @@ describe('order-builder.service mapDocumentLines', () => {
         WarehouseCode: undefined,
       },
     ]);
+  });
+
+  it('adds percentual misc value to original price when misc calculation is active', () => {
+    const lines = mapDocumentLines({
+      productMappings,
+      taxCodes: [],
+      miscPriceCalculationConfig: {
+        enableMiscPriceCalculation: true,
+        originalPriceTargetProperty: 'safe_amount',
+        miscSourceProperty: 'misc',
+        miscCalculationType: 'porcentual',
+      },
+      lineItems: [
+        {
+          hs_sku: 'A56010004',
+          quantity: '2',
+          price: '115',
+          safe_amount: '100',
+          misc: '15',
+        },
+      ],
+    });
+
+    expect(lines[0].UnitPrice).toBe(115);
+  });
+
+  it('adds fixed misc value to original price when misc calculation is active', () => {
+    const lines = mapDocumentLines({
+      productMappings,
+      taxCodes: [],
+      miscPriceCalculationConfig: {
+        enableMiscPriceCalculation: true,
+        originalPriceTargetProperty: 'safe_amount',
+        miscSourceProperty: 'misc',
+        miscCalculationType: 'fijo',
+      },
+      lineItems: [
+        {
+          hs_sku: 'A56010004',
+          quantity: '2',
+          price: '400',
+          safe_amount: '100',
+          misc: '300',
+        },
+      ],
+    });
+
+    expect(lines[0].UnitPrice).toBe(400);
+  });
+
+  it('logs warning when misc config is incomplete while mapping SAP order lines', () => {
+    const logger = { warn: jest.fn() };
+
+    mapDocumentLines({
+      productMappings,
+      taxCodes: [],
+      logger,
+      miscPriceCalculationConfig: {
+        enableMiscPriceCalculation: true,
+        originalPriceTargetProperty: 'safe_amount',
+      },
+      lineItems: [
+        {
+          hs_sku: 'A56010004',
+          quantity: '2',
+          safe_amount: '100',
+        },
+      ],
+    });
+
+    expect(logger.warn).toHaveBeenCalledWith({
+      msg: 'Misc price calculation config is incomplete',
+      itemCode: 'A56010004',
+    });
   });
 });

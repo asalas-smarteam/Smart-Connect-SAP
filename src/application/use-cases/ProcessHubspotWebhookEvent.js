@@ -18,6 +18,7 @@ export class ProcessHubspotWebhookEvent {
     webhookEventProgressRepository,
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
+    logger = { warn: () => {} },
   }) {
     this.runtimeRepository = runtimeRepository;
     this.sapOrderAdapter = sapOrderAdapter;
@@ -26,6 +27,7 @@ export class ProcessHubspotWebhookEvent {
     this.webhookEventProgressRepository = webhookEventProgressRepository;
     this.buildWebhookSyncErrorEntry = buildWebhookSyncErrorEntry;
     this.buildErrorResponseSnapshot = buildErrorResponseSnapshot;
+    this.logger = logger;
   }
 
   async execute({ event, tenantModels, tenantId, tenantKey, portalId }) {
@@ -146,6 +148,7 @@ export class ProcessHubspotWebhookEvent {
         productMappings: mappings.productMappings,
         taxCodes,
         miscPriceCalculationConfig,
+        logger: this.logger,
       });
       const orderPayload = buildOrderPayload({
         cardCode,
