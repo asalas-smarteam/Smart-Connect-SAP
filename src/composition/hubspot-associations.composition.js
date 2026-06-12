@@ -1,5 +1,6 @@
 import FieldMappingService from '#application/services/field-mapping.service.js';
 import HandleHubspotAssociations from '#application/use-cases/HandleHubspotAssociations.js';
+import BypassEmailConfigRepository from '#infrastructure/config/BypassEmailConfigRepository.js';
 import TenantFieldMappingRepository from '#infrastructure/database/repositories/TenantFieldMappingRepository.js';
 import HubspotAssociationFetchAdapter from '#infrastructure/hubspot/HubspotAssociationFetchAdapter.js';
 import associationRegistryService from '#infrastructure/hubspot/associationRegistryService.js';
@@ -17,6 +18,7 @@ export function buildHandleHubspotAssociations() {
     }),
     contactHandler,
     fallbackEmailGenerator: generateFallbackEmail,
+    bypassEmailConfigRepository: new BypassEmailConfigRepository(),
   });
 }
 

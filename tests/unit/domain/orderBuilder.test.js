@@ -1,5 +1,8 @@
 import { jest } from '@jest/globals';
-import { mapDocumentLines } from '../../../src/domain/orders/order-builder.service.js';
+import {
+  buildOrderPayload,
+  mapDocumentLines,
+} from '../../../src/domain/orders/order-builder.service.js';
 
 describe('order-builder.service mapDocumentLines', () => {
   const productMappings = [
@@ -168,6 +171,33 @@ describe('order-builder.service mapDocumentLines', () => {
     expect(logger.warn).toHaveBeenCalledWith({
       msg: 'Misc price calculation config is incomplete',
       itemCode: 'A56010004',
+    });
+  });
+});
+
+describe('order-builder.service buildOrderPayload', () => {
+  it('adds SlpCode when SAP owner id is resolved as an integer', () => {
+    const payload = buildOrderPayload({
+      cardCode: 'CL99999',
+      slpCode: 5,
+      documentLines: [
+        {
+          ItemCode: 'A56010004',
+          Quantity: 1,
+        },
+      ],
+    });
+
+    expect(payload).toEqual({
+      CardCode: 'CL99999',
+      DocDueDate: expect.any(String),
+      SlpCode: 5,
+      DocumentLines: [
+        {
+          ItemCode: 'A56010004',
+          Quantity: 1,
+        },
+      ],
     });
   });
 });

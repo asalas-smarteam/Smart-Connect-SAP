@@ -11,6 +11,7 @@ const mockInvalidateSession = jest.fn();
 const mockResolveTenantKey = jest.fn();
 const mockLoggerInfo = jest.fn();
 const mockLoggerError = jest.fn();
+const mockLoggerWarn = jest.fn();
 
 jest.unstable_mockModule('axios', () => ({
   default: mockAxios,
@@ -47,6 +48,7 @@ jest.unstable_mockModule('../../src/infrastructure/logger/logger.js', () => ({
   default: {
     info: mockLoggerInfo,
     error: mockLoggerError,
+    warn: mockLoggerWarn,
   },
 }));
 
@@ -69,6 +71,8 @@ function buildTenantModels({
   company = null,
   contact = null,
   lineItems = null,
+  deal = {},
+  ownerMapping = null,
 } = {}) {
   const event = {
     _id: 'evt-1',
@@ -79,6 +83,7 @@ function buildTenantModels({
       portalId,
       deal: {
         hs_object_id: 'deal-1',
+        ...deal,
       },
       company,
       contact,
@@ -160,6 +165,9 @@ function buildTenantModels({
       findOneAndUpdate: jest.fn(() => ({ lean: leanEvent })),
       updateOne: jest.fn().mockResolvedValue({ acknowledged: true }),
     },
+    OwnerMapping: {
+      findOne: jest.fn().mockReturnValue(createLeanQuery(ownerMapping)),
+    },
   };
 }
 
@@ -210,6 +218,7 @@ describe('webhookProcessor flow', () => {
     mockResolveTenantKey.mockReset();
     mockLoggerInfo.mockReset();
     mockLoggerError.mockReset();
+    mockLoggerWarn.mockReset();
 
     mockGetSessionCookie.mockResolvedValue({ cookie: 'B1SESSION=abc' });
     mockResolveTenantKey.mockReturnValue('tenant_1');
@@ -355,6 +364,113 @@ describe('webhookProcessor flow', () => {
         }),
       })
     );
+  });
+
+  it('sends SAP SlpCode in the order payload from the HubSpot owner mapping', async () => {
+    setupMappings();
+    const tenantModels = buildTenantModels({
+      deal: {
+        hubspotOwnerId: '82088708',
+      },
+      ownerMapping: {
+        sapOwnerId: '5',
+      },
+      contact: {
+        hs_object_id: 'contact-1',
+        firstname: 'Cliente Mostrador',
+        idsap: 'CL99999',
+      },
+    });
+
+    mockAxios
+      .mockResolvedValueOnce({
+        data: {
+          CardCode: 'CL99999',
+          CardName: 'Cliente Mostrador',
+          PriceListNum: 4,
+          ContactEmployees: [],
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          DocEntry: 10,
+          DocNum: 20,
+        },
+      });
+
+    const result = await webhookProcessor.processPendingEvents({
+      tenantModels,
+      tenantId: 'tenant-1',
+      tenantKey: 'tenant_1',
+      portalId: '12345',
+    });
+
+    expect(result.completed).toBe(1);
+    expect(tenantModels.OwnerMapping.findOne).toHaveBeenCalledWith({
+      hubspotCredentialId: 'hubspot-credential-1',
+      hubspotOwnerId: '82088708',
+      active: true,
+    });
+    expect(mockAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'post',
+        url: 'https://sap.example.com:50000/b1s/v2/Orders',
+        data: expect.objectContaining({
+          CardCode: 'CL99999',
+          SlpCode: 5,
+        }),
+      })
+    );
+  });
+
+  it('omits SAP SlpCode and logs a warning when the HubSpot owner mapping is missing', async () => {
+    setupMappings();
+    const tenantModels = buildTenantModels({
+      deal: {
+        hubspotOwnerId: '82088708',
+      },
+      ownerMapping: null,
+      contact: {
+        hs_object_id: 'contact-1',
+        firstname: 'Cliente Mostrador',
+        idsap: 'CL99999',
+      },
+    });
+
+    mockAxios
+      .mockResolvedValueOnce({
+        data: {
+          CardCode: 'CL99999',
+          CardName: 'Cliente Mostrador',
+          PriceListNum: 4,
+          ContactEmployees: [],
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          DocEntry: 10,
+          DocNum: 20,
+        },
+      });
+
+    const result = await webhookProcessor.processPendingEvents({
+      tenantModels,
+      tenantId: 'tenant-1',
+      tenantKey: 'tenant_1',
+      portalId: '12345',
+    });
+
+    const orderRequest = mockAxios.mock.calls
+      .map(([config]) => config)
+      .find((config) => config.method === 'post' && config.url.endsWith('/b1s/v2/Orders'));
+
+    expect(result.completed).toBe(1);
+    expect(orderRequest.data).not.toHaveProperty('SlpCode');
+    expect(mockLoggerWarn).toHaveBeenCalledWith({
+      msg: 'SAP owner mapping not found for HubSpot owner',
+      hubspotOwnerId: '82088708',
+      dealId: 'deal-1',
+    });
   });
 
   it('errors when neither HubSpot nor tenant config provides PriceListNum', async () => {

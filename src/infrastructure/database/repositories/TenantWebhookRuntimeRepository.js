@@ -62,6 +62,20 @@ export class TenantWebhookRuntimeRepository {
     };
   }
 
+  async findOwnerMappingByHubspotOwner({ tenantModels, hubspotCredentialId, hubspotOwnerId }) {
+    const query = tenantModels?.OwnerMapping?.findOne?.({
+      hubspotCredentialId,
+      hubspotOwnerId,
+      active: true,
+    });
+
+    if (!query?.lean) {
+      return query ?? null;
+    }
+
+    return query.lean();
+  }
+
   async resolveMiscPriceCalculationConfig(tenantModels) {
     const Configuration = tenantModels?.Configuration;
 

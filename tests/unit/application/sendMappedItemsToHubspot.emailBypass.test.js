@@ -138,4 +138,56 @@ describe('SendMappedItemsToHubspot email bypass', () => {
       failed: 1,
     }));
   });
+
+  it('sends an empty email to HubSpot when a missing business partner email is bypassed', async () => {
+    const handler = {
+      find: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({ id: 'hs-6' }),
+      update: jest.fn(),
+    };
+    const validationFailureWriter = {
+      write: jest.fn().mockResolvedValue(null),
+    };
+    const logger = {
+      warn: jest.fn(),
+    };
+    const useCase = buildUseCase({
+      handlers: { contact: handler },
+      validationFailureWriter,
+      bypassEmailConfigRepository: {
+        isBypassEmailEnabled: jest.fn().mockResolvedValue(true),
+      },
+      logger,
+    });
+    const item = {
+      properties: {
+        email: null,
+        idsap: 'C006',
+      },
+    };
+
+    const result = await useCase.execute({
+      mappedItems: [item],
+      clientConfig: { hubspotCredentialId: 'cred-1' },
+      objectType: 'contact',
+      tenantModels: { Configuration: {} },
+      credentials: { _id: 'cred-1' },
+    });
+
+    expect(item.properties.email).toBe('');
+    expect(handler.find).toHaveBeenCalledWith(expect.objectContaining({ item }));
+    expect(handler.create).toHaveBeenCalledWith(expect.objectContaining({ item }));
+    expect(validationFailureWriter.write).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith(expect.objectContaining({
+      msg: 'Missing business partner email bypassed before HubSpot sync',
+      objectType: 'contact',
+      sapId: 'C006',
+    }));
+    expect(result).toEqual(expect.objectContaining({
+      ok: true,
+      sent: 1,
+      failed: 0,
+      created: 1,
+    }));
+  });
 });

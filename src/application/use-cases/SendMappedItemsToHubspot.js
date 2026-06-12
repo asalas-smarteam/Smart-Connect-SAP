@@ -2,9 +2,10 @@ import {
   DEFAULT_MAIN_DATA_IN_UPDATE,
   shouldUpdateSapFromHubspot,
 } from '#domain/sync/main-data-in-update.constants.js';
-import { isBasicEmailFormat } from '#shared/utils/email.utils.js';
-
-const EMAIL_BYPASS_OBJECT_TYPES = new Set(['contact', 'company']);
+import {
+  applyBypassEmail,
+  resolveBypassEmail,
+} from '#application/services/bypassEmail.service.js';
 
 function getHandler(handlers, objectType) {
   return handlers[objectType] ?? null;
@@ -92,40 +93,21 @@ export class SendMappedItemsToHubspot {
   }
 
   async getBypassEmail({ objectType, tenantModels }) {
-    if (!EMAIL_BYPASS_OBJECT_TYPES.has(objectType) || !this.bypassEmailConfigRepository) {
-      return false;
-    }
-
-    try {
-      return await this.bypassEmailConfigRepository.isBypassEmailEnabled({ tenantModels });
-    } catch (error) {
-      this.logger?.warn?.({
-        msg: 'Unable to read bypassEmail tenant configuration',
-        error,
-      });
-      return false;
-    }
+    return resolveBypassEmail({
+      objectType,
+      tenantModels,
+      bypassEmailConfigRepository: this.bypassEmailConfigRepository,
+      logger: this.logger,
+    });
   }
 
   applyBypassEmail({ objectType, item, bypassEmail }) {
-    if (!bypassEmail || !EMAIL_BYPASS_OBJECT_TYPES.has(objectType)) {
-      return false;
-    }
-
-    const email = String(item?.properties?.email ?? '').trim();
-
-    if (!email || isBasicEmailFormat(email)) {
-      return false;
-    }
-
-    item.properties.email = '';
-    this.logger?.warn?.({
-      msg: 'Invalid business partner email removed before HubSpot sync',
+    return applyBypassEmail({
       objectType,
-      sapId: item?.properties?.idsap ?? null,
-      email,
+      item,
+      bypassEmail,
+      logger: this.logger,
     });
-    return true;
   }
 
   async getMainDataInUpdate(tenantModels) {

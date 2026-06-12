@@ -178,14 +178,20 @@ export function mapDocumentLines({
   return lines;
 }
 
-export function buildOrderPayload({ cardCode, documentLines }) {
+export function buildOrderPayload({ cardCode, documentLines, slpCode = null }) {
   if (!documentLines.length) {
     throw new PermanentWebhookError('At least one line_item is required to create SAP Order');
   }
 
-  return {
+  const payload = {
     CardCode: cardCode,
     DocDueDate: new Date().toISOString().slice(0, 10),
     DocumentLines: documentLines,
   };
+
+  if (Number.isInteger(slpCode)) {
+    payload.SlpCode = slpCode;
+  }
+
+  return payload;
 }

@@ -150,9 +150,15 @@ export class ProcessHubspotWebhookEvent {
         miscPriceCalculationConfig,
         logger: this.logger,
       });
+      const slpCode = await this.resolveOrderSlpCode({
+        tenantModels,
+        deal,
+        hubspotCredentials,
+      });
       const orderPayload = buildOrderPayload({
         cardCode,
         documentLines,
+        slpCode,
       });
       auditTrail.payload_SAP.order = orderPayload;
 
@@ -271,6 +277,48 @@ export class ProcessHubspotWebhookEvent {
       company: next?.company ?? current?.company ?? null,
       contact: next?.contact ?? current?.contact ?? null,
     };
+  }
+
+  async resolveOrderSlpCode({ tenantModels, deal, hubspotCredentials }) {
+    const hubspotOwnerId = toNonEmptyString(deal?.hubspotOwnerId);
+    const dealId = toNonEmptyString(deal?.hs_object_id);
+
+    if (!hubspotOwnerId) {
+      this.logger?.warn?.({
+        msg: 'SAP owner not resolved because HubSpot deal owner is missing',
+        dealId,
+      });
+      return null;
+    }
+
+    const mapping = await this.runtimeRepository.findOwnerMappingByHubspotOwner({
+      tenantModels,
+      hubspotCredentialId: hubspotCredentials?._id,
+      hubspotOwnerId,
+    });
+    const sapOwnerId = toNonEmptyString(mapping?.sapOwnerId);
+
+    if (!sapOwnerId) {
+      this.logger?.warn?.({
+        msg: 'SAP owner mapping not found for HubSpot owner',
+        hubspotOwnerId,
+        dealId,
+      });
+      return null;
+    }
+
+    const slpCode = Number(sapOwnerId);
+    if (!Number.isInteger(slpCode)) {
+      this.logger?.warn?.({
+        msg: 'SAP owner mapping has invalid sapOwnerId',
+        hubspotOwnerId,
+        sapOwnerId,
+        dealId,
+      });
+      return null;
+    }
+
+    return slpCode;
   }
 }
 

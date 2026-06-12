@@ -1,3 +1,8 @@
+import {
+  applyBypassEmail,
+  resolveBypassEmail,
+} from '#application/services/bypassEmail.service.js';
+
 export const ASSOCIATION_MAP = Object.freeze({
   deal: ['contact', 'company', 'product'],
   contact: ['company'],
@@ -31,6 +36,10 @@ function normalizeAssociationValues(rawResult, associationType) {
   return [];
 }
 
+function getSapContactEmail(sapContact) {
+  return String(sapContact?.E_Mail ?? sapContact?.EmailAddress ?? '').trim();
+}
+
 export class HandleHubspotAssociations {
   constructor({
     associationFetcher,
@@ -39,6 +48,7 @@ export class HandleHubspotAssociations {
     fieldMappingService,
     contactHandler,
     fallbackEmailGenerator,
+    bypassEmailConfigRepository = null,
     logger = console,
   }) {
     this.associationFetcher = associationFetcher;
@@ -47,7 +57,17 @@ export class HandleHubspotAssociations {
     this.fieldMappingService = fieldMappingService;
     this.contactHandler = contactHandler;
     this.fallbackEmailGenerator = fallbackEmailGenerator;
+    this.bypassEmailConfigRepository = bypassEmailConfigRepository;
     this.logger = logger;
+  }
+
+  async getBypassEmail({ tenantModels }) {
+    return resolveBypassEmail({
+      objectType: 'contact',
+      tenantModels,
+      bypassEmailConfigRepository: this.bypassEmailConfigRepository,
+      logger: this.logger,
+    });
   }
 
   async execute({ objectType, token, item, clientConfig, tenantModels, hubspotId }) {
@@ -172,16 +192,22 @@ export class HandleHubspotAssociations {
         tenantModels,
         'contactEmployee'
       );
+      const bypassEmail = await this.getBypassEmail({ tenantModels });
 
       for (const [index, mappedContact] of mappedContacts.entries()) {
         const sapContact = sapContacts[index] || {};
         const sapInternalCode = sapContact?.InternalCode;
+        const sapContactEmail = getSapContactEmail(sapContact);
         const contactPayload = {
           ...mappedContact,
           properties: {
             ...(mappedContact?.properties || {}),
           },
         };
+
+        if (sapContactEmail) {
+          contactPayload.properties.email = sapContactEmail;
+        }
 
         if (!contactPayload.properties.email) {
           const fallbackEmail = this.fallbackEmailGenerator(
@@ -192,6 +218,22 @@ export class HandleHubspotAssociations {
           if (fallbackEmail) {
             contactPayload.properties.email = fallbackEmail;
           }
+        }
+
+        const emailWasBypassed = applyBypassEmail({
+          objectType: 'contact',
+          item: contactPayload,
+          bypassEmail,
+          logger: this.logger,
+          sapId: sapInternalCode ?? null,
+        });
+
+        if (!contactPayload.properties.email && !emailWasBypassed) {
+          this.logger.error?.(
+            'Company contact sync error:',
+            new Error('Company contact email is required before HubSpot sync')
+          );
+          continue;
         }
 
         const existingContact = await this.contactHandler.find({
