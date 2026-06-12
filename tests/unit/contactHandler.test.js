@@ -1,10 +1,12 @@
 import { jest } from '@jest/globals';
 
 const mockFindContactByEmail = jest.fn();
+const mockFindContactByProperty = jest.fn();
 const mockUpdateContact = jest.fn();
 
 jest.unstable_mockModule('../../src/infrastructure/hubspot/hubspotClient.js', () => ({
   findContactByEmail: mockFindContactByEmail,
+  findContactByProperty: mockFindContactByProperty,
   updateContact: mockUpdateContact,
   createContact: jest.fn(),
 }));
@@ -31,6 +33,40 @@ describe('contact.handler', () => {
     expect(mockFindContactByEmail).toHaveBeenCalledWith(
       'token-1',
       'contact@example.com',
+      {
+        properties: ['email', 'firstname', 'phone', 'idsap', 'idSap', 'internalcode'],
+      }
+    );
+  });
+
+  it('uses configured HubSpot property when email is empty', async () => {
+    mockFindContactByProperty.mockResolvedValue({ id: 'hs-1' });
+    const lean = jest.fn().mockResolvedValue({
+      key: 'defaultFindHubspot',
+      value: 'idsap',
+    });
+    const findOne = jest.fn().mockReturnValue({ lean });
+
+    const existing = await find({
+      token: 'token-1',
+      tenantModels: {
+        Configuration: { findOne },
+      },
+      item: {
+        properties: {
+          email: '',
+          idsap: 'C004',
+        },
+      },
+    });
+
+    expect(existing).toEqual({ id: 'hs-1' });
+    expect(findOne).toHaveBeenCalledWith({ key: 'defaultFindHubspot' });
+    expect(mockFindContactByEmail).not.toHaveBeenCalled();
+    expect(mockFindContactByProperty).toHaveBeenCalledWith(
+      'token-1',
+      'idsap',
+      'C004',
       {
         properties: ['email', 'firstname', 'phone', 'idsap', 'idSap', 'internalcode'],
       }

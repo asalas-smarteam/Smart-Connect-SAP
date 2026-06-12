@@ -1,10 +1,12 @@
 import { jest } from '@jest/globals';
 
 const mockFindCompanyByEmail = jest.fn();
+const mockFindCompanyByProperty = jest.fn();
 const mockUpdateCompany = jest.fn();
 
 jest.unstable_mockModule('../../src/infrastructure/hubspot/hubspotClient.js', () => ({
   findCompanyByEmail: mockFindCompanyByEmail,
+  findCompanyByProperty: mockFindCompanyByProperty,
   updateCompany: mockUpdateCompany,
   createCompany: jest.fn(),
 }));
@@ -31,6 +33,40 @@ describe('company.handler', () => {
     expect(mockFindCompanyByEmail).toHaveBeenCalledWith(
       'token-1',
       'company@example.com',
+      {
+        properties: ['email', 'name', 'phone', 'idsap', 'idSap'],
+      }
+    );
+  });
+
+  it('uses configured HubSpot property when email is empty', async () => {
+    mockFindCompanyByProperty.mockResolvedValue({ id: 'hs-company-1' });
+    const lean = jest.fn().mockResolvedValue({
+      key: 'defaultFindHubspot',
+      value: 'idsap',
+    });
+    const findOne = jest.fn().mockReturnValue({ lean });
+
+    const existing = await find({
+      token: 'token-1',
+      tenantModels: {
+        Configuration: { findOne },
+      },
+      item: {
+        properties: {
+          email: '',
+          idsap: 'C004',
+        },
+      },
+    });
+
+    expect(existing).toEqual({ id: 'hs-company-1' });
+    expect(findOne).toHaveBeenCalledWith({ key: 'defaultFindHubspot' });
+    expect(mockFindCompanyByEmail).not.toHaveBeenCalled();
+    expect(mockFindCompanyByProperty).toHaveBeenCalledWith(
+      'token-1',
+      'idsap',
+      'C004',
       {
         properties: ['email', 'name', 'phone', 'idsap', 'idSap'],
       }

@@ -100,11 +100,15 @@ async function searchObject(token, objectType, filters, properties = []) {
 }
 
 export async function findContactByEmail(token, email, options = {}) {
+  return findContactByProperty(token, 'email', email, options);
+}
+
+export async function findContactByProperty(token, propertyName, value, options = {}) {
   return searchObject(token, 'contacts', [
     {
-      propertyName: 'email',
+      propertyName,
       operator: 'EQ',
-      value: email,
+      value,
     },
   ], options?.properties);
 }
@@ -119,11 +123,15 @@ export async function updateContact(token, id, data) {
 }
 
 export async function findCompanyByEmail(token, email, options = {}) {
+  return findCompanyByProperty(token, 'email', email, options);
+}
+
+export async function findCompanyByProperty(token, propertyName, value, options = {}) {
   return searchObject(token, 'companies', [
     {
-      propertyName: 'email',
+      propertyName,
       operator: 'EQ',
-      value: email,
+      value,
     },
   ], options?.properties);
 }

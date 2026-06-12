@@ -8,6 +8,7 @@ import {
 import { buildTenantDatabaseName, getTenantConnection } from '../database/tenant/tenantDatabase.js';
 import { registerTenantModels } from '../database/models/tenant/index.js';
 import { BYPASS_EMAIL_CONFIG_KEY } from '#infrastructure/config/BypassEmailConfigRepository.js';
+import { DEFAULT_FIND_HUBSPOT_CONFIG_KEY } from '#infrastructure/config/DefaultFindHubspotConfigRepository.js';
 import { sanitizeMongoCollectionName } from '#shared/utils/provisioningValidation.js';
 import { replicateDefaultSapFilters } from './replicateDefaultSapFilters.js';
 
@@ -70,6 +71,17 @@ async function ensureTenantConfigurations({ Configuration }) {
         key: BYPASS_EMAIL_CONFIG_KEY,
         userUpdated: 'admin',
         value: false,
+      },
+    },
+    { upsert: true }
+  );
+  await Configuration.updateOne(
+    { key: DEFAULT_FIND_HUBSPOT_CONFIG_KEY },
+    {
+      $setOnInsert: {
+        key: DEFAULT_FIND_HUBSPOT_CONFIG_KEY,
+        userUpdated: 'admin',
+        value: 'idsap',
       },
     },
     { upsert: true }

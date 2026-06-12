@@ -136,6 +136,17 @@ describe('provisionTenant', () => {
       },
       { upsert: true }
     );
+    expect(configurationModel.updateOne).toHaveBeenCalledWith(
+      { key: 'defaultFindHubspot' },
+      {
+        $setOnInsert: {
+          key: 'defaultFindHubspot',
+          userUpdated: 'admin',
+          value: 'idsap',
+        },
+      },
+      { upsert: true }
+    );
     expect(createCollection).toHaveBeenCalledTimes(3);
     expect(createCollection).toHaveBeenCalledWith('products');
     expect(createCollection).toHaveBeenCalledWith('Configurations');

@@ -4,6 +4,7 @@ import {
   shouldUpdateByKeyFields,
 } from './utils/updateDecision.utils.js';
 import { buildMappedSearchProperties } from './utils/searchProperties.utils.js';
+import { buildConfiguredSearchCriteria } from './utils/searchCriteria.utils.js';
 
 const CONTACT_SEARCH_PROPERTIES = [
   'email',
@@ -15,9 +16,9 @@ const CONTACT_SEARCH_PROPERTIES = [
 ];
 
 export async function find({ token, item, clientConfig, tenantModels }) {
-  const email = item?.properties?.email;
+  const searchCriteria = await buildConfiguredSearchCriteria({ item, tenantModels });
 
-  if (!email) {
+  if (!searchCriteria) {
     return null;
   }
 
@@ -28,9 +29,18 @@ export async function find({ token, item, clientConfig, tenantModels }) {
     defaults: CONTACT_SEARCH_PROPERTIES,
   });
 
-  return hubspotClient.findContactByEmail(token, email, {
-    properties,
-  });
+  if (searchCriteria.propertyName === 'email') {
+    return hubspotClient.findContactByEmail(token, searchCriteria.value, {
+      properties,
+    });
+  }
+
+  return hubspotClient.findContactByProperty(
+    token,
+    searchCriteria.propertyName,
+    searchCriteria.value,
+    { properties }
+  );
 }
 
 export async function create({ token, item }) {
