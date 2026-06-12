@@ -1,6 +1,7 @@
 import { appendFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import SendMappedItemsToHubspot from '#application/use-cases/SendMappedItemsToHubspot.js';
+import BypassEmailConfigRepository from '#infrastructure/config/BypassEmailConfigRepository.js';
 import MainDataInUpdateConfigRepository from '#infrastructure/config/MainDataInUpdateConfigRepository.js';
 import associationRegistryService from '#infrastructure/hubspot/associationRegistryService.js';
 import companyHandler from '#infrastructure/hubspot/handlers/company.handler.js';
@@ -10,6 +11,7 @@ import productHandler from '#infrastructure/hubspot/handlers/product.handler.js'
 import hubspotAuthService from '#infrastructure/hubspot/hubspotAuthService.js';
 import * as hubspotClient from '#infrastructure/hubspot/hubspotClient.js';
 import sapSyncAdapter from '#infrastructure/hubspot/sapSyncAdapter.js';
+import logger from '#infrastructure/logger/logger.js';
 import { buildHandleHubspotAssociations } from './hubspot-associations.composition.js';
 
 const validationFailuresFile = path.resolve(
@@ -42,6 +44,8 @@ export function buildSendMappedItemsToHubspot() {
     sapHubspotIdUpdater: sapSyncAdapter,
     validationFailureWriter,
     mainDataInUpdateConfigRepository: new MainDataInUpdateConfigRepository(),
+    bypassEmailConfigRepository: new BypassEmailConfigRepository(),
+    logger,
     handlers: {
       contact: contactHandler,
       company: companyHandler,

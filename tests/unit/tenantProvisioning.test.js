@@ -78,12 +78,17 @@ describe('provisionTenant', () => {
       db: { listCollections },
       createCollection,
     };
+    const configurationModel = {
+      collection: { name: 'Configurations' },
+      updateOne: jest.fn().mockResolvedValue(),
+    };
 
     mockGetTenantConnection.mockResolvedValue(tenantConnection);
 
     mockRegisterTenantModels.mockReturnValue({
       Orders: { collection: { name: 'orders' } },
       Products: { collection: { name: 'products' } },
+      Configuration: configurationModel,
       IntegrationMode: {
         collection: { name: 'integrationmodes' },
         updateOne: jest.fn().mockResolvedValue(),
@@ -120,8 +125,20 @@ describe('provisionTenant', () => {
       masterConnection: mockMasterConnection,
       tenantConnection,
     });
-    expect(createCollection).toHaveBeenCalledTimes(2);
+    expect(configurationModel.updateOne).toHaveBeenCalledWith(
+      { key: 'bypassEmail' },
+      {
+        $setOnInsert: {
+          key: 'bypassEmail',
+          userUpdated: 'admin',
+          value: false,
+        },
+      },
+      { upsert: true }
+    );
+    expect(createCollection).toHaveBeenCalledTimes(3);
     expect(createCollection).toHaveBeenCalledWith('products');
+    expect(createCollection).toHaveBeenCalledWith('Configurations');
     expect(createCollection).toHaveBeenCalledWith('integrationmodes');
     expect(mockGlobalAuditLog.create).toHaveBeenCalledWith({
       action: 'tenant.provisioned',

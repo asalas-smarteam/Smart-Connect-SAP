@@ -7,6 +7,7 @@ import {
 } from '../database/master/database.js';
 import { buildTenantDatabaseName, getTenantConnection } from '../database/tenant/tenantDatabase.js';
 import { registerTenantModels } from '../database/models/tenant/index.js';
+import { BYPASS_EMAIL_CONFIG_KEY } from '#infrastructure/config/BypassEmailConfigRepository.js';
 import { sanitizeMongoCollectionName } from '#shared/utils/provisioningValidation.js';
 import { replicateDefaultSapFilters } from './replicateDefaultSapFilters.js';
 
@@ -54,6 +55,24 @@ async function ensureIntegrationModes({ IntegrationMode }) {
       { $setOnInsert: mode },
       { upsert: true }
     ))
+  );
+}
+
+async function ensureTenantConfigurations({ Configuration }) {
+  if (typeof Configuration?.updateOne !== 'function') {
+    return;
+  }
+
+  await Configuration.updateOne(
+    { key: BYPASS_EMAIL_CONFIG_KEY },
+    {
+      $setOnInsert: {
+        key: BYPASS_EMAIL_CONFIG_KEY,
+        userUpdated: 'admin',
+        value: false,
+      },
+    },
+    { upsert: true }
   );
 }
 
@@ -194,6 +213,7 @@ export async function provisionTenant({
 
     await ensureTenantCollections(tenantConnection, tenantModels);
     await ensureIntegrationModes(tenantModels);
+    await ensureTenantConfigurations(tenantModels);
     await replicateDefaultSapFilters({
       masterConnection: FeatureFlags.db,
       tenantConnection,

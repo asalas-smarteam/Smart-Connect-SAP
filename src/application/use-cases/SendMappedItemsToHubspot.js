@@ -2,6 +2,9 @@ import {
   DEFAULT_MAIN_DATA_IN_UPDATE,
   shouldUpdateSapFromHubspot,
 } from '#domain/sync/main-data-in-update.constants.js';
+import { isBasicEmailFormat } from '#shared/utils/email.utils.js';
+
+const EMAIL_BYPASS_OBJECT_TYPES = new Set(['contact', 'company']);
 
 function getHandler(handlers, objectType) {
   return handlers[objectType] ?? null;
@@ -33,6 +36,8 @@ export class SendMappedItemsToHubspot {
     handlers,
     validationFailureWriter,
     mainDataInUpdateConfigRepository = null,
+    bypassEmailConfigRepository = null,
+    logger = console,
     sleeper = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   }) {
     this.tokenProvider = tokenProvider;
@@ -43,6 +48,8 @@ export class SendMappedItemsToHubspot {
     this.handlers = handlers;
     this.validationFailureWriter = validationFailureWriter;
     this.mainDataInUpdateConfigRepository = mainDataInUpdateConfigRepository;
+    this.bypassEmailConfigRepository = bypassEmailConfigRepository;
+    this.logger = logger;
     this.sleeper = sleeper;
   }
 
@@ -70,6 +77,7 @@ export class SendMappedItemsToHubspot {
     }
 
     const mainDataInUpdate = await this.getMainDataInUpdate(tenantModels);
+    const bypassEmail = await this.getBypassEmail({ objectType, tenantModels });
     const result = await this.processItemsSequentially(mappedItems, {
       objectType,
       clientConfig,
@@ -77,9 +85,47 @@ export class SendMappedItemsToHubspot {
       handler,
       getToken,
       mainDataInUpdate,
+      bypassEmail,
     });
 
     return { ok: true, ...result };
+  }
+
+  async getBypassEmail({ objectType, tenantModels }) {
+    if (!EMAIL_BYPASS_OBJECT_TYPES.has(objectType) || !this.bypassEmailConfigRepository) {
+      return false;
+    }
+
+    try {
+      return await this.bypassEmailConfigRepository.isBypassEmailEnabled({ tenantModels });
+    } catch (error) {
+      this.logger?.warn?.({
+        msg: 'Unable to read bypassEmail tenant configuration',
+        error,
+      });
+      return false;
+    }
+  }
+
+  applyBypassEmail({ objectType, item, bypassEmail }) {
+    if (!bypassEmail || !EMAIL_BYPASS_OBJECT_TYPES.has(objectType)) {
+      return false;
+    }
+
+    const email = String(item?.properties?.email ?? '').trim();
+
+    if (!email || isBasicEmailFormat(email)) {
+      return false;
+    }
+
+    item.properties.email = '';
+    this.logger?.warn?.({
+      msg: 'Invalid business partner email removed before HubSpot sync',
+      objectType,
+      sapId: item?.properties?.idsap ?? null,
+      email,
+    });
+    return true;
   }
 
   async getMainDataInUpdate(tenantModels) {
@@ -146,15 +192,18 @@ export class SendMappedItemsToHubspot {
     tenantModels,
     handler,
     mainDataInUpdate = DEFAULT_MAIN_DATA_IN_UPDATE,
+    bypassEmail = false,
   }) {
     try {
       if (handler.preprocess) {
         await handler.preprocess({ item, clientConfig, tenantModels });
       }
 
+      const emailWasBypassed = this.applyBypassEmail({ objectType, item, bypassEmail });
+
       const token = await getToken();
 
-      if (!item?.properties?.email && objectType !== 'product') {
+      if (!item?.properties?.email && objectType !== 'product' && !emailWasBypassed) {
         await this.writeValidationFailure(objectType, item);
         await this.registerBaseMapping(
           clientConfig,
