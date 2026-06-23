@@ -75,6 +75,36 @@ describe('product.handler preprocess', () => {
     expect(fields).toEqual(['hs_price_usd']);
   });
 
+  it('preserves SAP-mapped price fields when the keepMappedPrice flag is set', async () => {
+    const tenantModels = {
+      Configuration: {
+        findOneAndUpdate: jest.fn().mockResolvedValue({
+          key: 'fieldsPricesHS',
+          value: ['hs_price_nio'],
+          userUpdated: 'admin',
+        }),
+      },
+    };
+    const item = {
+      properties: {
+        hs_price_nio: 150,
+      },
+      rawSapData: {
+        MovingAveragePrice: 150,
+        keepMappedPrice: true,
+        ItemWarehouseInfoCollection: [],
+      },
+    };
+
+    await preprocess({ item, tenantModels });
+
+    expect(item.properties).toEqual({
+      A01_stock: 11,
+      B10_stock: 4,
+      hs_price_nio: 150,
+    });
+  });
+
   it('preserves strategy price fields when product has a selected SAP price', async () => {
     const tenantModels = {
       Configuration: {

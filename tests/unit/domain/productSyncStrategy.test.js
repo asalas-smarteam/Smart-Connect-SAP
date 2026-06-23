@@ -1,9 +1,11 @@
 import { jest } from '@jest/globals';
 import ProductSyncStrategyFactory from '../../../src/domain/products/product-sync-strategy.factory.js';
 import {
+  KEEP_MAPPED_PRICE_FLAG,
   PRODUCT_SYNC_STRATEGIES,
 } from '../../../src/domain/products/product-sync-strategy.constants.js';
 import OneToManyProductStrategy from '../../../src/domain/products/strategies/one-to-many-product.strategy.js';
+import OneToOneProductStrategy from '../../../src/domain/products/strategies/one-to-one-product.strategy.js';
 
 describe('ProductSyncStrategyFactory', () => {
   it('rejects unsupported product sync strategies', () => {
@@ -120,5 +122,119 @@ describe('OneToManyProductStrategy', () => {
 
     expect(result).toEqual({ sent: 0, failed: 0, created: 0, updated: 0, recordsProcessed: 0 });
     expect(hubspotSyncTarget.send).not.toHaveBeenCalled();
+  });
+});
+
+describe('OneToOneProductStrategy', () => {
+  function buildStrategy() {
+    const hubspotSyncTarget = {
+      send: jest.fn().mockResolvedValue({ sent: 1, failed: 0, created: 1 }),
+    };
+    const strategy = new OneToOneProductStrategy({
+      hubspotSyncTarget,
+      logger: { info: jest.fn(), error: jest.fn() },
+    });
+
+    return { hubspotSyncTarget, strategy };
+  }
+
+  it('keeps the SAP-mapped price when requirePrice.value is enabled', async () => {
+    const { hubspotSyncTarget, strategy } = buildStrategy();
+
+    await strategy.execute({
+      mappedRecords: [
+        {
+          properties: { hs_sku: 'SKU-1', hs_price_nio: 150 },
+          rawSapData: { ItemCode: 'SKU-1', MovingAveragePrice: 150 },
+        },
+      ],
+      config: {},
+      objectType: 'product',
+      tenantContext: {},
+      credentials: {},
+      strategyConfig: {
+        strategy: PRODUCT_SYNC_STRATEGIES.ONE_TO_ONE_PRODUCT,
+        requirePrice: { value: true, field: '' },
+      },
+    });
+
+    const sentRecords = hubspotSyncTarget.send.mock.calls[0][0].mappedRecords;
+    expect(sentRecords[0].properties.hs_price_nio).toBe(150);
+    expect(sentRecords[0].rawSapData[KEEP_MAPPED_PRICE_FLAG]).toBe(true);
+  });
+
+  it('does not mark records when requirePrice.value is disabled', async () => {
+    const { hubspotSyncTarget, strategy } = buildStrategy();
+
+    await strategy.execute({
+      mappedRecords: [
+        {
+          properties: { hs_sku: 'SKU-1', hs_price_nio: 150 },
+          rawSapData: { ItemCode: 'SKU-1', MovingAveragePrice: 150 },
+        },
+      ],
+      config: {},
+      objectType: 'product',
+      tenantContext: {},
+      credentials: {},
+      strategyConfig: {
+        strategy: PRODUCT_SYNC_STRATEGIES.ONE_TO_ONE_PRODUCT,
+        requirePrice: { value: false, field: '' },
+      },
+    });
+
+    const sentRecords = hubspotSyncTarget.send.mock.calls[0][0].mappedRecords;
+    expect(sentRecords[0].rawSapData).not.toHaveProperty(KEEP_MAPPED_PRICE_FLAG);
+  });
+
+  it('keeps the mapped cost field when requireCost.flag is enabled', async () => {
+    const { hubspotSyncTarget, strategy } = buildStrategy();
+
+    await strategy.execute({
+      mappedRecords: [
+        {
+          properties: { hs_sku: 'SKU-1', hs_price_nio: 0, hs_cost_of_goods_sold: 150 },
+          rawSapData: { ItemCode: 'SKU-1', MovingAveragePrice: 150 },
+        },
+      ],
+      config: {},
+      objectType: 'product',
+      tenantContext: {},
+      credentials: {},
+      strategyConfig: {
+        strategy: PRODUCT_SYNC_STRATEGIES.ONE_TO_ONE_PRODUCT,
+        requirePrice: { value: false, field: '' },
+        requireCost: { flag: true, field: 'hs_cost_of_goods_sold' },
+      },
+    });
+
+    const sentRecords = hubspotSyncTarget.send.mock.calls[0][0].mappedRecords;
+    expect(sentRecords[0].properties.hs_cost_of_goods_sold).toBe(150);
+  });
+
+  it('drops the cost field when requireCost.flag is disabled', async () => {
+    const { hubspotSyncTarget, strategy } = buildStrategy();
+
+    await strategy.execute({
+      mappedRecords: [
+        {
+          properties: { hs_sku: 'SKU-1', hs_price_nio: 0, hs_cost_of_goods_sold: 150 },
+          rawSapData: { ItemCode: 'SKU-1', MovingAveragePrice: 150 },
+        },
+      ],
+      config: {},
+      objectType: 'product',
+      tenantContext: {},
+      credentials: {},
+      strategyConfig: {
+        strategy: PRODUCT_SYNC_STRATEGIES.ONE_TO_ONE_PRODUCT,
+        requirePrice: { value: false, field: '' },
+        requireCost: { flag: false, field: 'hs_cost_of_goods_sold' },
+      },
+    });
+
+    const sentRecords = hubspotSyncTarget.send.mock.calls[0][0].mappedRecords;
+    expect(sentRecords[0].properties).not.toHaveProperty('hs_cost_of_goods_sold');
+    expect(sentRecords[0].properties.hs_price_nio).toBe(0);
   });
 });

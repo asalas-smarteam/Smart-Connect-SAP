@@ -7,6 +7,10 @@ export const PRODUCT_SYNC_STRATEGIES = Object.freeze({
 
 export const DEFAULT_PRODUCT_SYNC_STRATEGY = PRODUCT_SYNC_STRATEGIES.ONE_TO_ONE_PRODUCT;
 
+// Marker the oneToOne strategy places on a record when requirePrice is enabled,
+// so the product handler keeps the SAP-mapped price instead of zeroing it.
+export const KEEP_MAPPED_PRICE_FLAG = 'keepMappedPrice';
+
 export const PRODUCT_SYNC_ON_MISSING_PRICE = Object.freeze({
   SET_ZERO: 'SET_ZERO',
   SKIP_PRODUCT: 'SKIP_PRODUCT',

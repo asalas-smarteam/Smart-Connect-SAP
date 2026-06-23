@@ -1,5 +1,6 @@
 import * as hubspotClient from '../hubspotClient.js';
 import tenantConfigurationService from '#infrastructure/config/tenantConfiguration.service.js';
+import { KEEP_MAPPED_PRICE_FLAG } from '#domain/products/product-sync-strategy.constants.js';
 import { getHubspotWarehouseStockPropertiesForTenant } from '../warehouseStock.js';
 
 const DEFAULT_PRICE_FIELDS = ['hs_price_usd'];
@@ -39,7 +40,7 @@ export async function preprocess({ item, tenantModels }) {
 
   Object.assign(item.properties, warehouseStockProperties);
 
-  if (item?.rawSapData?.selectedPrice) {
+  if (item?.rawSapData?.selectedPrice || item?.rawSapData?.[KEEP_MAPPED_PRICE_FLAG]) {
     return;
   }
 

@@ -1,6 +1,37 @@
 import {
+  KEEP_MAPPED_PRICE_FLAG,
   PRODUCT_SYNC_STRATEGIES,
 } from '../product-sync-strategy.constants.js';
+
+function markRecordToKeepMappedPrice(record) {
+  return {
+    ...record,
+    rawSapData: {
+      ...(record?.rawSapData ?? {}),
+      [KEEP_MAPPED_PRICE_FLAG]: true,
+    },
+  };
+}
+
+function removeMappedField(record, field) {
+  const properties = { ...(record?.properties ?? {}) };
+  delete properties[field];
+  return { ...record, properties };
+}
+
+// Currencies (fieldsPricesHS) and cost field are mapped from SAP by the mapping
+// repository. Here we only decide which of them survive to HubSpot:
+// - keepMappedPrice: keep currency values instead of letting the handler zero them.
+// - dropCostField: drop the cost field so it is not inserted.
+function applyPriceAndCostConfig(record, { keepMappedPrice, dropCostField, costField }) {
+  let result = keepMappedPrice ? markRecordToKeepMappedPrice(record) : record;
+
+  if (dropCostField && costField) {
+    result = removeMappedField(result, costField);
+  }
+
+  return result;
+}
 
 export class OneToOneProductStrategy {
   constructor({ hubspotSyncTarget, logger = console }) {
@@ -15,19 +46,32 @@ export class OneToOneProductStrategy {
     tenantContext,
     credentials,
     tenantId,
+    strategyConfig = {},
   }) {
-    const totalProducts = Array.isArray(mappedRecords) ? mappedRecords.length : 0;
+    const records = Array.isArray(mappedRecords) ? mappedRecords : [];
+    const totalProducts = records.length;
+    const requirePriceValue = strategyConfig.requirePrice?.value;
+    const requireCostFlag = strategyConfig.requireCost?.flag;
+    const costField = strategyConfig.requireCost?.field;
+    const recordsToSend = records.map((record) => applyPriceAndCostConfig(record, {
+      keepMappedPrice: requirePriceValue,
+      dropCostField: !requireCostFlag,
+      costField,
+    }));
 
     this.logger.info?.({
       msg: 'Starting product sync strategy',
       tenantId,
       strategy: PRODUCT_SYNC_STRATEGIES.ONE_TO_ONE_PRODUCT,
       totalProducts,
+      requirePrice: requirePriceValue,
+      requireCost: requireCostFlag,
+      costField,
     });
 
     try {
       const result = await this.hubspotSyncTarget.send({
-        mappedRecords,
+        mappedRecords: recordsToSend,
         config,
         objectType,
         tenantContext,
