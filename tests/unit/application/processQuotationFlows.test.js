@@ -155,7 +155,7 @@ describe('ProcessHubspotUpdateQuotation', () => {
     eventType: 'updateQuotation',
     payload: {
       portalId: '50564010',
-      deal: { hs_object_id: '59680314911' },
+      deal: { hs_object_id: '59680314911', hubspot_owner_id: '82534997' },
       line_items: [
         { hubspot_id: 'li-1', hs_sku: 'A01', quantity: '2', price: '17.5' },
       ],
@@ -163,8 +163,10 @@ describe('ProcessHubspotUpdateQuotation', () => {
   };
 
   function buildDeps() {
+    const runtimeRepository = buildRuntimeRepository();
+    runtimeRepository.findOwnerMappingByHubspotOwner.mockResolvedValue({ sapOwnerId: 61 });
     return {
-      runtimeRepository: buildRuntimeRepository(),
+      runtimeRepository,
       sapQuotationAdapter: {
         getQuotation: jest.fn().mockResolvedValue({ DocEntry: 12345, DocumentLines: [{ LineNum: 0 }] }),
         updateQuotation: jest.fn().mockResolvedValue({ updated: true }),
@@ -196,6 +198,7 @@ describe('ProcessHubspotUpdateQuotation', () => {
     });
     const patch = deps.sapQuotationAdapter.updateQuotation.mock.calls[0][0].patchPayload;
     expect(patch.DocumentLines).toEqual([{ LineNum: 0, UnitPrice: 17.5, Quantity: 2 }]);
+    expect(patch.SalesPersonCode).toBe(61);
     expect(deps.sapDocumentLinkRepository.updateLines).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({ docEntry: 12345, docNum: 8001, dealId: '59680314911' });
   });

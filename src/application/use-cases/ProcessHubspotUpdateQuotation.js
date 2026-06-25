@@ -1,7 +1,7 @@
 import { buildQuotationLineUpdates } from '#domain/orders/order-builder.service.js';
 import { PermanentWebhookError } from '#shared/errors/index.js';
 import { resolveEventPayload } from '../services/webhook-payload.service.js';
-import { createDocumentAuditTrail } from './webhookQuotationSupport.js';
+import { createDocumentAuditTrail, resolveDocumentSlpCode } from './webhookQuotationSupport.js';
 import { normalizeNumber, toNonEmptyString } from '#shared/utils/string.utils.js';
 
 function applyLineUpdatesToLink(linkLines, lineUpdates) {
@@ -94,6 +94,19 @@ export class ProcessHubspotUpdateQuotation {
         Comments: 'Oferta actualizada por contrapropuesta desde HubSpot',
         DocumentLines: lineUpdates,
       };
+
+      // Re-map the deal owner to its SAP salesperson in case it changed in HubSpot.
+      const slpCode = await resolveDocumentSlpCode({
+        runtimeRepository: this.runtimeRepository,
+        tenantModels,
+        deal,
+        hubspotCredentials,
+        logger: this.logger,
+      });
+      if (Number.isInteger(slpCode)) {
+        patchPayload.SalesPersonCode = slpCode;
+      }
+
       auditTrail.payload_SAP.quotation = patchPayload;
 
       const quotationResponse = await this.sapQuotationAdapter.updateQuotation({

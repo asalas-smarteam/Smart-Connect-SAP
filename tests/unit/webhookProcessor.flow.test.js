@@ -366,11 +366,11 @@ describe('webhookProcessor flow', () => {
     );
   });
 
-  it('sends SAP SlpCode in the order payload from the HubSpot owner mapping', async () => {
+  it('sends SAP SalesPersonCode in the order payload from the HubSpot owner mapping', async () => {
     setupMappings();
     const tenantModels = buildTenantModels({
       deal: {
-        hubspotOwnerId: '82088708',
+        hubspot_owner_id: '82088708',
       },
       ownerMapping: {
         sapOwnerId: '5',
@@ -417,17 +417,17 @@ describe('webhookProcessor flow', () => {
         url: 'https://sap.example.com:50000/b1s/v2/Orders',
         data: expect.objectContaining({
           CardCode: 'CL99999',
-          SlpCode: 5,
+          SalesPersonCode: 5,
         }),
       })
     );
   });
 
-  it('omits SAP SlpCode and logs a warning when the HubSpot owner mapping is missing', async () => {
+  it('omits SAP SalesPersonCode and logs a warning when the HubSpot owner mapping is missing', async () => {
     setupMappings();
     const tenantModels = buildTenantModels({
       deal: {
-        hubspotOwnerId: '82088708',
+        hubspot_owner_id: '82088708',
       },
       ownerMapping: null,
       contact: {
@@ -465,7 +465,7 @@ describe('webhookProcessor flow', () => {
       .find((config) => config.method === 'post' && config.url.endsWith('/b1s/v2/Orders'));
 
     expect(result.completed).toBe(1);
-    expect(orderRequest.data).not.toHaveProperty('SlpCode');
+    expect(orderRequest.data).not.toHaveProperty('SalesPersonCode');
     expect(mockLoggerWarn).toHaveBeenCalledWith({
       msg: 'SAP owner mapping not found for HubSpot owner',
       hubspotOwnerId: '82088708',

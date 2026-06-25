@@ -190,7 +190,7 @@ export function buildOrderPayload({ cardCode, documentLines, slpCode = null }) {
   };
 
   if (Number.isInteger(slpCode)) {
-    payload.SlpCode = slpCode;
+    payload.SalesPersonCode = slpCode;
   }
 
   return payload;
@@ -217,7 +217,7 @@ export function buildQuotationPayload({
   };
 
   if (Number.isInteger(slpCode)) {
-    payload.SlpCode = slpCode;
+    payload.SalesPersonCode = slpCode;
   }
 
   const resolvedNumAtCard = toNonEmptyString(numAtCard);
@@ -270,7 +270,7 @@ export function buildOrderFromQuotationPayload({
   };
 
   if (Number.isInteger(slpCode)) {
-    payload.SlpCode = slpCode;
+    payload.SalesPersonCode = slpCode;
   }
 
   const resolvedNumAtCard = toNonEmptyString(numAtCard);

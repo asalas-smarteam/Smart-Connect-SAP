@@ -6,7 +6,7 @@ import {
 } from '../../../src/domain/orders/order-builder.service.js';
 
 describe('order-builder.service buildQuotationPayload', () => {
-  it('builds a Quotation payload with NumAtCard, Comments and SlpCode', () => {
+  it('builds a Quotation payload with NumAtCard, Comments and SalesPersonCode', () => {
     const payload = buildQuotationPayload({
       cardCode: 'CL00129',
       documentLines: [{ ItemCode: 'A01', Quantity: 1, UnitPrice: 10 }],
@@ -19,7 +19,7 @@ describe('order-builder.service buildQuotationPayload', () => {
       CardCode: 'CL00129',
       NumAtCard: 'HS-DEAL-123',
       Comments: 'Oferta creada desde HubSpot',
-      SlpCode: 5,
+      SalesPersonCode: 5,
       DocumentLines: [{ ItemCode: 'A01', Quantity: 1, UnitPrice: 10 }],
     });
     expect(payload.DocDueDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
@@ -43,7 +43,7 @@ describe('order-builder.service buildOrderFromQuotationPayload', () => {
 
     expect(QUOTATION_BASE_TYPE).toBe(23);
     expect(payload.CardCode).toBe('CL00129');
-    expect(payload.SlpCode).toBe(7);
+    expect(payload.SalesPersonCode).toBe(7);
     expect(payload.DocumentLines).toEqual([
       { BaseType: 23, BaseEntry: 12345, BaseLine: 0 },
       { BaseType: 23, BaseEntry: 12345, BaseLine: 1 },

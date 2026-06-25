@@ -176,7 +176,7 @@ describe('order-builder.service mapDocumentLines', () => {
 });
 
 describe('order-builder.service buildOrderPayload', () => {
-  it('adds SlpCode when SAP owner id is resolved as an integer', () => {
+  it('adds SalesPersonCode when SAP owner id is resolved as an integer', () => {
     const payload = buildOrderPayload({
       cardCode: 'CL99999',
       slpCode: 5,
@@ -191,7 +191,7 @@ describe('order-builder.service buildOrderPayload', () => {
     expect(payload).toEqual({
       CardCode: 'CL99999',
       DocDueDate: expect.any(String),
-      SlpCode: 5,
+      SalesPersonCode: 5,
       DocumentLines: [
         {
           ItemCode: 'A56010004',

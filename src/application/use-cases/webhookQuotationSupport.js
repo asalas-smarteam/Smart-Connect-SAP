@@ -62,7 +62,7 @@ export async function resolveDocumentSlpCode({
   hubspotCredentials,
   logger,
 }) {
-  const hubspotOwnerId = toNonEmptyString(deal?.hubspotOwnerId);
+  const hubspotOwnerId = toNonEmptyString(deal?.hubspot_owner_id || deal?.hubspotOwnerId);
   const dealId = toNonEmptyString(deal?.hs_object_id);
 
   if (!hubspotOwnerId) {
