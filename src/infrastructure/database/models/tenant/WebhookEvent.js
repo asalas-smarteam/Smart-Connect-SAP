@@ -45,6 +45,11 @@ export const webhookEventSchema = new Schema(
   }
 );
 
+// NOTE: This partial unique index only covers `createDeal`. MongoDB does not allow
+// multiple indexes with the same key pattern differing only by partialFilterExpression,
+// so the quotation event types (createQuotation / updateQuotation / convertQuotationToOrder)
+// rely on application-level dedup (queueWebhookEvent) plus the unique index on
+// SapDocumentLinks (hubspotCredentialId + dealId + documentType) for race-safe idempotency.
 webhookEventSchema.index(
   {
     eventType: 1,

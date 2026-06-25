@@ -32,6 +32,53 @@ describe('warehouseStock utils', () => {
     ]);
   });
 
+  it('uses valueSAP as warehouse code and keeps value as the HubSpot property name', async () => {
+    const tenantModels = {
+      Configuration: {
+        findOneAndUpdate: jest.fn().mockResolvedValue({
+          key: 'fieldsWareHouseHS',
+          value: [
+            { label: 'DISTELSA', value: 'distelsa_stock', valueSAP: '01' },
+            { label: 'PRODUCTOS DE EXHIBICION', value: 'exhibicion_stock', valueSAP: '05' },
+          ],
+          userUpdated: 'admin',
+        }),
+      },
+    };
+
+    const fields = await resolveHubspotWarehouseFields(tenantModels);
+
+    expect(fields).toEqual([
+      { warehouseCode: '01', propertyName: 'distelsa_stock' },
+      { warehouseCode: '05', propertyName: 'exhibicion_stock' },
+    ]);
+  });
+
+  it('builds stock properties for numeric SAP warehouse codes mapped via valueSAP', async () => {
+    const tenantModels = {
+      Configuration: {
+        findOneAndUpdate: jest.fn().mockResolvedValue({
+          key: 'fieldsWareHouseHS',
+          value: [
+            { label: 'DISTELSA', value: 'distelsa_stock', valueSAP: '01' },
+            { label: 'PRODUCTOS DE EXHIBICION', value: 'exhibicion_stock', valueSAP: '05' },
+          ],
+          userUpdated: 'admin',
+        }),
+      },
+    };
+
+    const properties = await getHubspotWarehouseStockPropertiesForTenant(tenantModels, [
+      { WarehouseCode: '01', Ordered: 2, Committed: 1, InStock: 7 },
+      { WarehouseCode: '05', Ordered: 0, Committed: 3, InStock: 5 },
+    ]);
+
+    expect(properties).toEqual({
+      distelsa_stock: 8,
+      exhibicion_stock: 2,
+    });
+  });
+
   it('builds HubSpot stock properties per configured warehouse', async () => {
     const tenantModels = {
       Configuration: {

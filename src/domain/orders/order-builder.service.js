@@ -117,7 +117,7 @@ function resolveUnitPrice({ mapped, lineItem, miscPriceCalculationConfig }) {
 
   return {
     unitPrice: normalizeNumber(
-      mapped?.UnitPrice ?? lineItem?.hs_effective_unit_price,
+      mapped?.UnitPrice ?? lineItem?.hs_effective_unit_price ?? lineItem?.price,
       0
     ),
     warning: null,
@@ -194,4 +194,197 @@ export function buildOrderPayload({ cardCode, documentLines, slpCode = null }) {
   }
 
   return payload;
+}
+
+// SAP BaseType for Sales Quotation (Oferta de Venta).
+export const QUOTATION_BASE_TYPE = 23;
+
+export function buildQuotationPayload({
+  cardCode,
+  documentLines,
+  slpCode = null,
+  numAtCard = null,
+  comments = null,
+}) {
+  if (!documentLines.length) {
+    throw new PermanentWebhookError('At least one line_item is required to create SAP Quotation');
+  }
+
+  const payload = {
+    CardCode: cardCode,
+    DocDueDate: new Date().toISOString().slice(0, 10),
+    DocumentLines: documentLines,
+  };
+
+  if (Number.isInteger(slpCode)) {
+    payload.SlpCode = slpCode;
+  }
+
+  const resolvedNumAtCard = toNonEmptyString(numAtCard);
+  if (resolvedNumAtCard) {
+    payload.NumAtCard = resolvedNumAtCard;
+  }
+
+  const resolvedComments = toNonEmptyString(comments);
+  if (resolvedComments) {
+    payload.Comments = resolvedComments;
+  }
+
+  return payload;
+}
+
+export function buildOrderFromQuotationPayload({
+  cardCode,
+  baseEntry,
+  baseLines,
+  slpCode = null,
+  numAtCard = null,
+  comments = null,
+}) {
+  const normalizedBaseEntry = baseEntry === null || typeof baseEntry === 'undefined'
+    ? null
+    : normalizeNumber(baseEntry, null);
+  if (!Number.isFinite(normalizedBaseEntry)) {
+    throw new PermanentWebhookError('A valid quotation BaseEntry is required to create SAP Order');
+  }
+
+  const documentLines = (Array.isArray(baseLines) ? baseLines : [])
+    .map((line) => normalizeNumber(line?.sapLineNum ?? line, null))
+    .filter((baseLine) => Number.isFinite(baseLine))
+    .map((baseLine) => ({
+      BaseType: QUOTATION_BASE_TYPE,
+      BaseEntry: normalizedBaseEntry,
+      BaseLine: baseLine,
+    }));
+
+  if (!documentLines.length) {
+    throw new PermanentWebhookError(
+      'At least one quotation line (BaseLine) is required to create SAP Order from Quotation'
+    );
+  }
+
+  const payload = {
+    CardCode: cardCode,
+    DocDueDate: new Date().toISOString().slice(0, 10),
+    DocumentLines: documentLines,
+  };
+
+  if (Number.isInteger(slpCode)) {
+    payload.SlpCode = slpCode;
+  }
+
+  const resolvedNumAtCard = toNonEmptyString(numAtCard);
+  if (resolvedNumAtCard) {
+    payload.NumAtCard = resolvedNumAtCard;
+  }
+
+  const resolvedComments = toNonEmptyString(comments);
+  if (resolvedComments) {
+    payload.Comments = resolvedComments;
+  }
+
+  return payload;
+}
+
+// Resolves the SAP LineNum for an incoming HubSpot line item against the stored link lines.
+// HubSpot workflows are not consistent about which identifier they send (line item id vs
+// product id), so we match in priority order: line item id -> product id -> SKU. Already
+// matched LineNums are excluded to avoid emitting a duplicate LineNum in the PATCH.
+function resolveQuotationLinkLine(lineItem, linkLines, usedLineNums) {
+  const candidateIds = [
+    toNonEmptyString(lineItem?.hubspot_id),
+    toNonEmptyString(lineItem?.hubspotLineItemId),
+    toNonEmptyString(lineItem?.hs_product_id),
+    toNonEmptyString(lineItem?.hubspotProductId),
+    toNonEmptyString(lineItem?.productId),
+  ].filter(Boolean);
+  const candidateSkus = [
+    toNonEmptyString(lineItem?.hs_sku),
+    toNonEmptyString(lineItem?.sku),
+    toNonEmptyString(lineItem?.itemCode),
+  ].filter(Boolean);
+
+  const lines = (Array.isArray(linkLines) ? linkLines : []).filter((link) => {
+    const lineNum = normalizeNumber(link?.sapLineNum, null);
+    return Number.isFinite(lineNum) && !usedLineNums.has(lineNum);
+  });
+
+  const matchers = [
+    (link) => candidateIds.includes(toNonEmptyString(link?.hubspotLineItemId)),
+    (link) => candidateIds.includes(toNonEmptyString(link?.hubspotProductId)),
+    (link) => candidateSkus.includes(toNonEmptyString(link?.sku)),
+  ];
+
+  for (const matcher of matchers) {
+    const match = lines.find(matcher);
+    if (match) {
+      return { sapLineNum: normalizeNumber(match.sapLineNum, null) };
+    }
+  }
+
+  return null;
+}
+
+// Builds the PATCH /Quotations(DocEntry) DocumentLines updating only existing lines
+// (price / quantity / discount) matched by their SAP LineNum.
+export function buildQuotationLineUpdates({ lineItems, productMappings, linkLines, taxCodes = [], miscPriceCalculationConfig = null, logger = null }) {
+  const updates = [];
+  const usedLineNums = new Set();
+
+  for (const lineItem of Array.isArray(lineItems) ? lineItems : []) {
+    const matchedLink = resolveQuotationLinkLine(lineItem, linkLines, usedLineNums);
+    if (!matchedLink) {
+      logger?.warn?.({
+        msg: 'Skipping quotation line update: no stored LineNum for HubSpot line item',
+        hubspotLineItemId: toNonEmptyString(lineItem?.hubspot_id),
+        hubspotProductId: toNonEmptyString(lineItem?.hs_product_id),
+        sku: toNonEmptyString(lineItem?.hs_sku),
+      });
+      continue;
+    }
+
+    usedLineNums.add(matchedLink.sapLineNum);
+
+    const mapped = mapHubspotToSapFields(lineItem, productMappings);
+    const quantity = normalizeNumber(mapped?.Quantity ?? lineItem?.quantity, null);
+    const discount = normalizeNumber(lineItem?.hs_discount_percentage, null);
+    const { unitPrice, warning } = resolveUnitPrice({ mapped, lineItem, miscPriceCalculationConfig });
+
+    if (warning) {
+      logger?.warn?.({ msg: warning, sapLineNum: matchedLink.sapLineNum });
+    }
+
+    const line = { LineNum: matchedLink.sapLineNum };
+
+    if (Number.isFinite(unitPrice)) {
+      line.UnitPrice = unitPrice;
+    }
+
+    if (Number.isFinite(quantity) && quantity > 0) {
+      line.Quantity = quantity;
+    }
+
+    if (Number.isFinite(discount)) {
+      line.DiscountPercent = discount;
+    }
+
+    // Allow changing the warehouse on update (accepts both `warehouseCode` and `warehouses`).
+    const warehouseCode = toNonEmptyString(lineItem?.warehouseCode || lineItem?.warehouses);
+    if (warehouseCode) {
+      line.WarehouseCode = warehouseCode;
+    }
+
+    const taxCode = resolveTaxCodeByRate(taxCodes, lineItem?.hs_tax_rate);
+    if (taxCode) {
+      line.TaxCode = taxCode;
+    }
+
+    updates.push(line);
+  }
+
+  if (!updates.length) {
+    throw new PermanentWebhookError('No matching quotation lines found to update');
+  }
+
+  return updates;
 }

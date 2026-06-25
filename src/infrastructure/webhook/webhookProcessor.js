@@ -1,6 +1,6 @@
 import {
-  buildProcessHubspotWebhookEventUseCase,
   buildProcessWebhookDealEventBatch,
+  buildWebhookEventDispatcher,
   buildWebhookEventRepository,
 } from '#composition/webhook-processing.composition.js';
 
@@ -26,11 +26,10 @@ const webhookProcessor = {
       WebhookEvent: tenantModels?.WebhookEvent,
       batchSize: DEFAULT_BATCH_SIZE,
     });
-    const processHubspotWebhookEvent = buildProcessHubspotWebhookEventUseCase();
     const useCase = buildProcessWebhookDealEventBatch({
       webhookEventRepository: repository,
       maxRetries: maxRetriesByEnv,
-      processHubspotWebhookEvent,
+      processWebhookDealEvent: buildWebhookEventDispatcher(),
     });
 
     return useCase.execute({ tenantModels, tenantId, tenantKey, portalId });

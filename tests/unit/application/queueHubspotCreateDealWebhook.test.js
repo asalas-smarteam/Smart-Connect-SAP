@@ -12,7 +12,7 @@ function createUseCase() {
     }),
   };
   const webhookEventRepository = {
-    queueCreateDealEvent: jest.fn().mockResolvedValue({
+    queueWebhookEvent: jest.fn().mockResolvedValue({
       duplicated: false,
       eventId: 'event-1',
     }),
@@ -54,8 +54,9 @@ describe('QueueHubspotCreateDealWebhook', () => {
     const result = await useCase.execute({ payload });
 
     expect(activeTenantResolver.resolve).toHaveBeenCalledWith({ tenantId: 'tenant-1' });
-    expect(webhookEventRepository.queueCreateDealEvent).toHaveBeenCalledWith({
+    expect(webhookEventRepository.queueWebhookEvent).toHaveBeenCalledWith({
       tenantKey: 'tenant_key_1',
+      eventType: 'createDeal',
       payload,
     });
     expect(webhookQueue.addManualJob).toHaveBeenCalledWith({
@@ -76,7 +77,7 @@ describe('QueueHubspotCreateDealWebhook', () => {
       webhookEventRepository,
       webhookQueue,
     } = createUseCase();
-    webhookEventRepository.queueCreateDealEvent.mockResolvedValue({
+    webhookEventRepository.queueWebhookEvent.mockResolvedValue({
       duplicated: true,
       eventId: 'event-1',
     });

@@ -14,6 +14,22 @@ function resolveWarehouseCodeFromPropertyName(propertyName) {
   return match?.[1] ?? '';
 }
 
+function resolveWarehouseField(field) {
+  const propertyName = field?.value;
+
+  if (!propertyName) {
+    return null;
+  }
+
+  const warehouseCode = field?.valueSAP || resolveWarehouseCodeFromPropertyName(propertyName);
+
+  if (!warehouseCode) {
+    return null;
+  }
+
+  return { warehouseCode, propertyName };
+}
+
 export function getWarehouseAvailableStock(warehouse) {
   const inStock = Number(warehouse?.InStock ?? 0);
   const committed = Number(warehouse?.Committed ?? 0);
@@ -31,14 +47,15 @@ export function normalizeHubspotWarehouseFields(value) {
   const normalizedFields = [];
 
   value.forEach((field) => {
-    const propertyName = field?.value;
-    const warehouseCode = resolveWarehouseCodeFromPropertyName(propertyName);
+    const warehouseField = resolveWarehouseField(field);
 
-    if (!propertyName || !warehouseCode) {
+    if (!warehouseField) {
       return;
     }
 
+    const { warehouseCode, propertyName } = warehouseField;
     const dedupeKey = `${warehouseCode}:${propertyName.toLowerCase()}`;
+
     if (seen.has(dedupeKey)) {
       return;
     }

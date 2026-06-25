@@ -1,6 +1,4 @@
-import axios from 'axios';
-import https from 'https';
-import sapSessionManager, { isSessionInvalidError } from './sapSessionManager.js';
+import { sapServiceLayerWebhookRequest } from './sapServiceLayerWebhookRequest.js';
 import {
   buildDefaultBusinessPartnerCardCode,
   mapHubspotToSapFields,
@@ -12,12 +10,6 @@ import {
   normalizeNumber,
   toNonEmptyString,
 } from '#shared/utils/string.utils.js';
-
-const httpsAgent = new https.Agent({ rejectUnauthorized: false });
-
-function cleanBaseUrl(baseUrl) {
-  return String(baseUrl || '').trim().replace(/\/+$/, '');
-}
 
 function resolveContactEmployeePayload(contact, contactEmployeeMappings) {
   const mapped = mapHubspotToSapFields(contact || {}, contactEmployeeMappings);
@@ -47,41 +39,8 @@ function resolveContactEmployeePayload(contact, contactEmployeeMappings) {
 }
 
 export class SapWebhookOrderAdapter {
-  async request(sapConfig, { method, path, data, params }) {
-    const baseUrl = cleanBaseUrl(sapConfig?.serviceLayerBaseUrl);
-
-    if (!baseUrl) {
-      throw new Error('Missing serviceLayerBaseUrl for webhook processing');
-    }
-
-    const url = `${baseUrl}/b1s/v2${path.startsWith('/') ? path : `/${path}`}`;
-
-    const requestWithSession = async () => {
-      const { cookie } = await sapSessionManager.getSessionCookie(sapConfig);
-      const response = await axios({
-        method,
-        url,
-        data,
-        params,
-        headers: {
-          Cookie: cookie,
-        },
-        httpsAgent,
-      });
-      return response.data;
-    };
-
-    try {
-      return await requestWithSession();
-    } catch (error) {
-      if (!isSessionInvalidError(error)) {
-        throw error;
-      }
-
-      const tenantKey = sapSessionManager.resolveTenantKey(sapConfig);
-      await sapSessionManager.invalidateSession(tenantKey);
-      return requestWithSession();
-    }
+  async request(sapConfig, options) {
+    return sapServiceLayerWebhookRequest(sapConfig, options);
   }
 
   async findBusinessPartnerByCardCode(sapConfig, cardCode) {

@@ -1,7 +1,14 @@
-export function createWebhookController({ queueHubspotCreateDealWebhook, logger }) {
+export function createWebhookController({
+  queueHubspotWebhookEvent,
+  queueHubspotCreateDealWebhook,
+  eventType = 'webhook',
+  logger,
+}) {
+  const queueUseCase = queueHubspotWebhookEvent || queueHubspotCreateDealWebhook;
+
   return async function receiveHubspotWebhook(req, reply) {
     try {
-      const result = await queueHubspotCreateDealWebhook.execute({
+      const result = await queueUseCase.execute({
         payload: req.body ?? {},
         tenantId: req.headers?.['x-tenant-id'] || req.body?.tenantId,
       });
@@ -15,7 +22,8 @@ export function createWebhookController({ queueHubspotCreateDealWebhook, logger 
       const message = statusCode >= 500 ? 'Internal error' : error.message;
 
       logger.error({
-        msg: 'Failed to queue HubSpot createDeal webhook',
+        msg: 'Failed to queue HubSpot webhook',
+        eventType,
         error: error.message,
       });
 

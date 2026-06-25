@@ -3,18 +3,22 @@ function toNonEmptyString(value) {
   return normalized || null;
 }
 
-export class HubspotCreateDealWebhook {
-  constructor({ payload, tenantId }) {
+// Base validation shared by every HubSpot deal-based webhook (createDeal and the
+// quotation flows). They all carry the same base payload: { portalId, deal, ... }.
+export class HubspotDealWebhook {
+  constructor({ payload, tenantId, eventType = 'createDeal' }) {
     this.payload = payload;
     this.tenantId = tenantId;
+    this.eventType = eventType;
     this.portalId = toNonEmptyString(payload?.portalId);
     this.dealId = toNonEmptyString(payload?.deal?.hs_object_id);
   }
 
-  static fromRequest({ payload = {}, tenantId }) {
-    return new HubspotCreateDealWebhook({
+  static fromRequest({ payload = {}, tenantId, eventType = 'createDeal' }) {
+    return new this({
       payload,
       tenantId: toNonEmptyString(tenantId) || toNonEmptyString(payload?.tenantId),
+      eventType,
     });
   }
 
@@ -43,5 +47,8 @@ export class HubspotCreateDealWebhook {
     }
   }
 }
+
+// Backwards-compatible alias kept for the existing createDeal flow.
+export class HubspotCreateDealWebhook extends HubspotDealWebhook {}
 
 export default HubspotCreateDealWebhook;
