@@ -1,0 +1,246 @@
+{
+  "nodes": [
+    {
+      "id": "a1f3c9d2e7b40516",
+      "type": "group",
+      "x": -780,
+      "y": -560,
+      "width": 1860,
+      "height": 1220,
+      "label": "Smart Connect SAP — Mapa Mental",
+      "color": "6"
+    },
+    {
+      "id": "0c4e8a1b9d6f2371",
+      "type": "text",
+      "x": 100,
+      "y": 0,
+      "width": 320,
+      "height": 120,
+      "color": "6",
+      "text": "# 🔗 Smart Connect SAP\n\nIntegración HubSpot ↔ SAP"
+    },
+    {
+      "id": "1b7d3f5a2c8e9046",
+      "type": "text",
+      "x": -640,
+      "y": -360,
+      "width": 300,
+      "height": 110,
+      "color": "2",
+      "text": "## 🟠 HubSpot\n\nCRM origen de datos"
+    },
+    {
+      "id": "2e9a6c1f4b7d8350",
+      "type": "text",
+      "x": -700,
+      "y": -180,
+      "width": 280,
+      "height": 90,
+      "color": "3",
+      "text": "Procesamiento de **cotizaciones**"
+    },
+    {
+      "id": "3f0b8d2a6e1c7549",
+      "type": "text",
+      "x": -700,
+      "y": -60,
+      "width": 280,
+      "height": 90,
+      "color": "3",
+      "text": "Criterios de **búsqueda configurables**"
+    },
+    {
+      "id": "4a1c9e3b7f2d8650",
+      "type": "text",
+      "x": 720,
+      "y": -360,
+      "width": 300,
+      "height": 110,
+      "color": "5",
+      "text": "## 🔵 SAP\n\nERP destino"
+    },
+    {
+      "id": "5b2d0f4c8a3e9761",
+      "type": "text",
+      "x": 760,
+      "y": -180,
+      "width": 280,
+      "height": 90,
+      "color": "3",
+      "text": "Owner mapping → **SalesPersonCode**"
+    },
+    {
+      "id": "6c3e1a5d9b4f0872",
+      "type": "text",
+      "x": 760,
+      "y": -60,
+      "width": 280,
+      "height": 90,
+      "color": "3",
+      "text": "Gestión de **órdenes / payloads**"
+    },
+    {
+      "id": "7d4f2b6e0c5a1983",
+      "type": "text",
+      "x": -640,
+      "y": 360,
+      "width": 300,
+      "height": 110,
+      "color": "4",
+      "text": "## 🟢 Casos de Uso\n\nLógica de negocio"
+    },
+    {
+      "id": "8e5a3c7f1d6b2094",
+      "type": "text",
+      "x": -700,
+      "y": 200,
+      "width": 280,
+      "height": 90,
+      "color": "3",
+      "text": "Procesamiento de cotizaciones HubSpot"
+    },
+    {
+      "id": "9f6b4d8a2e7c310a",
+      "type": "text",
+      "x": -700,
+      "y": 320,
+      "width": 280,
+      "height": 90,
+      "color": "3",
+      "text": "**Bypass** de email"
+    },
+    {
+      "id": "a07c5e9b3f8d421b",
+      "type": "text",
+      "x": 720,
+      "y": 360,
+      "width": 300,
+      "height": 110,
+      "color": "1",
+      "text": "## 🔴 Sincronización\n\nEstrategias de datos"
+    },
+    {
+      "id": "b18d6f0c4a9e532c",
+      "type": "text",
+      "x": 760,
+      "y": 200,
+      "width": 280,
+      "height": 90,
+      "color": "3",
+      "text": "Sync de **productos**"
+    },
+    {
+      "id": "c29e7a1d5b0f643d",
+      "type": "text",
+      "x": 760,
+      "y": 320,
+      "width": 280,
+      "height": 90,
+      "color": "3",
+      "text": "Conservar **precio mapeado en SAP**"
+    }
+  ],
+  "edges": [
+    {
+      "id": "d3af8b2e6c1d754e",
+      "fromNode": "0c4e8a1b9d6f2371",
+      "fromSide": "left",
+      "toNode": "1b7d3f5a2c8e9046",
+      "toSide": "right",
+      "toEnd": "arrow",
+      "color": "2"
+    },
+    {
+      "id": "e4b09c3f7d2e865f",
+      "fromNode": "0c4e8a1b9d6f2371",
+      "fromSide": "right",
+      "toNode": "4a1c9e3b7f2d8650",
+      "toSide": "left",
+      "toEnd": "arrow",
+      "color": "5"
+    },
+    {
+      "id": "f5c1ad4a8e3f9760",
+      "fromNode": "0c4e8a1b9d6f2371",
+      "fromSide": "bottom",
+      "toNode": "7d4f2b6e0c5a1983",
+      "toSide": "top",
+      "toEnd": "arrow",
+      "color": "4"
+    },
+    {
+      "id": "06d2be5b9f401871",
+      "fromNode": "0c4e8a1b9d6f2371",
+      "fromSide": "bottom",
+      "toNode": "a07c5e9b3f8d421b",
+      "toSide": "top",
+      "toEnd": "arrow",
+      "color": "1"
+    },
+    {
+      "id": "17e3cf6c0a512982",
+      "fromNode": "1b7d3f5a2c8e9046",
+      "fromSide": "bottom",
+      "toNode": "2e9a6c1f4b7d8350",
+      "toSide": "top",
+      "toEnd": "arrow"
+    },
+    {
+      "id": "28f4d07d1b623a93",
+      "fromNode": "1b7d3f5a2c8e9046",
+      "fromSide": "bottom",
+      "toNode": "3f0b8d2a6e1c7549",
+      "toSide": "top",
+      "toEnd": "arrow"
+    },
+    {
+      "id": "3905e18e2c734b04",
+      "fromNode": "4a1c9e3b7f2d8650",
+      "fromSide": "bottom",
+      "toNode": "5b2d0f4c8a3e9761",
+      "toSide": "top",
+      "toEnd": "arrow"
+    },
+    {
+      "id": "4a16f29f3d845c15",
+      "fromNode": "4a1c9e3b7f2d8650",
+      "fromSide": "bottom",
+      "toNode": "6c3e1a5d9b4f0872",
+      "toSide": "top",
+      "toEnd": "arrow"
+    },
+    {
+      "id": "5b2703004e956d26",
+      "fromNode": "7d4f2b6e0c5a1983",
+      "fromSide": "top",
+      "toNode": "8e5a3c7f1d6b2094",
+      "toSide": "bottom",
+      "toEnd": "arrow"
+    },
+    {
+      "id": "6c381411500a7e37",
+      "fromNode": "7d4f2b6e0c5a1983",
+      "fromSide": "top",
+      "toNode": "9f6b4d8a2e7c310a",
+      "toSide": "bottom",
+      "toEnd": "arrow"
+    },
+    {
+      "id": "7d492522611b8f48",
+      "fromNode": "a07c5e9b3f8d421b",
+      "fromSide": "top",
+      "toNode": "b18d6f0c4a9e532c",
+      "toSide": "bottom",
+      "toEnd": "arrow"
+    },
+    {
+      "id": "8e5a3633722c9059",
+      "fromNode": "a07c5e9b3f8d421b",
+      "fromSide": "top",
+      "toNode": "c29e7a1d5b0f643d",
+      "toSide": "bottom",
+      "toEnd": "arrow"
+    }
+  ]
+}
