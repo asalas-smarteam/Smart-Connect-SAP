@@ -1,7 +1,7 @@
 import { buildLineItemPriceControllerDependencies } from '#composition/line-item-prices.composition.js';
 
 function resolveStatusCode(error) {
-  return /lineItems must be a non-empty array|itemCode is required|\.id is required|portalId is required|eventId is required|subscriptionId is required|appId is required|occurredAt is required|fromObjectId is required/.test(
+  return /lineItems must be a non-empty array|itemCode is required|\.id is required|portalId is required|eventId is required|subscriptionId is required|appId is required|occurredAt is required|fromObjectId is required|objectId is required|safe_price_value is required to recalculate line item price/.test(
     error.message
   )
     ? 400

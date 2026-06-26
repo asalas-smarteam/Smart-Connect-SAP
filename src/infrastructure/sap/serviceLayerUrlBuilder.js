@@ -43,6 +43,7 @@ function sanitizeSelectFields(mappings) {
 const additionalFieldsEnvByObjectType = {
   company: 'COMPANY_ADD_FIELDS_URL_SAP',
   product: 'PRODUCT_ADD_FIELDS_URL_SAP',
+  deal: 'DEAL_ADD_FIELDS_URL_SAP'
 };
 
 function getAdditionalFieldsByObjectType(objectType) {

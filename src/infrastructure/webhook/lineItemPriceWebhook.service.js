@@ -1,8 +1,14 @@
 import hubspotAuthService from '../hubspot/hubspotAuthService.js';
 import * as hubspotClient from '../hubspot/hubspotClient.js';
 
+// Conjunto 1: cambio de asociación deal <-> line item
 const SUPPORTED_ASSOCIATION_TYPE = 'DEAL_TO_LINE_ITEM';
 const SUPPORTED_CHANGE_SOURCE = 'USER';
+
+// Conjunto 2: cambio de propiedad del line item
+const SUPPORTED_SUBSCRIPTION_TYPE = 'line_item.propertyChange';
+const SUPPORTED_PROPERTY_NAME = 'miscelaneo';
+const SUPPORTED_CHANGE_SOURCE_PROPERTY = 'CRM_UI';
 
 function toNonEmptyString(value) {
   const normalized = String(value ?? '').trim();
@@ -175,6 +181,98 @@ async function resolveLineItems(token, deal, miscPriceCalculationConfig = null) 
   return lineItems;
 }
 
+function toNumberOrNull(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+// Flujo de cambio de propiedad: precio = safe_price_value + miscelaneo.
+// Es idempotente porque siempre parte del precio base (safe_price_value).
+async function recalculateLineItemPriceFromMisc(payload, token) {
+  const lineItemId = toNonEmptyString(payload?.objectId);
+
+  if (!lineItemId) {
+    throw new Error('objectId is required');
+  }
+
+  const lineItem = await fetchHubspotObject(token, 'line_items', lineItemId, {
+    properties: ['price', 'miscelaneo', 'safe_price_value'],
+  });
+
+  const safePrice = toNumberOrNull(lineItem?.properties?.safe_price_value);
+
+  if (safePrice === null) {
+    throw new Error('safe_price_value is required to recalculate line item price');
+  }
+
+  const misc = toNumberOrNull(lineItem?.properties?.miscelaneo) ?? 0;
+  const newPrice = safePrice + misc;
+
+  await hubspotClient.batchUpdateLineItems(token, {
+    inputs: [{ id: lineItemId, properties: { price: String(newPrice) } }],
+  });
+
+  return { lineItemId, safePrice, misc, price: newPrice };
+}
+
+async function handlePropertyChangeEvent(payload, { tenantModels, tenant }) {
+  if (payload?.portalId === undefined || payload?.portalId === null || payload?.portalId === '') {
+    throw new Error('portalId is required');
+  }
+
+  assertRequiredWebhookField(payload, 'eventId');
+  assertRequiredWebhookField(payload, 'subscriptionId');
+  assertRequiredWebhookField(payload, 'appId');
+  assertRequiredWebhookField(payload, 'occurredAt');
+  assertRequiredWebhookField(payload, 'objectId');
+
+  const { LineItemPriceWebhookEvent } = tenantModels;
+  const createdEvent = await LineItemPriceWebhookEvent.create({
+    payload,
+    isSend: false,
+    errorMessage: null,
+  });
+
+  try {
+    const hubspotCredentials = await resolveHubspotCredentials(tenantModels, tenant);
+    const token = await hubspotAuthService.getAccessToken(
+      hubspotCredentials.clientConfigId,
+      hubspotCredentials,
+      tenantModels
+    );
+
+    const result = await recalculateLineItemPriceFromMisc(payload, token);
+
+    await LineItemPriceWebhookEvent.updateOne(
+      { _id: createdEvent._id },
+      { $set: { isSend: true, errorMessage: null } }
+    );
+
+    return {
+      skip: true,
+      payload: null,
+      executionId: createdEvent._id,
+      meta: {
+        skipped: false,
+        handled: true,
+        reason: 'line_item_price_recalculated',
+        ...result,
+      },
+    };
+  } catch (error) {
+    await LineItemPriceWebhookEvent.updateOne(
+      { _id: createdEvent._id },
+      { $set: { isSend: false, errorMessage: error.message } }
+    );
+
+    throw error;
+  }
+}
+
 async function buildLegacyPayload(payload, token, miscPriceCalculationConfig = null) {
   const dealId = toNonEmptyString(payload?.fromObjectId);
 
@@ -208,10 +306,16 @@ const lineItemPriceWebhookService = {
       };
     }
 
-    if (
-      payload?.associationType !== SUPPORTED_ASSOCIATION_TYPE
-      || payload?.changeSource !== SUPPORTED_CHANGE_SOURCE
-    ) {
+    const isSupportedAssociationEvent =
+      payload?.associationType === SUPPORTED_ASSOCIATION_TYPE
+      && payload?.changeSource === SUPPORTED_CHANGE_SOURCE;
+
+    const isSupportedPropertyEvent =
+      payload?.subscriptionType === SUPPORTED_SUBSCRIPTION_TYPE
+      && payload?.propertyName === SUPPORTED_PROPERTY_NAME
+      && payload?.changeSource === SUPPORTED_CHANGE_SOURCE_PROPERTY;
+
+    if (!isSupportedAssociationEvent && !isSupportedPropertyEvent) {
       return {
         skip: true,
         payload: null,
@@ -221,6 +325,11 @@ const lineItemPriceWebhookService = {
           reason: 'unsupported_event',
         },
       };
+    }
+
+    // Flujo de cambio de propiedad: recalcula y actualiza el precio del line item.
+    if (isSupportedPropertyEvent) {
+      return handlePropertyChangeEvent(payload, { tenantModels, tenant });
     }
 
     if (payload?.portalId === undefined || payload?.portalId === null || payload?.portalId === '') {
