@@ -9,6 +9,10 @@ import { buildTenantDatabaseName, getTenantConnection } from '../database/tenant
 import { registerTenantModels } from '../database/models/tenant/index.js';
 import { BYPASS_EMAIL_CONFIG_KEY } from '#infrastructure/config/BypassEmailConfigRepository.js';
 import { DEFAULT_FIND_HUBSPOT_CONFIG_KEY } from '#infrastructure/config/DefaultFindHubspotConfigRepository.js';
+import {
+  UPDATE_DEAL_STAGE_CONFIG_KEY,
+  DEFAULT_UPDATE_DEAL_STAGE_CONFIG,
+} from '#infrastructure/config/updateDealStage.config.js';
 import { sanitizeMongoCollectionName } from '#shared/utils/provisioningValidation.js';
 import { replicateDefaultSapFilters } from './replicateDefaultSapFilters.js';
 
@@ -82,6 +86,17 @@ async function ensureTenantConfigurations({ Configuration }) {
         key: DEFAULT_FIND_HUBSPOT_CONFIG_KEY,
         userUpdated: 'admin',
         value: 'idsap',
+      },
+    },
+    { upsert: true }
+  );
+  await Configuration.updateOne(
+    { key: UPDATE_DEAL_STAGE_CONFIG_KEY },
+    {
+      $setOnInsert: {
+        key: UPDATE_DEAL_STAGE_CONFIG_KEY,
+        userUpdated: 'admin',
+        value: { ...DEFAULT_UPDATE_DEAL_STAGE_CONFIG, dealstage: 'closedwon' },
       },
     },
     { upsert: true }

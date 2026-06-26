@@ -22,6 +22,9 @@ const DEFAULT_COMPANY_EMPLOYEE_MAPPINGS = [
 const DEFAULT_DEAL_MAPPINGS = [
   { sourceField: 'DocEntry', targetField: 'sap_docentry', sourceContext: 'businessPartner' },
   { sourceField: 'DocNum', targetField: 'sap_docnum', sourceContext: 'businessPartner' },
+  { sourceField: 'DocNum', targetField: 'dealname', sourceContext: 'businessPartner' },
+  { sourceField: 'DocTotal', targetField: 'amount', sourceContext: 'businessPartner' },
+  { sourceField: 'DocumentStatus', targetField: 'dealstage', sourceContext: 'businessPartner' },
 ];
 
 const DEFAULT_PRODUCT_MAPPINGS = [

@@ -185,7 +185,7 @@ export class SendMappedItemsToHubspot {
 
       const token = await getToken();
 
-      if (!item?.properties?.email && objectType !== 'product' && !emailWasBypassed) {
+      if (!item?.properties?.email && objectType !== 'product' && objectType !== 'deal' && !emailWasBypassed) {
         await this.writeValidationFailure(objectType, item);
         await this.registerBaseMapping(
           clientConfig,

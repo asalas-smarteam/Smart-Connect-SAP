@@ -35,6 +35,17 @@ const BASE_MASTER_CLIENT_CONFIGS = [
     active: false,
     syncInTenant: true,
   },
+  {
+    clientName: 'Obtener Negocios',
+    objectType: 'deal',
+    mode: 'INCREMENTAL',
+    executionTime: null,
+    intervalMinutes: 2,
+    serviceLayerPath: '/Orders',
+    hubspotBatchSize: 30,
+    active: false,
+    syncInTenant: true,
+  },
 ];
 
 export async function seedMasterClientConfigs(masterConnection) {

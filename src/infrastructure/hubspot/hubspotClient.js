@@ -155,6 +155,16 @@ export async function findDealByName(token, dealName) {
   ]);
 }
 
+export async function findDealByProperty(token, propertyName, value, options = {}) {
+  return searchObject(token, 'deals', [
+    {
+      propertyName,
+      operator: 'EQ',
+      value,
+    },
+  ], options?.properties);
+}
+
 export async function createDeal(token, data) {
   return hubspotRequest('post', '/crm/v3/objects/deals', token, data);
 }
