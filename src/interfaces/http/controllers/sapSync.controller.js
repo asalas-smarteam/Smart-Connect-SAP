@@ -4,7 +4,8 @@ function createSapSyncController({ sapSyncAdmin = buildSapSyncAdmin() } = {}) {
   return {
     triggerSapSync: async (req, reply) =>  {
   try {
-    await sapSyncAdmin.runSapSyncOnce();
+    const { tenantID = null } = req.body ?? {};
+    await sapSyncAdmin.runSapSyncOnce({ tenantID });
     reply.code(200).send({ message: 'SAP sync jobs executed successfully' });
   } catch (error) {
     req.log.error({ msg: 'Error executing SAP sync jobs manually', error });

@@ -43,6 +43,10 @@ async function fetchAllPages(baseUrl, initialUrl, headers) {
       httpsAgent,
     });
 
+    if(items.length === 3000){
+      return items; // Stop fetching more pages if we have reached 3000 items
+    }
+
     const data = response?.data;
     if (Array.isArray(data?.value)) {
       items.push(...data.value);
@@ -67,10 +71,10 @@ const serviceLayerService = {
 
     const requestOptions = {
       ...options,
-      top: options?.top || config?.serviceLayerTopFilter || 20,
+      //top: options?.top || config?.serviceLayerTopFilter || 20,
     };
 
-    const dataUrl = withTopParam(buildServiceLayerUrl(config, mappings, requestOptions), requestOptions.top); // , requestOptions.top
+    const dataUrl = withTopParam(buildServiceLayerUrl(config, mappings, requestOptions)); // , requestOptions.top
 
     const requestWithSession = async () => {
       const { cookie } = await sapSessionManager.getSessionCookie(config);

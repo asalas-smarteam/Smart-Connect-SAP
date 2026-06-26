@@ -9,10 +9,15 @@ export async function runSapSyncOnce({
   tenantRepository = buildSapSyncTenantRepository(),
   syncUseCase = buildSyncSapConfigToHubspot(),
   tenantProvider = listActiveTenants,
+  tenantID = null,
 } = {}) {
   const activeTenants = await tenantProvider();
 
-  for (const { client } of activeTenants) {
+  const targetTenants = tenantID
+    ? activeTenants.filter(({ client }) => client.tenantKey === tenantID)
+    : activeTenants;
+
+  for (const { client } of targetTenants) {
     const { tenantModels, configs } = await tenantRepository.findActiveConfigs(client.tenantKey);
 
     for (const config of configs) {

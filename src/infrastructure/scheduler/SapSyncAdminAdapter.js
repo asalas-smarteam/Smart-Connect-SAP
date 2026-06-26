@@ -10,8 +10,8 @@ import {
 } from './sapSyncQueueAdmin.service.js';
 
 export class SapSyncAdminAdapter {
-  runSapSyncOnce() {
-    return runSapSyncOnce();
+  runSapSyncOnce(payload) {
+    return runSapSyncOnce(payload);
   }
 
   runWebhookProcessorManualOnce() {
