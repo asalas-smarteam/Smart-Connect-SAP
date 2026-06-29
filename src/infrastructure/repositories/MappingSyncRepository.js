@@ -167,7 +167,6 @@ export class MappingSyncRepository {
 
     for (const mapping of defaultMappings) {
       const existing = await tenantModels.FieldMapping.findOne({
-        clientConfigId,
         hubspotCredentialId,
         objectType,
         sourceContext: mapping.sourceContext,

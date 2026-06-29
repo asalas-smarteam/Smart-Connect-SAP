@@ -43,9 +43,9 @@ async function fetchAllPages(baseUrl, initialUrl, headers) {
       httpsAgent,
     });
 
-    if(items.length === 3000){
+    /*if(items.length === 3000){
       return items; // Stop fetching more pages if we have reached 3000 items
-    }
+    }*/
 
     const data = response?.data;
     if (Array.isArray(data?.value)) {

@@ -100,6 +100,11 @@ function pad2(value) {
 }
 
 function resolveDynamicFilterValue(clientConfig, options, dynamicType = 'datetime') {
+  // TEST ONLY: set SAP_TEST_FIXED_DATETIME=2026-06-26T13:40:00 in .env to pin the dynamic date. Remove when done.
+  if (process.env.SAP_TEST_FIXED_DATETIME && dynamicType === 'datetime') {
+    return process.env.SAP_TEST_FIXED_DATETIME;
+  }
+
   const nowDate = options?.now instanceof Date ? options.now : new Date();
 
   // 'date' anchors the dynamic filter to the start of the current (local) day. Used to
