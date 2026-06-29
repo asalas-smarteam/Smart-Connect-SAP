@@ -41,6 +41,7 @@ export function sanitizeIncomingCustomFilters(filters) {
       value: filter.value ?? null,
       isDefault: false,
       isDynamic: false,
+      dynamicType: 'datetime',
       editable: true,
     };
   });
@@ -89,6 +90,7 @@ export function buildMergedFilters({ defaultFilters, customFilters }) {
         value: filter.value,
         isDefault: true,
         isDynamic: Boolean(filter.isDynamic),
+        dynamicType: filter.dynamicType || 'datetime',
         editable: false,
       })),
       ...dedupedCustomFilters,

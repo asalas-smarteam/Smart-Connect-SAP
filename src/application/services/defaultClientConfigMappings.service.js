@@ -34,6 +34,19 @@ const DEFAULT_PRODUCT_MAPPINGS = [
   { sourceField: 'Price', targetField: 'price', sourceContext: 'product', includeInServiceLayerSelect: false },
 ];
 
+// Invoices are not pushed to a HubSpot object; the mappings only drive the SAP $select so
+// the reconciler can read NumAtCard (HS-DEAL-<dealId>) and identify the deal to update.
+export const DEFAULT_INVOICE_MAPPINGS = [
+  { sourceField: 'NumAtCard', targetField: 'num_at_card', sourceContext: 'businessPartner' },
+  { sourceField: 'DocEntry', targetField: 'sap_docentry', sourceContext: 'businessPartner' },
+  { sourceField: 'DocNum', targetField: 'sap_docnum', sourceContext: 'businessPartner' },
+  { sourceField: 'CardCode', targetField: 'cardcode', sourceContext: 'businessPartner' },
+  { sourceField: 'CardName', targetField: 'cardname', sourceContext: 'businessPartner' },
+  { sourceField: 'DocTotal', targetField: 'doctotal', sourceContext: 'businessPartner' },
+  { sourceField: 'UpdateDate', targetField: 'update_date', sourceContext: 'businessPartner' },
+  { sourceField: 'UpdateTime', targetField: 'update_time', sourceContext: 'businessPartner' },
+];
+
 async function ensureDefaultMappings({
   FieldMapping,
   clientConfig,
@@ -138,6 +151,20 @@ export async function ensureDefaultProductMappings({ FieldMapping, clientConfig 
     clientConfig,
     mappings: DEFAULT_PRODUCT_MAPPINGS,
     objectType: 'product',
+    editable: false,
+  });
+}
+
+export async function ensureDefaultInvoiceMappings({ FieldMapping, clientConfig }) {
+  if (clientConfig?.objectType !== 'invoice') {
+    return;
+  }
+
+  await ensureDefaultMappings({
+    FieldMapping,
+    clientConfig,
+    mappings: DEFAULT_INVOICE_MAPPINGS,
+    objectType: 'invoice',
     editable: false,
   });
 }

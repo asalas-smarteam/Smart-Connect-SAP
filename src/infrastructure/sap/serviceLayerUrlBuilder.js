@@ -75,14 +75,55 @@ function sanitizeControlledFilter(filter) {
   return value;
 }
 
-function resolveDynamicFilterValue(clientConfig, options) {
+function buildOrderByClause(orderBy) {
+  if (!Array.isArray(orderBy) || orderBy.length === 0) {
+    return '';
+  }
+
+  const parts = orderBy
+    .map((entry) => {
+      const property = cleanValue(entry?.property);
+      if (!property || !SAP_FIELD_PATTERN.test(property)) {
+        return null;
+      }
+
+      const direction = cleanValue(entry?.direction).toLowerCase() === 'asc' ? 'asc' : 'desc';
+      return `${property} ${direction}`;
+    })
+    .filter(Boolean);
+
+  return parts.join(',');
+}
+
+function pad2(value) {
+  return String(value).padStart(2, '0');
+}
+
+function resolveDynamicFilterValue(clientConfig, options, dynamicType = 'datetime') {
+  const nowDate = options?.now instanceof Date ? options.now : new Date();
+
+  // 'date' anchors the dynamic filter to the start of the current (local) day. Used to
+  // fetch "everything updated today". SAP UpdateDate values are stored at T00:00:00Z, so
+  // comparing against today's midnight is the correct lower bound.
+  if (dynamicType === 'date') {
+    const day = `${nowDate.getFullYear()}-${pad2(nowDate.getMonth() + 1)}-${pad2(nowDate.getDate())}`;
+    return `${day}T00:00:00Z`;
+  }
+
   const intervalMinutes = Number(options?.dynamicIntervalMinutes ?? clientConfig?.intervalMinutes);
   if (!Number.isFinite(intervalMinutes) || intervalMinutes <= 0) {
     return null;
   }
 
-  const nowDate = options?.now instanceof Date ? options.now : new Date();
   const past = new Date(nowDate.getTime() - intervalMinutes * 60000);
+
+  // 'time' resolves to the HH:mm:ss of (now - interval), using local wall-clock components
+  // to match SAP's UpdateTime (Edm.String 'HH:mm:ss' in the server timezone). It is compared
+  // as a quoted string in the $filter.
+  if (dynamicType === 'time') {
+    return `${pad2(past.getHours())}:${pad2(past.getMinutes())}:${pad2(past.getSeconds())}`;
+  }
+
   return past.toISOString().split('.')[0];
 }
 
@@ -121,12 +162,15 @@ export function buildServiceLayerUrl(clientConfig, mappings, options = {}) {
       }
 
       let value = filter?.value;
+      const dynamicType = filter?.isDynamic === true
+        ? (cleanValue(filter?.dynamicType) || 'datetime')
+        : 'datetime';
       if (filter?.isDynamic === true) {
         if (options?.skipDynamicFilters === true) {
           return;
         }
 
-        value = resolveDynamicFilterValue(clientConfig, options);
+        value = resolveDynamicFilterValue(clientConfig, options, dynamicType);
       }
 
       if (value === null || typeof value === 'undefined') {
@@ -143,9 +187,14 @@ export function buildServiceLayerUrl(clientConfig, mappings, options = {}) {
           conditions.push(`${property} eq ${normalizedValue}`);
           return;
         }
-        case 'ge':
-          conditions.push(`${property} ge ${stringValue}`);
+        case 'ge': {
+          // Time values (SAP UpdateTime Edm.String 'HH:mm:ss') are compared as quoted strings.
+          const geValue = dynamicType === 'time'
+            ? `'${stringValue.replace(/'/g, "''")}'`
+            : stringValue;
+          conditions.push(`${property} ge ${geValue}`);
           return;
+        }
         case 'startswith':
           conditions.push(`startswith(${property},'${stringValue.replace(/'/g, "''")}')`);
           return;
@@ -166,6 +215,11 @@ export function buildServiceLayerUrl(clientConfig, mappings, options = {}) {
   if (conditions.length > 0) {
     const filterString = conditions.join(' and ');
     queryParts.push(`$filter=${encodeURIComponent(filterString)}`);
+  }
+
+  const orderByClause = buildOrderByClause(clientConfig?.orderBy);
+  if (orderByClause) {
+    queryParts.push(`$orderby=${encodeURIComponent(orderByClause)}`);
   }
 
   return `${baseUrl}/b1s/v2${path}?${queryParts.join('&')}`;

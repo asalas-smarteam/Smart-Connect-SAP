@@ -7,6 +7,7 @@ import associationRegistryService from '#infrastructure/hubspot/associationRegis
 import companyHandler from '#infrastructure/hubspot/handlers/company.handler.js';
 import contactHandler from '#infrastructure/hubspot/handlers/contact.handler.js';
 import dealHandler from '#infrastructure/hubspot/handlers/deal.handler.js';
+import invoiceHandler from '#infrastructure/hubspot/handlers/invoice.handler.js';
 import productHandler from '#infrastructure/hubspot/handlers/product.handler.js';
 import hubspotAuthService from '#infrastructure/hubspot/hubspotAuthService.js';
 import * as hubspotClient from '#infrastructure/hubspot/hubspotClient.js';
@@ -51,6 +52,7 @@ export function buildSendMappedItemsToHubspot() {
       company: companyHandler,
       deal: dealHandler,
       product: productHandler,
+      invoice: invoiceHandler,
     },
   });
 }

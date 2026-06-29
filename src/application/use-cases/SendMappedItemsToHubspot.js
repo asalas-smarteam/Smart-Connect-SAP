@@ -67,6 +67,16 @@ export class SendMappedItemsToHubspot {
       tenantModels
     );
 
+    if (objectType === 'invoice') {
+      return this.processInvoiceItems({
+        mappedItems,
+        clientConfig,
+        tenantModels,
+        handler,
+        getToken,
+      });
+    }
+
     if (objectType === 'product' && Number(clientConfig?.hubspotBatchSize) > 1) {
       return this.processProductBatches({
         mappedItems,
@@ -278,6 +288,38 @@ export class SendMappedItemsToHubspot {
     }
 
     return { sent, failed, created, updated };
+  }
+
+  async processInvoiceItems({ mappedItems, clientConfig, tenantModels, handler, getToken }) {
+    if (typeof handler?.process !== 'function') {
+      throw new Error('Invoice handler must expose a process() method');
+    }
+
+    let sent = 0;
+    let failed = 0;
+    let updated = 0;
+
+    for (const item of mappedItems) {
+      try {
+        const token = await getToken();
+        const result = await handler.process({ token, item, clientConfig, tenantModels });
+
+        if (result?.status === 'failed') {
+          failed += 1;
+          continue;
+        }
+
+        sent += 1;
+        if (result?.status === 'updated') {
+          updated += 1;
+        }
+      } catch (error) {
+        this.logger?.error?.('processInvoiceItems error:', error);
+        failed += 1;
+      }
+    }
+
+    return { ok: true, sent, failed, created: 0, updated };
   }
 
   async finalizeCreatedProductBatch({ createdResults, createdItems, clientConfig, tenantModels }) {

@@ -1,4 +1,5 @@
 import TenantFieldMappingRepository from '#infrastructure/database/repositories/TenantFieldMappingRepository.js';
+import { DEFAULT_INVOICE_MAPPINGS } from '#application/services/defaultClientConfigMappings.service.js';
 
 const DEFAULT_PRODUCT_MAPPINGS = Object.freeze([
   { sourceField: 'ItemCode', targetField: 'hs_sku', sourceContext: 'product' },
@@ -16,6 +17,11 @@ const DEFAULT_PRODUCT_MAPPINGS = Object.freeze([
     includeInServiceLayerSelect: false,
   },
 ]);
+
+const DEFAULT_MAPPINGS_BY_OBJECT_TYPE = Object.freeze({
+  product: DEFAULT_PRODUCT_MAPPINGS,
+  invoice: DEFAULT_INVOICE_MAPPINGS,
+});
 
 function resolveTenantModels(tenantContext) {
   const tenantModels = tenantContext?.tenantModels;
@@ -145,19 +151,21 @@ export class MappingSyncRepository {
       throw new Error('objectType is required to ensure default mappings');
     }
 
-    if (objectType !== 'product') {
+    const defaultMappings = DEFAULT_MAPPINGS_BY_OBJECT_TYPE[objectType];
+
+    if (!defaultMappings) {
       return [];
     }
 
     const clientConfigId = clientConfig?._id ?? clientConfig?.id;
 
     if (!clientConfigId) {
-      throw new Error('clientConfig is required to ensure product default mappings');
+      throw new Error(`clientConfig is required to ensure ${objectType} default mappings`);
     }
 
     const createdOrUpdated = [];
 
-    for (const mapping of DEFAULT_PRODUCT_MAPPINGS) {
+    for (const mapping of defaultMappings) {
       const existing = await tenantModels.FieldMapping.findOne({
         clientConfigId,
         hubspotCredentialId,

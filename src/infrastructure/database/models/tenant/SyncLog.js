@@ -10,7 +10,7 @@ export const syncLogSchema = new Schema(
     },
     objectType: {
       type: String,
-      enum: ['Product', 'Contact', 'Deal', 'Company'],
+      enum: ['Product', 'Contact', 'Deal', 'Company', 'Invoice'],
       default: null,
     },
     status: {

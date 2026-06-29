@@ -63,6 +63,8 @@ const SYNC_LOG_OBJECT_TYPES = Object.freeze({
   deals: 'Deal',
   company: 'Company',
   companies: 'Company',
+  invoice: 'Invoice',
+  invoices: 'Invoice',
 });
 
 export function normalizeSyncLogObjectType(objectType) {

@@ -30,6 +30,11 @@ export const defaultSapFilterSchema = new Schema(
       type: Boolean,
       default: false,
     },
+    dynamicType: {
+      type: String,
+      enum: ['datetime', 'date', 'time'],
+      default: 'datetime',
+    },
     active: {
       type: Boolean,
       default: true,

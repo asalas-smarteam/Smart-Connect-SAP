@@ -10,6 +10,7 @@ function buildFilterKey(filter) {
     filter.value || '',
     String(Boolean(filter.isDefault)),
     String(Boolean(filter.isDynamic)),
+    filter.dynamicType || 'datetime',
   ].join('|');
 }
 
@@ -38,6 +39,7 @@ export async function replicateDefaultSapFilters({ masterConnection, tenantConne
         value: filter.value,
         isDefault: filter.isDefault,
         isDynamic: filter.isDynamic,
+        dynamicType: filter.dynamicType || 'datetime',
         active: filter.active,
       }));
 

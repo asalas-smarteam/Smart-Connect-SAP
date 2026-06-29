@@ -35,9 +35,29 @@ const clientFilterSchema = new Schema(
       type: Boolean,
       default: false,
     },
+    dynamicType: {
+      type: String,
+      enum: ['datetime', 'date', 'time'],
+      default: 'datetime',
+    },
     editable: {
       type: Boolean,
       default: true,
+    },
+  },
+  { _id: false }
+);
+
+const clientOrderBySchema = new Schema(
+  {
+    property: {
+      type: String,
+      required: true,
+    },
+    direction: {
+      type: String,
+      enum: ['asc', 'desc'],
+      default: 'desc',
     },
   },
   { _id: false }
@@ -153,6 +173,10 @@ export const clientConfigSchema = new Schema(
     },
     filters: {
       type: [clientFilterSchema],
+      default: [],
+    },
+    orderBy: {
+      type: [clientOrderBySchema],
       default: [],
     },
     active: {

@@ -197,6 +197,7 @@ export class ManageClientConfigs {
             value: filter.value,
             isDefault: true,
             isDynamic: Boolean(filter.isDynamic),
+            dynamicType: filter.dynamicType || 'datetime',
             editable: false,
           })),
           ...updatedCustomFilters,

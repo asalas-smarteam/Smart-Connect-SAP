@@ -2,6 +2,7 @@ import {
   ensureDefaultCompanyEmployeeMappings,
   ensureDefaultContactEmployeeMappings,
   ensureDefaultDealMappings,
+  ensureDefaultInvoiceMappings,
   ensureDefaultProductMappings,
 } from '#application/services/defaultClientConfigMappings.service.js';
 
@@ -11,6 +12,7 @@ export class DefaultClientConfigMappingInitializer {
     await ensureDefaultContactEmployeeMappings({ FieldMapping, clientConfig });
     await ensureDefaultDealMappings({ FieldMapping, clientConfig });
     await ensureDefaultProductMappings({ FieldMapping, clientConfig });
+    await ensureDefaultInvoiceMappings({ FieldMapping, clientConfig });
   }
 }
 
