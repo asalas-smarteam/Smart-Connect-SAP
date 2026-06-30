@@ -37,6 +37,9 @@ function buildHubspotBatchPayload(enrichedLineItems) {
             }
             : {}),
           quantity: String(normalizeQuantity(lineItem.quantity ?? lineItem.Quantity)),
+          ...(toNonEmptyString(lineItem._discountHsProperty)
+            ? { [lineItem._discountHsProperty]: String(normalizeNumber(lineItem.Discount ?? lineItem.discount, 0)) }
+            : {}),
           ...(taxRateGroupId
             ? { hs_tax_rate_group_id: taxRateGroupId }
             : { discount: String(normalizeNumber(lineItem.Discount ?? lineItem.discount, 0)) }),

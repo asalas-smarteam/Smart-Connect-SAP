@@ -1,4 +1,5 @@
 import { calculateUnitPriceWithMisc } from '#domain/prices/misc-price-calculation.service.js';
+import { resolveDiscount } from '#domain/products/discount-resolver.service.js';
 
 const SAP_ITEM_PRICES_SELECT_PATH = '/b1s/v2/Items';
 const DEFAULT_SAP_ITEM_SELECT_FIELDS = ['ItemPrices', 'ItemWarehouseInfoCollection'];
@@ -62,9 +63,10 @@ function buildSapPricePayload({ cardCode, itemCode, date }) {
   };
 }
 
-function buildItemSelectFields(taxFieldItem) {
+function buildItemSelectFields(taxFieldItem, includeGroupCode = false) {
   return [
     ...DEFAULT_SAP_ITEM_SELECT_FIELDS,
+    includeGroupCode ? 'ItemsGroupCode' : null,
     toNonEmptyString(taxFieldItem),
   ].filter((field, index, fields) => field && fields.indexOf(field) === index);
 }
@@ -111,6 +113,7 @@ export class SyncLineItemPrices {
     hubspotPriceClient,
     buildErrorResponseSnapshot,
     buildWebhookSyncErrorEntry,
+    sapDiscountClient = null,
     dateProvider = () => new Date(),
     logger = { warn: () => {} },
   }) {
@@ -119,6 +122,7 @@ export class SyncLineItemPrices {
     this.hubspotPriceClient = hubspotPriceClient;
     this.buildErrorResponseSnapshot = buildErrorResponseSnapshot;
     this.buildWebhookSyncErrorEntry = buildWebhookSyncErrorEntry;
+    this.sapDiscountClient = sapDiscountClient;
     this.dateProvider = dateProvider;
     this.logger = logger;
   }
@@ -155,7 +159,10 @@ export class SyncLineItemPrices {
       const miscPriceCalculationConfig = typeof this.credentialRepository.resolveMiscPriceCalculationConfig === 'function'
         ? await this.credentialRepository.resolveMiscPriceCalculationConfig({ tenantModels })
         : null;
-      const itemSelectFields = buildItemSelectFields(taxSettings?.fieldItem);
+      const discountConfig = typeof this.credentialRepository.resolveDiscountConfig === 'function'
+        ? await this.credentialRepository.resolveDiscountConfig({ tenantModels })
+        : { isRequired: false, fieldMappings: {} };
+      const itemSelectFields = buildItemSelectFields(taxSettings?.fieldItem, discountConfig.isRequired);
       const sapCredentialsData = typeof sapCredentials?.toObject === 'function'
         ? sapCredentials.toObject()
         : sapCredentials;
@@ -163,6 +170,10 @@ export class SyncLineItemPrices {
         ...sapCredentialsData,
         tenantKey,
       };
+      const discountHsField = discountConfig?.fieldMappings?.Discount ?? null;
+      const activeDiscountGroups = discountConfig.isRequired && this.sapDiscountClient
+        ? await this.sapDiscountClient.fetchActiveDiscountGroups({ sapConfig, tenantKey })
+        : [];
       const enrichedLineItems = [];
 
       for (const lineItem of payload.lineItems) {
@@ -243,6 +254,17 @@ export class SyncLineItemPrices {
           taxSettings,
           fallbackDiscount: normalizeNumber(priceData?.Discount, 0),
         });
+        let finalDiscount = discount;
+        if (discountConfig.isRequired && activeDiscountGroups.length > 0) {
+          const sapDiscount = resolveDiscount(activeDiscountGroups, {
+            itemCode,
+            itemsGroupCode: sapItemStockData?.ItemsGroupCode,
+            currentDate: this.dateProvider(),
+          });
+          if (sapDiscount !== null) {
+            finalDiscount = sapDiscount;
+          }
+        }
         const quantity = normalizeQuantity(lineItem.quantity ?? lineItem.Quantity);
         const priceCalculation = calculateUnitPriceWithMisc({
           sapPrice: priceData?.Price ?? 0,
@@ -273,9 +295,10 @@ export class SyncLineItemPrices {
             }
             : {}),
           Currency: priceData?.Currency ?? null,
-          Discount: discount,
+          Discount: finalDiscount,
           lineTotal,
           ...(toNonEmptyString(tax.HSCode) ? { tax: tax.HSCode } : {}),
+          ...(discountHsField ? { _discountHsProperty: discountHsField } : {}),
           warehouseStockProperties,
         });
       }

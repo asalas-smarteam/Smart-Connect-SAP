@@ -21,6 +21,8 @@ import TenantSapSyncLockAdapter from '#infrastructure/locks/TenantSapSyncLockAda
 import MappingSyncRepository from '#infrastructure/repositories/MappingSyncRepository.js';
 import SapSyncDataAdapter from '#infrastructure/sap/SapSyncDataAdapter.js';
 import sapSyncAdminAdapter from '#infrastructure/scheduler/SapSyncAdminAdapter.js';
+import SapDiscountClient from '#infrastructure/external-services/SapDiscountClient.js';
+import TenantLineItemPriceConfigRepository from '#infrastructure/repositories/TenantLineItemPriceConfigRepository.js';
 import { buildSendMappedItemsToHubspot } from './hubspot-sync.composition.js';
 
 export function buildSyncSapConfigToHubspot() {
@@ -66,6 +68,8 @@ export function buildSyncSapConfigToHubspot() {
     hubspotCredentialRepository,
     productSyncConfigRepository,
     productSyncStrategyFactory,
+    sapDiscountClient: new SapDiscountClient(),
+    discountConfigRepository: new TenantLineItemPriceConfigRepository(),
   });
 }
 

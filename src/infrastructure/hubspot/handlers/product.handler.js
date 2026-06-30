@@ -40,6 +40,12 @@ export async function preprocess({ item, tenantModels }) {
 
   Object.assign(item.properties, warehouseStockProperties);
 
+  const resolvedDiscount = item?.rawSapData?._resolvedDiscount;
+  const discountHsProperty = item?.rawSapData?._discountHsProperty;
+  if (resolvedDiscount !== null && resolvedDiscount !== undefined && discountHsProperty) {
+    item.properties[discountHsProperty] = resolvedDiscount;
+  }
+
   if (item?.rawSapData?.selectedPrice || item?.rawSapData?.[KEEP_MAPPED_PRICE_FLAG]) {
     return;
   }

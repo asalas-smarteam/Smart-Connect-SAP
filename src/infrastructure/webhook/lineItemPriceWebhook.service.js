@@ -190,7 +190,7 @@ function toNumberOrNull(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-// Flujo de cambio de propiedad: precio = safe_price_value + miscelaneo.
+// Flujo de cambio de propiedad: precio = safe_price_value * (1 + miscelaneo / 100).
 // Es idempotente porque siempre parte del precio base (safe_price_value).
 async function recalculateLineItemPriceFromMisc(payload, token) {
   const lineItemId = toNonEmptyString(payload?.objectId);
@@ -210,7 +210,7 @@ async function recalculateLineItemPriceFromMisc(payload, token) {
   }
 
   const misc = toNumberOrNull(lineItem?.properties?.miscelaneo) ?? 0;
-  const newPrice = safePrice + misc;
+  const newPrice = safePrice + (safePrice * misc) / 100;
 
   await hubspotClient.batchUpdateLineItems(token, {
     inputs: [{ id: lineItemId, properties: { price: String(newPrice) } }],

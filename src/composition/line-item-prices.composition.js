@@ -1,6 +1,7 @@
 import SyncLineItemPrices from '#application/use-cases/SyncLineItemPrices.js';
 import HubspotLineItemPriceClient from '#infrastructure/external-services/HubspotLineItemPriceClient.js';
 import SapLineItemPriceClient from '#infrastructure/external-services/SapLineItemPriceClient.js';
+import SapDiscountClient from '#infrastructure/external-services/SapDiscountClient.js';
 import TenantLineItemPriceConfigRepository from '#infrastructure/repositories/TenantLineItemPriceConfigRepository.js';
 import logger from '#infrastructure/logger/logger.js';
 import syncLogAdapter from '#infrastructure/sync/SyncLogAdapter.js';
@@ -20,6 +21,7 @@ export function buildSyncLineItemPrices({
     credentialRepository: new TenantLineItemPriceConfigRepository(),
     sapPriceClient: new SapLineItemPriceClient(),
     hubspotPriceClient: new HubspotLineItemPriceClient(),
+    sapDiscountClient: new SapDiscountClient(),
     buildErrorResponseSnapshot: syncLogGateway
       ? (error) => syncLogGateway.buildErrorResponseSnapshot(error)
       : buildErrorResponse,

@@ -138,6 +138,19 @@ export class TenantLineItemPriceConfigRepository {
       itemWarehouseInfoCollection
     );
   }
+
+  async resolveDiscountConfig({ tenantModels }) {
+    const value = await tenantConfigurationService.getValue(
+      tenantModels,
+      'requireDiscounts',
+      { isRequired: false, fieldMappings: {} }
+    );
+
+    return {
+      isRequired: Boolean(value?.isRequired),
+      fieldMappings: value?.fieldMappings ?? {},
+    };
+  }
 }
 
 export default TenantLineItemPriceConfigRepository;

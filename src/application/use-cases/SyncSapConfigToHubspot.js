@@ -1,4 +1,5 @@
 import { buildSapFetchOptions } from '../services/sap-sync-options.service.js';
+import { resolveDiscount } from '#domain/products/discount-resolver.service.js';
 
 export class SyncSapConfigToHubspot {
   constructor({
@@ -10,6 +11,8 @@ export class SyncSapConfigToHubspot {
     hubspotCredentialRepository,
     productSyncConfigRepository = null,
     productSyncStrategyFactory = null,
+    sapDiscountClient = null,
+    discountConfigRepository = null,
     dateProvider = () => new Date(),
   }) {
     this.sapDataSource = sapDataSource;
@@ -20,6 +23,8 @@ export class SyncSapConfigToHubspot {
     this.hubspotCredentialRepository = hubspotCredentialRepository;
     this.productSyncConfigRepository = productSyncConfigRepository;
     this.productSyncStrategyFactory = productSyncStrategyFactory;
+    this.sapDiscountClient = sapDiscountClient;
+    this.discountConfigRepository = discountConfigRepository;
     this.dateProvider = dateProvider;
   }
 
@@ -117,6 +122,13 @@ export class SyncSapConfigToHubspot {
         ...record,
         rawSapData: rawData?.[index] ?? null,
       }));
+
+      await this.enrichRecordsWithDiscounts({
+        mappedRecords: mappedRecordsWithRawSap,
+        objectType,
+        config: activeConfig,
+        tenantContext,
+      });
 
       const hubspotResult = await this.sendMappedRecords({
         mappedRecords: mappedRecordsWithRawSap,
@@ -228,6 +240,57 @@ export class SyncSapConfigToHubspot {
       status: 'completed',
       metrics,
     };
+  }
+
+  async enrichRecordsWithDiscounts({
+    mappedRecords,
+    objectType,
+    config,
+    tenantContext,
+  }) {
+    if (objectType !== 'product' || !this.sapDiscountClient || !this.discountConfigRepository) {
+      return;
+    }
+
+    const discountConfig = await this.discountConfigRepository.resolveDiscountConfig({
+      tenantModels: tenantContext?.tenantModels,
+    });
+
+    if (!discountConfig?.isRequired) {
+      return;
+    }
+
+    const { SapCredentials } = tenantContext?.tenantModels ?? {};
+    const sapCredentialsList = typeof SapCredentials?.find === 'function'
+      ? await SapCredentials.find().lean()
+      : [];
+    const [sapCredentials] = sapCredentialsList;
+
+    if (!sapCredentials) {
+      return;
+    }
+
+    const discountGroups = await this.sapDiscountClient.fetchActiveDiscountGroups({
+      sapConfig: sapCredentials,
+      tenantKey: config?.tenantKey ?? config?.tenantId ?? null,
+    });
+    const hsField = discountConfig.fieldMappings?.Discount ?? null;
+    const currentDate = this.dateProvider();
+
+    mappedRecords.forEach((record) => {
+      if (!record.rawSapData) {
+        return;
+      }
+
+      const discount = resolveDiscount(discountGroups, {
+        itemCode: record.rawSapData.ItemCode,
+        itemsGroupCode: record.rawSapData.ItemsGroupCode,
+        currentDate,
+      });
+
+      record.rawSapData._resolvedDiscount = discount;
+      record.rawSapData._discountHsProperty = hsField;
+    });
   }
 
   async sendMappedRecords({
