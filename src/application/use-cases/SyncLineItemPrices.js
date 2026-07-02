@@ -249,12 +249,14 @@ export class SyncLineItemPrices {
           itemWarehouseInfoCollection: sapItemStockData?.ItemWarehouseInfoCollection,
         });
         const tax = taxSettings?.taxCodes?.find((entry) => toNonEmptyString(entry?.Code) === toNonEmptyString(sapItemStockData?.[taxSettings.fieldItem])) || {};
-        const discount = resolveTaxRate({
+        
+        /*const discount = resolveTaxRate({
           sapItemData: sapItemStockData,
           taxSettings,
           fallbackDiscount: normalizeNumber(priceData?.Discount, 0),
-        });
-        let finalDiscount = discount;
+        });*/
+        let finalDiscount = 0;
+
         if (discountConfig.isRequired && activeDiscountGroups.length > 0) {
           const sapDiscount = resolveDiscount(activeDiscountGroups, {
             itemCode,
