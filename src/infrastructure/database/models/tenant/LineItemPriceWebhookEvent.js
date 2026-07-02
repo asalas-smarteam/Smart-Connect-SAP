@@ -17,6 +17,10 @@ export const lineItemPriceWebhookEventSchema = new Schema(
       type: String,
       default: null,
     },
+    dealId: {
+      type: String,
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -45,6 +49,15 @@ lineItemPriceWebhookEventSchema.index(
     },
   }
 );
+
+lineItemPriceWebhookEventSchema.index({ dealId: 1, createdAt: -1 });
+
+lineItemPriceWebhookEventSchema.index({
+  'payload.objectId': 1,
+  'payload.sourceId': 1,
+  'payload.propertyValue': 1,
+  'payload.occurredAt': 1,
+});
 
 export function createLineItemPriceWebhookEventModel(connection) {
   return connection.models.LineItemPriceWebhookEvent

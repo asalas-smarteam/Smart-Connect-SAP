@@ -1,5 +1,6 @@
 import hubspotAuthService from '../hubspot/hubspotAuthService.js';
 import * as hubspotClient from '../hubspot/hubspotClient.js';
+import tenantConfigurationService from '../config/tenantConfiguration.service.js';
 
 // Conjunto 1: cambio de asociación deal <-> line item
 const SUPPORTED_ASSOCIATION_TYPE = 'DEAL_TO_LINE_ITEM';
@@ -9,6 +10,16 @@ const SUPPORTED_CHANGE_SOURCE = 'USER';
 const SUPPORTED_SUBSCRIPTION_TYPE = 'line_item.propertyChange';
 const SUPPORTED_PROPERTY_NAME = 'miscelaneo';
 const SUPPORTED_CHANGE_SOURCE_PROPERTY = 'CRM_UI';
+
+// Modo del flujo de cambio de propiedad: 'Legacy' (actualiza solo el line item del webhook)
+// o 'SkippedVersion' (recalcula todos los line items del deal con debounce por deal).
+const PROPERTY_CHANGE_MODE_CONFIG_KEY = 'skippedInWebhooksInPropertyChange';
+const PROPERTY_CHANGE_MODE_DEFAULT = 'Legacy';
+const PROPERTY_CHANGE_MODE_SKIPPED = 'SkippedVersion';
+const PROPERTY_CHANGE_DEBOUNCE_CONFIG_KEY = 'requireSkippedInWebhooksInPropertyChange';
+const PROPERTY_CHANGE_DEBOUNCE_DEFAULT = { requireSkipped: true, secondsToSkipped: 3 };
+const DUPLICATE_ERROR_MESSAGE = 'Duplicate event';
+const DEBOUNCED_ERROR_MESSAGE = 'evento skipeado por envios multiples';
 
 // Marcador de descarte por condición de carrera (misc llegó antes que la asociación)
 export const SKIPPED_MISC_PENDING_ASSOC_MARKER = 'skipped_misc_pending_assoc';
@@ -306,6 +317,217 @@ async function handlePropertyChangeEvent(payload, { tenantModels, tenant }) {
   }
 }
 
+// Flujo SkippedVersion: recalcula TODOS los line items del deal, cada uno con su propio
+// miscelaneo leído de HubSpot (no se usa payload.propertyValue). Así un solo webhook
+// que llegue al integrador "sana" el deal completo aunque los demás se pierdan.
+async function recalculateDealLineItemsFromMisc(dealId, token) {
+  const deal = await fetchHubspotObject(token, 'deals', dealId, {
+    associations: ['line_items'],
+  });
+
+  const lineItemIds = [
+    ...extractAssociationIds(deal, 'line_items'),
+    ...extractAssociationIds(deal, 'lineItems'),
+    ...extractAssociationIds(deal, 'line items'),
+    ...extractAssociationIds(deal, 'products'),
+  ].filter((value, index, items) => items.indexOf(value) === index);
+
+  if (lineItemIds.length === 0) {
+    throw new Error('Deal has no associated line items');
+  }
+
+  const lineItems = await Promise.all(
+    lineItemIds.map((lineItemId) => fetchHubspotObject(token, 'line_items', lineItemId, {
+      properties: ['price', 'miscelaneo', 'safe_price_value'],
+    }))
+  );
+
+  const recalculatedLineItems = [];
+
+  lineItems.forEach((lineItem, index) => {
+    const safePrice = toNumberOrNull(lineItem?.properties?.safe_price_value);
+
+    // Sin safe_price_value no hay base para recalcular: se excluye la línea sin fallar el deal.
+    if (safePrice === null) {
+      return;
+    }
+
+    const misc = toNumberOrNull(lineItem?.properties?.miscelaneo) ?? 0;
+    const price = safePrice + (safePrice * misc) / 100;
+
+    recalculatedLineItems.push({
+      lineItemId: toNonEmptyString(lineItem?.id) || lineItemIds[index],
+      safePrice,
+      misc,
+      price,
+    });
+  });
+
+  if (recalculatedLineItems.length === 0) {
+    throw new Error('safe_price_value is required to recalculate line item price');
+  }
+
+  await hubspotClient.batchUpdateLineItems(token, {
+    inputs: recalculatedLineItems.map((item) => ({
+      id: item.lineItemId,
+      properties: { price: String(item.price) },
+    })),
+  });
+
+  return {
+    requestedCount: lineItemIds.length,
+    updatedCount: recalculatedLineItems.length,
+    lineItems: recalculatedLineItems,
+  };
+}
+
+async function handlePropertyChangeEventSkipped(payload, { tenantModels, tenant }) {
+  if (payload?.portalId === undefined || payload?.portalId === null || payload?.portalId === '') {
+    throw new Error('portalId is required');
+  }
+
+  assertRequiredWebhookField(payload, 'eventId');
+  assertRequiredWebhookField(payload, 'subscriptionId');
+  assertRequiredWebhookField(payload, 'appId');
+  assertRequiredWebhookField(payload, 'occurredAt');
+  assertRequiredWebhookField(payload, 'objectId');
+
+  const { LineItemPriceWebhookEvent } = tenantModels;
+
+  // Duplicado exacto (reenvío de HubSpot): mismo objectId + sourceId + propertyValue + occurredAt.
+  // occurredAt distingue reenvíos de cambios legítimos que regresan a un valor anterior.
+  // Solo cuentan eventos exitosos (isSend) o en vuelo (errorMessage null): un reintento de
+  // HubSpot tras un fallo nuestro debe ejecutarse, no descartarse como duplicado.
+  const duplicate = await LineItemPriceWebhookEvent.findOne({
+    'payload.objectId': payload.objectId,
+    'payload.sourceId': payload.sourceId,
+    'payload.propertyValue': payload.propertyValue,
+    'payload.occurredAt': payload.occurredAt,
+    $or: [{ isSend: true }, { errorMessage: null }],
+  }).select({ _id: 1 }).lean();
+
+  if (duplicate) {
+    await LineItemPriceWebhookEvent.create({
+      payload,
+      isSend: false,
+      errorMessage: DUPLICATE_ERROR_MESSAGE,
+    });
+
+    return {
+      skip: true,
+      payload: null,
+      executionId: null,
+      meta: {
+        skipped: true,
+        reason: 'duplicate_event',
+      },
+    };
+  }
+
+  const debounceConfig = await tenantConfigurationService.getValue(
+    tenantModels,
+    PROPERTY_CHANGE_DEBOUNCE_CONFIG_KEY,
+    PROPERTY_CHANGE_DEBOUNCE_DEFAULT
+  );
+
+  const hubspotCredentials = await resolveHubspotCredentials(tenantModels, tenant);
+  const token = await hubspotAuthService.getAccessToken(
+    hubspotCredentials.clientConfigId,
+    hubspotCredentials,
+    tenantModels
+  );
+
+  const lineItem = await fetchHubspotObject(token, 'line_items', payload.objectId, {
+    associations: ['deals'],
+  });
+  const dealId = extractAssociationIds(lineItem, 'deals')[0];
+
+  if (!dealId) {
+    await LineItemPriceWebhookEvent.create({
+      payload,
+      isSend: false,
+      errorMessage: 'Line item has no associated deal',
+    });
+
+    throw new Error('Line item has no associated deal');
+  }
+
+  // Debounce por deal: si ya se ejecutó algo para este deal dentro de la ventana, este
+  // webhook sobra (el que ejecutó ya recalculó todas las líneas). Solo cuentan registros
+  // sin errorMessage: los skipped/duplicados no extienden la ventana (una ráfaga podría
+  // suprimir el procesamiento indefinidamente) y un reintento tras fallo no se debouncea.
+  if (debounceConfig?.requireSkipped === true) {
+    const secondsToSkipped = toNumberOrNull(debounceConfig?.secondsToSkipped)
+      ?? PROPERTY_CHANGE_DEBOUNCE_DEFAULT.secondsToSkipped;
+
+    const recentExecution = await LineItemPriceWebhookEvent.findOne({
+      dealId,
+      createdAt: { $gte: new Date(Date.now() - secondsToSkipped * 1000) },
+      errorMessage: null,
+    }).select({ _id: 1 }).lean();
+
+    if (recentExecution) {
+      await LineItemPriceWebhookEvent.create({
+        payload,
+        dealId,
+        isSend: false,
+        errorMessage: DEBOUNCED_ERROR_MESSAGE,
+      });
+
+      return {
+        skip: true,
+        payload: null,
+        executionId: null,
+        meta: {
+          skipped: true,
+          reason: 'debounced_event',
+          dealId,
+        },
+      };
+    }
+  }
+
+  // El registro se crea ANTES de procesar: un webhook concurrente del mismo deal que corra
+  // su debounce después de este insert lo verá y se skipea. La ventana residual entre el
+  // findOne y este create se acepta porque el recálculo es idempotente (parte de
+  // safe_price_value): una carrera solo causa trabajo redundante, nunca precios malos.
+  const createdEvent = await LineItemPriceWebhookEvent.create({
+    payload,
+    dealId,
+    isSend: false,
+    errorMessage: null,
+  });
+
+  try {
+    const result = await recalculateDealLineItemsFromMisc(dealId, token);
+
+    await LineItemPriceWebhookEvent.updateOne(
+      { _id: createdEvent._id },
+      { $set: { isSend: true, errorMessage: null } }
+    );
+
+    return {
+      skip: true,
+      payload: null,
+      executionId: createdEvent._id,
+      meta: {
+        skipped: false,
+        handled: true,
+        reason: 'deal_line_items_price_recalculated',
+        dealId,
+        ...result,
+      },
+    };
+  } catch (error) {
+    await LineItemPriceWebhookEvent.updateOne(
+      { _id: createdEvent._id },
+      { $set: { isSend: false, errorMessage: error.message } }
+    );
+
+    throw error;
+  }
+}
+
 async function buildLegacyPayload(payload, token, miscPriceCalculationConfig = null) {
   const dealId = toNonEmptyString(payload?.fromObjectId);
 
@@ -361,7 +583,18 @@ const lineItemPriceWebhookService = {
     }
 
     // Flujo de cambio de propiedad: recalcula y actualiza el precio del line item.
+    // El modo se conmuta por configuración: 'Legacy' mantiene el flujo original intacto.
     if (isSupportedPropertyEvent) {
+      const propertyChangeMode = await tenantConfigurationService.getValue(
+        tenantModels,
+        PROPERTY_CHANGE_MODE_CONFIG_KEY,
+        PROPERTY_CHANGE_MODE_DEFAULT
+      );
+
+      if (propertyChangeMode === PROPERTY_CHANGE_MODE_SKIPPED) {
+        return handlePropertyChangeEventSkipped(payload, { tenantModels, tenant });
+      }
+
       return handlePropertyChangeEvent(payload, { tenantModels, tenant });
     }
 

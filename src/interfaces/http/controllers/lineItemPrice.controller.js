@@ -90,7 +90,7 @@ function createLineItemPriceController({
         req.log?.error?.({
           msg: 'Failed to sync HubSpot line item prices',
           tenantKey: req.tenantKey,
-          error: error.message,
+          error: error.response?.data?.message || error.message,
         });
 
         if (executionId) {
