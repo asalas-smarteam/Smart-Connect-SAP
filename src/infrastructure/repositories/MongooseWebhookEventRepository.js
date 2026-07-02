@@ -29,19 +29,25 @@ export class MongooseWebhookEventRepository {
   }
 
   async markCompleted(event, result) {
+    const updates = {
+      status: 'completed',
+      lastError: null,
+      'payload.sapResult': {
+        docEntry: result.docEntry,
+        docNum: result.docNum,
+        cardCode: result.cardCode,
+      },
+      'payload.processedAt': new Date().toISOString(),
+    };
+
+    if (result.payloadSap) {
+      updates['payload.payloadSAP'] = result.payloadSap;
+    }
+
     await this.WebhookEvent.updateOne(
       { _id: event._id },
       {
-        $set: {
-          status: 'completed',
-          lastError: null,
-          'payload.sapResult': {
-            docEntry: result.docEntry,
-            docNum: result.docNum,
-            cardCode: result.cardCode,
-          },
-          'payload.processedAt': new Date().toISOString(),
-        },
+        $set: updates,
       }
     );
   }
@@ -59,6 +65,10 @@ export class MongooseWebhookEventRepository {
         docNum: failure.sapResult.docNum ?? null,
         cardCode: failure.sapResult.cardCode ?? null,
       };
+    }
+
+    if (failure.payloadSap) {
+      updates['payload.payloadSAP'] = failure.payloadSap;
     }
 
     await this.WebhookEvent.updateOne(

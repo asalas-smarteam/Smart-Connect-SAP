@@ -102,6 +102,7 @@ export class ProcessWebhookDealEventBatch {
         retries: currentRetries,
         lastError,
         sapResult: error.sapOrderResult,
+        payloadSap: error.sapOrderPayload ?? null,
       });
 
       summary.errored += 1;
@@ -133,6 +134,7 @@ export class ProcessWebhookDealEventBatch {
       status: nextStatus,
       retries: nextRetries,
       lastError,
+      payloadSap: error?.sapOrderPayload ?? null,
     });
 
     if (shouldRetry) {

@@ -79,6 +79,7 @@ describe('ProcessWebhookDealEventBatch', () => {
       status: 'waiting',
       retries: 1,
       lastError: 'SAP timeout',
+      payloadSap: null,
     });
     expect(summary.retried).toBe(1);
     expect(summary.errored).toBe(0);
@@ -114,6 +115,7 @@ describe('ProcessWebhookDealEventBatch', () => {
       status: 'errored',
       retries: 3,
       lastError: 'ItemCode is required',
+      payloadSap: null,
     });
     expect(summary.errored).toBe(1);
     expect(summary.errorDetails).toEqual([
@@ -132,6 +134,10 @@ describe('ProcessWebhookDealEventBatch', () => {
       cardCode: 'C20000',
       docEntry: 10,
       docNum: 20,
+    };
+    error.sapOrderPayload = {
+      CardCode: 'C20000',
+      DocumentLines: [{ ItemCode: 'A0001', Quantity: 1 }],
     };
     const repository = {
       claimWaiting: jest.fn().mockResolvedValue([event]),
@@ -158,6 +164,10 @@ describe('ProcessWebhookDealEventBatch', () => {
         cardCode: 'C20000',
         docEntry: 10,
         docNum: 20,
+      },
+      payloadSap: {
+        CardCode: 'C20000',
+        DocumentLines: [{ ItemCode: 'A0001', Quantity: 1 }],
       },
     });
     expect(repository.markCompleted).not.toHaveBeenCalled();

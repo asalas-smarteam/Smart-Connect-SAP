@@ -921,6 +921,9 @@ describe('webhookProcessor flow', () => {
             docEntry: 99,
             docNum: 199,
           },
+          'payload.payloadSAP': expect.objectContaining({
+            CardCode: 'CL99999',
+          }),
         }),
       }
     );
@@ -936,6 +939,9 @@ describe('webhookProcessor flow', () => {
             docEntry: 99,
             docNum: 199,
           },
+          'payload.payloadSAP': expect.objectContaining({
+            CardCode: 'CL99999',
+          }),
         },
       }
     );

@@ -268,7 +268,13 @@ describe('ProcessHubspotConvertQuotationToOrder', () => {
       sapDocEntry: 67890,
       baseDocument: { documentType: 'quotation', sapDocEntry: 12345, sapBaseType: 23 },
     });
-    expect(result).toEqual({ cardCode: 'CL00129', docEntry: 67890, docNum: 9001, dealId: '59680314911' });
+    expect(result).toEqual({
+      cardCode: 'CL00129',
+      docEntry: 67890,
+      docNum: 9001,
+      dealId: '59680314911',
+      payloadSap: orderPayload,
+    });
   });
 
   it('is idempotent: skips when an order link already exists', async () => {

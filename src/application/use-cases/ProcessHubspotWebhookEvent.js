@@ -180,6 +180,7 @@ export class ProcessHubspotWebhookEvent {
           cardCode,
           docEntry: orderResponse?.DocEntry ?? null,
           docNum: orderResponse?.DocNum ?? null,
+          payloadSap: orderPayload,
         },
       });
 
@@ -205,8 +206,11 @@ export class ProcessHubspotWebhookEvent {
         docEntry: orderResponse?.DocEntry ?? null,
         docNum: orderResponse?.DocNum ?? null,
         dealId: toNonEmptyString(deal?.hs_object_id),
+        payloadSap: orderPayload,
       };
     } catch (error) {
+      error.sapOrderPayload = auditTrail.payload_SAP.order;
+
       if (orderResponse) {
         error.sapOrderCreated = true;
         error.sapOrderResult = {

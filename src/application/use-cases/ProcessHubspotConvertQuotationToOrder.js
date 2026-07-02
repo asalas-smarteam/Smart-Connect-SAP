@@ -152,8 +152,11 @@ export class ProcessHubspotConvertQuotationToOrder {
         docEntry: orderResponse?.DocEntry ?? null,
         docNum: orderResponse?.DocNum ?? null,
         dealId,
+        payloadSap: orderPayload,
       };
     } catch (error) {
+      error.sapOrderPayload = auditTrail.payload_SAP.order;
+
       if (orderResponse) {
         error.sapOrderCreated = true;
         error.sapOrderResult = {
