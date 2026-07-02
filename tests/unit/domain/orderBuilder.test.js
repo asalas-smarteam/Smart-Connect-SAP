@@ -200,4 +200,27 @@ describe('order-builder.service buildOrderPayload', () => {
       ],
     });
   });
+
+  it('adds Comments when deal comments are provided and omits them when empty', () => {
+    const documentLines = [
+      {
+        ItemCode: 'A56010004',
+        Quantity: 1,
+      },
+    ];
+
+    const withComments = buildOrderPayload({
+      cardCode: 'CL99999',
+      documentLines,
+      comments: 'COMENTARIO DE PRUEBA',
+    });
+    expect(withComments.Comments).toBe('COMENTARIO DE PRUEBA');
+
+    const withoutComments = buildOrderPayload({
+      cardCode: 'CL99999',
+      documentLines,
+      comments: '   ',
+    });
+    expect(withoutComments).not.toHaveProperty('Comments');
+  });
 });

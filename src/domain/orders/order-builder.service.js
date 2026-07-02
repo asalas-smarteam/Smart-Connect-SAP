@@ -178,7 +178,7 @@ export function mapDocumentLines({
   return lines;
 }
 
-export function buildOrderPayload({ cardCode, documentLines, slpCode = null }) {
+export function buildOrderPayload({ cardCode, documentLines, slpCode = null, comments = null }) {
   if (!documentLines.length) {
     throw new PermanentWebhookError('At least one line_item is required to create SAP Order');
   }
@@ -191,6 +191,11 @@ export function buildOrderPayload({ cardCode, documentLines, slpCode = null }) {
 
   if (Number.isInteger(slpCode)) {
     payload.SalesPersonCode = slpCode;
+  }
+
+  const resolvedComments = toNonEmptyString(comments);
+  if (resolvedComments) {
+    payload.Comments = resolvedComments;
   }
 
   return payload;

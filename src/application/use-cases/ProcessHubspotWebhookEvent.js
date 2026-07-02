@@ -155,10 +155,13 @@ export class ProcessHubspotWebhookEvent {
         deal,
         hubspotCredentials,
       });
+      // TODO: deal.numero_de_contacto_primario - campo SAP destino por definir (homologación pendiente)
+      // TODO: deal.direccion_de_entrega - campo SAP destino por definir (homologación pendiente)
       const orderPayload = buildOrderPayload({
         cardCode,
         documentLines,
         slpCode,
+        comments: deal?.comments,
       });
       auditTrail.payload_SAP.order = orderPayload;
 

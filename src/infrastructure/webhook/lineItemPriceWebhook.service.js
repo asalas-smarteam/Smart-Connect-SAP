@@ -10,6 +10,12 @@ const SUPPORTED_SUBSCRIPTION_TYPE = 'line_item.propertyChange';
 const SUPPORTED_PROPERTY_NAME = 'miscelaneo';
 const SUPPORTED_CHANGE_SOURCE_PROPERTY = 'CRM_UI';
 
+// Marcador de descarte por condición de carrera (misc llegó antes que la asociación)
+export const SKIPPED_MISC_PENDING_ASSOC_MARKER = 'skipped_misc_pending_assoc';
+const SKIPPED_MISC_ERROR_MESSAGE =
+  `${SKIPPED_MISC_PENDING_ASSOC_MARKER}: safe_price_value not yet available — ` +
+  'the pending deal.associationChange will recalculate the price when it runs';
+
 function toNonEmptyString(value) {
   const normalized = String(value ?? '').trim();
   return normalized || null;
@@ -231,6 +237,33 @@ async function handlePropertyChangeEvent(payload, { tenantModels, tenant }) {
   assertRequiredWebhookField(payload, 'objectId');
 
   const { LineItemPriceWebhookEvent } = tenantModels;
+
+  // Condición de carrera: si existe un deal.associationChange pendiente para este line item,
+  // ese flujo ya recalculará el misceláneo — descartamos este evento sin fallo ni reintento.
+  const pendingAssociation = await LineItemPriceWebhookEvent.findOne({
+    'payload.subscriptionType': 'deal.associationChange',
+    'payload.toObjectId': String(payload.objectId),
+    isSend: false,
+  }).select({ _id: 1 }).lean();
+
+  if (pendingAssociation) {
+    await LineItemPriceWebhookEvent.create({
+      payload,
+      isSend: false,
+      errorMessage: SKIPPED_MISC_ERROR_MESSAGE,
+    });
+
+    return {
+      skip: true,
+      payload: null,
+      executionId: null,
+      meta: {
+        skipped: true,
+        reason: SKIPPED_MISC_PENDING_ASSOC_MARKER,
+      },
+    };
+  }
+
   const createdEvent = await LineItemPriceWebhookEvent.create({
     payload,
     isSend: false,
