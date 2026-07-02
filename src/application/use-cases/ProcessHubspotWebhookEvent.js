@@ -161,8 +161,10 @@ export class ProcessHubspotWebhookEvent {
         documentLines,
         slpCode,
         comments: deal?.comments,
-        U_ACO_Telefono: deal?.numero_de_contacto_primario + "/" + deal?.numero_de_contacto_secundario,
-        Address: deal?.direccion_de_entrega,
+        U_ACO_Telefono: deal?.numero_de_contacto_primario,
+        U_ACO_Telefono2: deal?.numero_de_contacto_secundario,
+        Address: deal?.direccion_de_facturacion,
+        Address2: deal?.direccion_de_entrega,
       });
 
       auditTrail.payload_SAP.order = orderPayload;
