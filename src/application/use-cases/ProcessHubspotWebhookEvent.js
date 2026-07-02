@@ -162,7 +162,10 @@ export class ProcessHubspotWebhookEvent {
         documentLines,
         slpCode,
         comments: deal?.comments,
+        U_ACO_Telefono: deal?.numero_de_contacto_primario,
+        Address: deal?.direccion_de_entrega,
       });
+
       auditTrail.payload_SAP.order = orderPayload;
 
       orderResponse = await this.sapOrderAdapter.createOrder({
