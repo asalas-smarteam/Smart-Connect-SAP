@@ -27,6 +27,12 @@ const SKIPPED_MISC_ERROR_MESSAGE =
   `${SKIPPED_MISC_PENDING_ASSOC_MARKER}: safe_price_value not yet available — ` +
   'the pending deal.associationChange will recalculate the price when it runs';
 
+// Marcador de descarte por ausencia total de asociación (line item preexistente o sin webhook)
+export const SKIPPED_MISC_NO_ASSOC_MARKER = 'skipped_misc_no_assoc';
+const SKIPPED_MISC_NO_ASSOC_MESSAGE =
+  `${SKIPPED_MISC_NO_ASSOC_MARKER}: no deal.associationChange found for this line item — ` +
+  'safe_price_value has not been set yet; skipping until the association sync runs';
+
 function toNonEmptyString(value) {
   const normalized = String(value ?? '').trim();
   return normalized || null;
@@ -249,15 +255,35 @@ async function handlePropertyChangeEvent(payload, { tenantModels, tenant }) {
 
   const { LineItemPriceWebhookEvent } = tenantModels;
 
-  // Condición de carrera: si existe un deal.associationChange pendiente para este line item,
-  // ese flujo ya recalculará el misceláneo — descartamos este evento sin fallo ni reintento.
-  const pendingAssociation = await LineItemPriceWebhookEvent.findOne({
+  // Buscar cualquier deal.associationChange para este line item (sin importar isSend).
+  // Tres casos posibles según el estado encontrado:
+  //   1. null    → no existe ningún evento de asociación; safe_price_value nunca se escribió
+  //   2. isSend false → asociación pendiente o fallida; ese flujo recalculará misc al procesar
+  //   3. isSend true  → asociación completada; safe_price_value debería estar disponible
+  const associationEvent = await LineItemPriceWebhookEvent.findOne({
     'payload.subscriptionType': 'deal.associationChange',
     'payload.toObjectId': String(payload.objectId),
-    isSend: false,
-  }).select({ _id: 1 }).lean();
+  }).sort({ createdAt: -1 }).select({ _id: 1, isSend: 1 }).lean();
 
-  if (pendingAssociation) {
+  if (!associationEvent) {
+    await LineItemPriceWebhookEvent.create({
+      payload,
+      isSend: false,
+      errorMessage: SKIPPED_MISC_NO_ASSOC_MESSAGE,
+    });
+
+    return {
+      skip: true,
+      payload: null,
+      executionId: null,
+      meta: {
+        skipped: true,
+        reason: SKIPPED_MISC_NO_ASSOC_MARKER,
+      },
+    };
+  }
+
+  if (!associationEvent.isSend) {
     await LineItemPriceWebhookEvent.create({
       payload,
       isSend: false,
