@@ -221,7 +221,8 @@ export class SendMappedItemsToHubspot {
             existing,
             tenantModels,
           });
-        } else {
+          resultMetrics = { created: 0, updated: 1 };
+        } else if (mainDataInUpdate === 'SAP') {
           await handler.update({
             token,
             id: existing.id,
@@ -230,8 +231,10 @@ export class SendMappedItemsToHubspot {
             clientConfig,
             tenantModels,
           });
+          resultMetrics = { created: 0, updated: 1 };
+        } else {
+          resultMetrics = { created: 0, updated: 0 };
         }
-        resultMetrics = { created: 0, updated: 1 };
       } else {
         created = await handler.create({ token, item, clientConfig, tenantModels });
 

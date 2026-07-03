@@ -89,7 +89,7 @@ describe('SendMappedItemsToHubspot', () => {
     }));
   });
 
-  it('keeps current HubSpot update behavior when mainDataInUpdate is HUBSPOT', async () => {
+  it('skips the update entirely when mainDataInUpdate is HUBSPOT', async () => {
     const existing = {
       id: 'hs-1',
       properties: {
@@ -122,7 +122,7 @@ describe('SendMappedItemsToHubspot', () => {
     const clientConfig = { hubspotCredentialId: 'cred-1' };
     const tenantModels = {};
 
-    await useCase.execute({
+    const result = await useCase.execute({
       mappedItems: [item],
       clientConfig,
       objectType: 'company',
@@ -130,9 +130,50 @@ describe('SendMappedItemsToHubspot', () => {
       credentials: { _id: 'cred-1' },
     });
 
+    expect(handler.update).not.toHaveBeenCalled();
+    expect(sapHubspotIdUpdater.updateBusinessPartnerInSapFromHubspot).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      ok: true,
+      sent: 1,
+      failed: 0,
+      created: 0,
+      updated: 0,
+    }));
+  });
+
+  it('updates HubSpot when mainDataInUpdate is SAP and objectType is not contact/company', async () => {
+    const existing = { id: 'hs-3', properties: { hs_sku: 'SKU-1' } };
+    const handler = {
+      find: jest.fn().mockResolvedValue(existing),
+      update: jest.fn().mockResolvedValue(null),
+      create: jest.fn(),
+    };
+    const sapHubspotIdUpdater = {
+      updateHubspotIdInSap: jest.fn(),
+      updateBusinessPartnerInSapFromHubspot: jest.fn(),
+    };
+    const useCase = buildUseCase({
+      handlers: { product: handler },
+      sapHubspotIdUpdater,
+      mainDataInUpdateConfigRepository: {
+        getMainDataInUpdate: jest.fn().mockResolvedValue('SAP'),
+      },
+    });
+    const item = { properties: { hs_sku: 'SKU-1' } };
+    const clientConfig = { hubspotCredentialId: 'cred-1' };
+    const tenantModels = {};
+
+    await useCase.execute({
+      mappedItems: [item],
+      clientConfig,
+      objectType: 'product',
+      tenantModels,
+      credentials: { _id: 'cred-1' },
+    });
+
     expect(handler.update).toHaveBeenCalledWith({
       token: 'token-1',
-      id: 'hs-1',
+      id: 'hs-3',
       existing,
       item,
       clientConfig,
