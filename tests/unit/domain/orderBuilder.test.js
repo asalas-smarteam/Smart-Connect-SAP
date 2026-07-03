@@ -223,4 +223,27 @@ describe('order-builder.service buildOrderPayload', () => {
     });
     expect(withoutComments).not.toHaveProperty('Comments');
   });
+
+  it('adds phone and address fields when provided and omits them when null or empty', () => {
+    const documentLines = [
+      {
+        ItemCode: 'A56010004',
+        Quantity: 1,
+      },
+    ];
+
+    const payload = buildOrderPayload({
+      cardCode: 'CL99999',
+      documentLines,
+      U_ACO_Telefono: '+50589496681',
+      U_ACO_Telefono2: null,
+      Address: '',
+      Address2: 'En Ferretería Noelito, sobre la carretera',
+    });
+
+    expect(payload.U_ACO_Telefono).toBe('+50589496681');
+    expect(payload.Address2).toBe('En Ferretería Noelito, sobre la carretera');
+    expect(payload).not.toHaveProperty('U_ACO_Telefono2');
+    expect(payload).not.toHaveProperty('Address');
+  });
 });
