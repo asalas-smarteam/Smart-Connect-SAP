@@ -194,6 +194,8 @@ export class SapWebhookOrderAdapter {
       Phone1: toNonEmptyString(mappedCompany?.Phone1 || mappedContact?.Phone1) || undefined,
       PriceListNum: resolvedPriceListNum,
       FederalTaxID: toNonEmptyString(federalTaxId) || undefined,
+      Frozen: 'tNO',
+      Valid: 'tYES',
     };
 
     if (resolvedCardCode) {
