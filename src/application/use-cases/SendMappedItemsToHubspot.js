@@ -222,7 +222,7 @@ export class SendMappedItemsToHubspot {
             tenantModels,
           });
           resultMetrics = { created: 0, updated: 1 };
-        } else if (mainDataInUpdate === 'SAP') {
+        } else if (mainDataInUpdate === 'HUBSPOT') {
           await handler.update({
             token,
             id: existing.id,
