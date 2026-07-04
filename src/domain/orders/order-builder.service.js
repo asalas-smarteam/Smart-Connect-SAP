@@ -70,6 +70,23 @@ export function buildDefaultBusinessPartnerCardCode({ company, contact, companyE
   return `CL${dynamicPart}`.slice(0, 15);
 }
 
+const DEFAULT_DISCOUNT_FIELD = 'hs_discount_percentage';
+
+// Resolves the line discount from the configured HubSpot field. Discounts are gated on
+// `requireDiscounts.isRequired`: when false (or unset) the discount is not applied and the
+// caller's fallback is returned. The field to read comes from `fieldMappings.Discount`
+// (default `hs_discount_percentage`).
+function resolveLineDiscount(lineItem, discountConfig, fallback) {
+  if (!discountConfig?.isRequired) {
+    return fallback;
+  }
+
+  const field = toNonEmptyString(discountConfig?.fieldMappings?.Discount)
+    || DEFAULT_DISCOUNT_FIELD;
+
+  return normalizeNumber(lineItem?.[field], fallback);
+}
+
 function resolveTaxCodeByRate(taxCodes, taxRate) {
   const rawRate = toNonEmptyString(taxRate);
   if (!rawRate) {
@@ -129,6 +146,7 @@ export function mapDocumentLines({
   productMappings,
   taxCodes = [],
   miscPriceCalculationConfig = null,
+  discountConfig = null,
   logger = null,
 }) {
   const lines = [];
@@ -137,7 +155,7 @@ export function mapDocumentLines({
     const mapped = mapHubspotToSapFields(lineItem, productMappings);
     const itemCode = toNonEmptyString(mapped?.ItemCode || lineItem?.hs_sku || lineItem?.itemCode);
     const quantity = normalizeNumber(mapped?.Quantity ?? lineItem?.quantity, 1);
-    const discount = normalizeNumber(lineItem?.hs_discount_percentage, 0);
+    const discount = resolveLineDiscount(lineItem, discountConfig, 0);
     const { unitPrice, warning } = resolveUnitPrice({ mapped, lineItem, miscPriceCalculationConfig });
 
     if (!itemCode) {
@@ -349,7 +367,7 @@ function resolveQuotationLinkLine(lineItem, linkLines, usedLineNums) {
 
 // Builds the PATCH /Quotations(DocEntry) DocumentLines updating only existing lines
 // (price / quantity / discount) matched by their SAP LineNum.
-export function buildQuotationLineUpdates({ lineItems, productMappings, linkLines, taxCodes = [], miscPriceCalculationConfig = null, logger = null }) {
+export function buildQuotationLineUpdates({ lineItems, productMappings, linkLines, taxCodes = [], miscPriceCalculationConfig = null, discountConfig = null, logger = null }) {
   const updates = [];
   const usedLineNums = new Set();
 
@@ -369,7 +387,7 @@ export function buildQuotationLineUpdates({ lineItems, productMappings, linkLine
 
     const mapped = mapHubspotToSapFields(lineItem, productMappings);
     const quantity = normalizeNumber(mapped?.Quantity ?? lineItem?.quantity, null);
-    const discount = normalizeNumber(lineItem?.hs_discount_percentage, null);
+    const discount = resolveLineDiscount(lineItem, discountConfig, null);
     const { unitPrice, warning } = resolveUnitPrice({ mapped, lineItem, miscPriceCalculationConfig });
 
     if (warning) {

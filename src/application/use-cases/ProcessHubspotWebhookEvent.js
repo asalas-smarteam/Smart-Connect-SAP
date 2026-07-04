@@ -54,6 +54,7 @@ export class ProcessHubspotWebhookEvent {
         hubspotCredentials,
         taxCodes,
         miscPriceCalculationConfig,
+        discountConfig,
       } = context;
       const mappedCompany = mapHubspotToSapFields(company || {}, mappings.companyMappings);
       const mappedContact = mapHubspotToSapFields(contact || {}, mappings.contactBusinessPartnerMappings);
@@ -109,6 +110,12 @@ export class ProcessHubspotWebhookEvent {
       }
 
       if (businessPartnerResult.created) {
+        await this.webhookEventProgressRepository?.markBusinessPartnerCreated({
+          WebhookEvent,
+          eventId: event?._id,
+          requestPayload: businessPartnerResult.requestPayload,
+          responsePayload: businessPartnerResult.responsePayload,
+        });
         await this.webhookReferenceRepository.persistReferences({
           WebhookEvent,
           eventId: event?._id,
@@ -148,6 +155,7 @@ export class ProcessHubspotWebhookEvent {
         productMappings: mappings.productMappings,
         taxCodes,
         miscPriceCalculationConfig,
+        discountConfig,
         logger: this.logger,
       });
       const slpCode = await this.resolveOrderSlpCode({

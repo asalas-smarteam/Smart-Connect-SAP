@@ -92,6 +92,7 @@ describe('order-builder.service buildQuotationLineUpdates', () => {
       productMappings,
       linkLines,
       taxCodes: [{ Rate: 15, Code: 'IVA' }],
+      discountConfig: { isRequired: true, fieldMappings: {} },
       lineItems: [
         {
           hubspot_id: 'li-1',
@@ -124,6 +125,7 @@ describe('order-builder.service buildQuotationLineUpdates', () => {
         { hubspotLineItemId: '56431574047', hubspotProductId: '45616885779', sku: '101-0029', sapLineNum: 0 },
       ],
       taxCodes: [{ Rate: 15, Code: 'IVA' }],
+      discountConfig: { isRequired: true, fieldMappings: {} },
       lineItems: [
         {
           hubspot_id: '45616885779',
@@ -140,6 +142,47 @@ describe('order-builder.service buildQuotationLineUpdates', () => {
     expect(updates).toEqual([
       { LineNum: 0, UnitPrice: 86302.62, Quantity: 2, DiscountPercent: 0, WarehouseCode: '02', TaxCode: 'IVA' },
     ]);
+  });
+
+  it('omits DiscountPercent when requireDiscounts.isRequired is false', () => {
+    const updates = buildQuotationLineUpdates({
+      productMappings,
+      linkLines,
+      taxCodes: [{ Rate: 15, Code: 'IVA' }],
+      discountConfig: { isRequired: false, fieldMappings: { Discount: 'hs_discount_percentage' } },
+      lineItems: [
+        {
+          hubspot_id: 'li-1',
+          hs_sku: 'A01',
+          quantity: '2',
+          price: '17.5',
+          hs_discount_percentage: '5',
+          hs_tax_rate: '15.0000',
+        },
+      ],
+    });
+
+    expect(updates[0]).not.toHaveProperty('DiscountPercent');
+  });
+
+  it('reads the discount from the configured fieldMappings.Discount field', () => {
+    const updates = buildQuotationLineUpdates({
+      productMappings,
+      linkLines,
+      discountConfig: { isRequired: true, fieldMappings: { Discount: 'discount' } },
+      lineItems: [
+        {
+          hubspot_id: 'li-1',
+          hs_sku: 'A01',
+          quantity: '2',
+          price: '17.5',
+          discount: '8',
+          hs_discount_percentage: '5',
+        },
+      ],
+    });
+
+    expect(updates[0].DiscountPercent).toBe(8);
   });
 
   it('falls back to SKU matching when no id matches', () => {

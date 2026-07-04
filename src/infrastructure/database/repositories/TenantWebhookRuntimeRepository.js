@@ -33,6 +33,7 @@ export class TenantWebhookRuntimeRepository {
       dealMappings,
       taxCodes,
       miscPriceCalculationConfig,
+      requireDiscounts,
     ] = await Promise.all([
       mappingService.getMappingsByObjectType(hubspotCredentialId, 'company', 'businessPartner', tenantModels),
       mappingService.getMappingsByObjectType(hubspotCredentialId, 'contact', 'businessPartner', tenantModels),
@@ -41,6 +42,11 @@ export class TenantWebhookRuntimeRepository {
       mappingService.getMappingsByObjectType(hubspotCredentialId, 'deal', 'businessPartner', tenantModels),
       tenantConfigurationService.getValue(tenantModels, 'taxCodes', []),
       this.resolveMiscPriceCalculationConfig(tenantModels),
+      tenantConfigurationService.getValue(
+        tenantModels,
+        'requireDiscounts',
+        { isRequired: false, fieldMappings: {} }
+      ),
     ]);
 
     return {
@@ -59,6 +65,10 @@ export class TenantWebhookRuntimeRepository {
       },
       taxCodes,
       miscPriceCalculationConfig,
+      discountConfig: {
+        isRequired: Boolean(requireDiscounts?.isRequired),
+        fieldMappings: requireDiscounts?.fieldMappings ?? {},
+      },
     };
   }
 

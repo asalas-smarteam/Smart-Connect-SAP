@@ -148,6 +148,78 @@ describe('order-builder.service mapDocumentLines', () => {
     expect(lines[0].UnitPrice).toBe(400);
   });
 
+  it('does not add DiscountPercent when requireDiscounts is not configured', () => {
+    const lines = mapDocumentLines({
+      productMappings,
+      taxCodes: [],
+      lineItems: [
+        {
+          hs_sku: 'A56010004',
+          quantity: '1',
+          price: '19.21',
+          hs_discount_percentage: '5',
+        },
+      ],
+    });
+
+    expect(lines[0]).not.toHaveProperty('DiscountPercent');
+  });
+
+  it('does not add DiscountPercent when requireDiscounts.isRequired is false', () => {
+    const lines = mapDocumentLines({
+      productMappings,
+      taxCodes: [],
+      discountConfig: { isRequired: false, fieldMappings: { Discount: 'hs_discount_percentage' } },
+      lineItems: [
+        {
+          hs_sku: 'A56010004',
+          quantity: '1',
+          price: '19.21',
+          hs_discount_percentage: '5',
+        },
+      ],
+    });
+
+    expect(lines[0]).not.toHaveProperty('DiscountPercent');
+  });
+
+  it('adds DiscountPercent from hs_discount_percentage when isRequired and no field override', () => {
+    const lines = mapDocumentLines({
+      productMappings,
+      taxCodes: [],
+      discountConfig: { isRequired: true, fieldMappings: {} },
+      lineItems: [
+        {
+          hs_sku: 'A56010004',
+          quantity: '1',
+          price: '19.21',
+          hs_discount_percentage: '5',
+        },
+      ],
+    });
+
+    expect(lines[0].DiscountPercent).toBe(5);
+  });
+
+  it('reads the discount from the configured fieldMappings.Discount field', () => {
+    const lines = mapDocumentLines({
+      productMappings,
+      taxCodes: [],
+      discountConfig: { isRequired: true, fieldMappings: { Discount: 'discount' } },
+      lineItems: [
+        {
+          hs_sku: 'A56010004',
+          quantity: '1',
+          price: '19.21',
+          discount: '12',
+          hs_discount_percentage: '5',
+        },
+      ],
+    });
+
+    expect(lines[0].DiscountPercent).toBe(12);
+  });
+
   it('logs warning when misc config is incomplete while mapping SAP order lines', () => {
     const logger = { warn: jest.fn() };
 

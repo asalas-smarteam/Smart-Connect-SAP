@@ -57,7 +57,7 @@ export class ProcessHubspotCreateQuotation {
       });
       context.tenantModels = tenantModels;
 
-      const { mappings, sapConfig, hubspotCredentials, taxCodes, miscPriceCalculationConfig } = context;
+      const { mappings, sapConfig, hubspotCredentials, taxCodes, miscPriceCalculationConfig, discountConfig } = context;
 
       // Idempotency: do not create a second quotation for the same deal.
       const existingLink = await this.sapDocumentLinkRepository.findByDeal({
@@ -104,6 +104,7 @@ export class ProcessHubspotCreateQuotation {
         productMappings: mappings.productMappings,
         taxCodes,
         miscPriceCalculationConfig,
+        discountConfig,
         logger: this.logger,
       });
       const slpCode = await resolveDocumentSlpCode({

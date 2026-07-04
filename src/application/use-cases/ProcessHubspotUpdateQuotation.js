@@ -60,7 +60,7 @@ export class ProcessHubspotUpdateQuotation {
         tenantKey,
         portalId,
       });
-      const { mappings, sapConfig, hubspotCredentials, taxCodes, miscPriceCalculationConfig } = context;
+      const { mappings, sapConfig, hubspotCredentials, taxCodes, miscPriceCalculationConfig, discountConfig } = context;
 
       const link = await this.sapDocumentLinkRepository.findByDeal({
         SapDocumentLink,
@@ -87,6 +87,7 @@ export class ProcessHubspotUpdateQuotation {
         linkLines: link.lines,
         taxCodes,
         miscPriceCalculationConfig,
+        discountConfig,
         logger: this.logger,
       });
 
