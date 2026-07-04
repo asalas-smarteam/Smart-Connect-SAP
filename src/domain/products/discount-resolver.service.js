@@ -6,20 +6,31 @@ function toNonEmptyString(value) {
   return normalized || null;
 }
 
+// Returns null when the bound is absent (open-ended), NaN when it is present but unparseable.
+// `new Date(null)` resolves to epoch (0) rather than Invalid Date, so null/undefined/'' must
+// be special-cased before delegating to Date - otherwise an open-ended ValidTo is mistaken for
+// "expired at epoch" and the group is wrongly excluded.
 function toTimestamp(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
   const timestamp = new Date(value).getTime();
-  return Number.isFinite(timestamp) ? timestamp : null;
+  return Number.isFinite(timestamp) ? timestamp : NaN;
 }
 
 function isGroupValidForDate(discountGroup, currentTimestamp) {
   const validFrom = toTimestamp(discountGroup?.ValidFrom);
   const validTo = toTimestamp(discountGroup?.ValidTo);
 
-  if (validFrom === null || validTo === null) {
+  if (Number.isNaN(validFrom) || Number.isNaN(validTo)) {
     return false;
   }
 
-  return currentTimestamp >= validFrom && currentTimestamp <= validTo;
+  const afterStart = validFrom === null || currentTimestamp >= validFrom;
+  const beforeEnd = validTo === null || currentTimestamp <= validTo;
+
+  return afterStart && beforeEnd;
 }
 
 function findLineDiscount(validGroups, objectType, objectCode) {
