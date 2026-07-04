@@ -19,9 +19,28 @@ function toTimestamp(value) {
   return Number.isFinite(timestamp) ? timestamp : NaN;
 }
 
+// SAP sends ValidFrom/ValidTo as UTC midnight (date-only semantics, e.g. "2026-07-04T00:00:00Z").
+// Validity must be evaluated by calendar day, not by exact time, so the group stays active
+// through the end of its ValidTo day (23:59:59.999 UTC) rather than expiring at 00:00.
+function toDayBoundaryTimestamp(value, edge) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const date = new Date(value);
+  const timestamp = date.getTime();
+  if (!Number.isFinite(timestamp)) {
+    return NaN;
+  }
+
+  return edge === 'end'
+    ? Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59, 999)
+    : Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 0, 0, 0, 0);
+}
+
 function isGroupValidForDate(discountGroup, currentTimestamp) {
-  const validFrom = toTimestamp(discountGroup?.ValidFrom);
-  const validTo = toTimestamp(discountGroup?.ValidTo);
+  const validFrom = toDayBoundaryTimestamp(discountGroup?.ValidFrom, 'start');
+  const validTo = toDayBoundaryTimestamp(discountGroup?.ValidTo, 'end');
 
   if (Number.isNaN(validFrom) || Number.isNaN(validTo)) {
     return false;

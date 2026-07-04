@@ -166,6 +166,42 @@ describe('resolveDiscount', () => {
     expect(discount).toBe(10);
   });
 
+  it('still applies the discount later on the ValidTo calendar day (SAP sends midnight)', () => {
+    const discountGroups = [
+      buildDiscountGroup({
+        validFrom: '2026-06-29T00:00:00Z',
+        validTo: '2026-07-04T00:00:00Z',
+        lines: [{ ObjectType: 'dgboItems', ObjectCode: 'A01050094', Discount: 10 }],
+      }),
+    ];
+
+    const discount = resolveDiscount(discountGroups, {
+      itemCode: 'A01050094',
+      itemsGroupCode: '141',
+      currentDate: new Date('2026-07-04T23:59:00Z'),
+    });
+
+    expect(discount).toBe(10);
+  });
+
+  it('expires the day after the ValidTo calendar day', () => {
+    const discountGroups = [
+      buildDiscountGroup({
+        validFrom: '2026-06-29T00:00:00Z',
+        validTo: '2026-07-04T00:00:00Z',
+        lines: [{ ObjectType: 'dgboItems', ObjectCode: 'A01050094', Discount: 10 }],
+      }),
+    ];
+
+    const discount = resolveDiscount(discountGroups, {
+      itemCode: 'A01050094',
+      itemsGroupCode: '141',
+      currentDate: new Date('2026-07-05T00:00:01Z'),
+    });
+
+    expect(discount).toBeNull();
+  });
+
   it('returns null when ValidFrom or ValidTo is an unparseable date', () => {
     const discountGroups = [
       buildDiscountGroup({
