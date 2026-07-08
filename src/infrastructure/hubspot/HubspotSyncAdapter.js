@@ -21,6 +21,7 @@ export class HubspotSyncAdapter {
       failed: result?.failed ?? 0,
       created: result?.created ?? 0,
       updated: result?.updated ?? Math.max((result?.sent ?? 0) - (result?.created ?? 0), 0),
+      errors: Array.isArray(result?.errors) ? result.errors : [],
     };
   }
 }

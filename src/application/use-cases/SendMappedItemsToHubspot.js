@@ -268,7 +268,15 @@ export class SendMappedItemsToHubspot {
       return { ok: true, ...resultMetrics };
     } catch (error) {
       console.error('processSingleItem error:', error);
-      return { ok: false, created: 0, updated: 0 };
+      return {
+        ok: false,
+        created: 0,
+        updated: 0,
+        error: {
+          payloadHubspot: item?.properties ?? null,
+          responseHubspot: error?.details?.hubspotResponse ?? null,
+        },
+      };
     }
   }
 
@@ -277,6 +285,7 @@ export class SendMappedItemsToHubspot {
     let failed = 0;
     let created = 0;
     let updated = 0;
+    const errors = [];
 
     for (const item of items) {
       const result = await this.processSingleItem({ ...context, item });
@@ -287,10 +296,13 @@ export class SendMappedItemsToHubspot {
         updated += result.updated ?? 0;
       } else {
         failed += 1;
+        if (result.error) {
+          errors.push(result.error);
+        }
       }
     }
 
-    return { sent, failed, created, updated };
+    return { sent, failed, created, updated, errors };
   }
 
   async processInvoiceItems({ mappedItems, clientConfig, tenantModels, handler, getToken }) {
@@ -301,6 +313,7 @@ export class SendMappedItemsToHubspot {
     let sent = 0;
     let failed = 0;
     let updated = 0;
+    const errors = [];
 
     for (const item of mappedItems) {
       try {
@@ -309,6 +322,10 @@ export class SendMappedItemsToHubspot {
 
         if (result?.status === 'failed') {
           failed += 1;
+          errors.push({
+            payloadHubspot: item?.properties ?? null,
+            responseHubspot: result?.hubspotResponse ?? result?.error?.details?.hubspotResponse ?? null,
+          });
           continue;
         }
 
@@ -319,10 +336,14 @@ export class SendMappedItemsToHubspot {
       } catch (error) {
         this.logger?.error?.('processInvoiceItems error:', error);
         failed += 1;
+        errors.push({
+          payloadHubspot: item?.properties ?? null,
+          responseHubspot: error?.details?.hubspotResponse ?? null,
+        });
       }
     }
 
-    return { ok: true, sent, failed, created: 0, updated };
+    return { ok: true, sent, failed, created: 0, updated, errors };
   }
 
   async finalizeCreatedProductBatch({ createdResults, createdItems, clientConfig, tenantModels }) {
@@ -362,6 +383,7 @@ export class SendMappedItemsToHubspot {
     let failed = 0;
     let created = 0;
     let updated = 0;
+    const errors = [];
     const createEntries = [];
     const updateEntries = [];
 
@@ -386,6 +408,10 @@ export class SendMappedItemsToHubspot {
       } catch (error) {
         console.error('processProductBatch item error:', error);
         failed += 1;
+        errors.push({
+          payloadHubspot: item?.properties ?? null,
+          responseHubspot: error?.details?.hubspotResponse ?? null,
+        });
       }
     }
 
@@ -416,6 +442,7 @@ export class SendMappedItemsToHubspot {
         failed += fallbackResult.failed;
         created += fallbackResult.created ?? 0;
         updated += fallbackResult.updated ?? 0;
+        errors.push(...(fallbackResult.errors ?? []));
       }
     }
 
@@ -442,10 +469,11 @@ export class SendMappedItemsToHubspot {
         failed += fallbackResult.failed;
         created += fallbackResult.created ?? 0;
         updated += fallbackResult.updated ?? 0;
+        errors.push(...(fallbackResult.errors ?? []));
       }
     }
 
-    return { sent, failed, created, updated };
+    return { sent, failed, created, updated, errors };
   }
 
   async processProductBatches({ mappedItems, clientConfig, tenantModels, handler, getToken }) {
@@ -454,6 +482,7 @@ export class SendMappedItemsToHubspot {
     let failed = 0;
     let created = 0;
     let updated = 0;
+    const errors = [];
 
     for (let index = 0; index < mappedItems.length; index += batchSize) {
       const batch = mappedItems.slice(index, index + batchSize);
@@ -469,9 +498,10 @@ export class SendMappedItemsToHubspot {
       failed += batchResult.failed;
       created += batchResult.created ?? 0;
       updated += batchResult.updated ?? 0;
+      errors.push(...(batchResult.errors ?? []));
     }
 
-    return { ok: true, sent, failed, created, updated };
+    return { ok: true, sent, failed, created, updated, errors };
   }
 }
 

@@ -34,6 +34,10 @@ export const syncLogSchema = new Schema(
       type: Schema.Types.Mixed,
       default: null,
     },
+    errors: {
+      type: [Schema.Types.Mixed],
+      default: [],
+    },
     startedAt: {
       type: Date,
     },

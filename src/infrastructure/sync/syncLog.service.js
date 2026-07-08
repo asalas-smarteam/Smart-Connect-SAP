@@ -102,6 +102,7 @@ export async function finishSyncLog(syncLog, {
   sent = 0,
   failed = 0,
   errorMessage = null,
+  errors = [],
   finishedAt = new Date(),
 } = {}) {
   if (!syncLog?.constructor?.updateOne || !syncLog?._id) {
@@ -119,6 +120,7 @@ export async function finishSyncLog(syncLog, {
       ? Number(failed)
       : 0,
     errorMessage: errorMessage ?? null,
+    errors: Array.isArray(errors) ? serializeLogValue(errors) ?? [] : [],
     finishedAt,
   };
 

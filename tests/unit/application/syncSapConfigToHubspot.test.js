@@ -109,6 +109,7 @@ describe('SyncSapConfigToHubspot', () => {
         hubspotFailed: 0,
         hubspotCreated: 1,
         hubspotUpdated: 0,
+        hubspotErrors: [],
       },
     }));
     expect(clientConfigRepository.markSyncSucceeded).toHaveBeenCalledWith({

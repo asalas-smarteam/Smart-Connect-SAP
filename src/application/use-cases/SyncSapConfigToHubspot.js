@@ -148,6 +148,7 @@ export class SyncSapConfigToHubspot {
         recordsProcessed: metrics.recordsProcessed,
         sent: metrics.hubspotSent,
         failed: metrics.hubspotFailed,
+        errors: metrics.hubspotErrors,
         finishedAt: this.dateProvider(),
       });
 
@@ -204,6 +205,7 @@ export class SyncSapConfigToHubspot {
     const hubspotFailed = hubspotResult?.failed ?? 0;
     const hubspotCreated = hubspotResult?.created ?? 0;
     const hubspotUpdated = hubspotResult?.updated ?? Math.max(hubspotSent - hubspotCreated, 0);
+    const hubspotErrors = Array.isArray(hubspotResult?.errors) ? hubspotResult.errors : [];
 
     return {
       recordsProcessed,
@@ -211,6 +213,7 @@ export class SyncSapConfigToHubspot {
       hubspotFailed,
       hubspotCreated,
       hubspotUpdated,
+      hubspotErrors,
     };
   }
 
@@ -332,6 +335,7 @@ export class SyncSapConfigToHubspot {
         failed: result?.failed ?? 0,
         created: result?.created ?? 0,
         updated: result?.updated ?? Math.max((result?.sent ?? 0) - (result?.created ?? 0), 0),
+        errors: Array.isArray(result?.errors) ? result.errors : [],
         recordsProcessed: mappedRecords.length,
       };
     } catch (_error) {
@@ -340,6 +344,7 @@ export class SyncSapConfigToHubspot {
         failed: mappedRecords.length,
         created: 0,
         updated: 0,
+        errors: [],
         recordsProcessed: mappedRecords.length,
       };
     }

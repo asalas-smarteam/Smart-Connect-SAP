@@ -39,6 +39,7 @@ describe('HubspotSyncAdapter', () => {
       failed: 0,
       created: 1,
       updated: 1,
+      errors: [],
     });
   });
 
