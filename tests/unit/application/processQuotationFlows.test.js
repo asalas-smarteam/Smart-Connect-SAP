@@ -23,6 +23,7 @@ function buildContext(overrides = {}) {
         { sourceField: 'DocEntry', targetField: 'sap_docentry' },
         { sourceField: 'DocNum', targetField: 'sap_docnum' },
       ],
+      dealOrdersQuotationsMappings: [],
     },
     sapConfig: { serviceLayerBaseUrl: 'https://sap.test' },
     hubspotCredentials: { _id: 'cred-1', clientConfigId: 'cfg-1' },
@@ -39,6 +40,7 @@ function buildRuntimeRepository(context = buildContext()) {
     resolveRequireRandCardCode: jest.fn().mockResolvedValue(true),
     resolveDefaultSeries: jest.fn().mockResolvedValue(null),
     resolveDefaultFindSAP: jest.fn().mockResolvedValue('EmailAddress'),
+    resolveGroupCodeDefaults: jest.fn().mockResolvedValue(null),
     findOwnerMappingByHubspotOwner: jest.fn().mockResolvedValue(null),
   };
 }
@@ -126,6 +128,54 @@ describe('ProcessHubspotCreateQuotation', () => {
       docNum: 8001,
       dealId: '59680314911',
     });
+  });
+
+  it('sends PaymentGroupCode from the orders-quotations deal mapping', async () => {
+    const context = buildContext();
+    context.mappings.dealOrdersQuotationsMappings = [
+      { sourceField: 'PaymentGroupCode', targetField: 'paymentGroupCode' },
+    ];
+    const deps = buildDeps();
+    deps.runtimeRepository = buildRuntimeRepository(context);
+    const useCase = new ProcessHubspotCreateQuotation(deps);
+
+    const event = {
+      ...baseEvent,
+      payload: {
+        ...baseEvent.payload,
+        deal: { hs_object_id: '59680314911', paymentGroupCode: '3' },
+      },
+    };
+
+    await useCase.execute({ event, tenantModels });
+
+    const { quotationPayload } = deps.sapQuotationAdapter.createQuotation.mock.calls[0][0];
+    expect(quotationPayload.PaymentGroupCode).toBe(3);
+    expect(deps.runtimeRepository.resolveGroupCodeDefaults).toHaveBeenCalled();
+  });
+
+  it('falls back to the groupCodeDefauls config when the deal has no paymentGroupCode', async () => {
+    const deps = buildDeps();
+    deps.runtimeRepository.resolveGroupCodeDefaults.mockResolvedValue({
+      PayTermsGrpCode: 2,
+      PaymentGroupCode: 2,
+    });
+    const useCase = new ProcessHubspotCreateQuotation(deps);
+
+    await useCase.execute({ event: baseEvent, tenantModels });
+
+    const { quotationPayload } = deps.sapQuotationAdapter.createQuotation.mock.calls[0][0];
+    expect(quotationPayload.PaymentGroupCode).toBe(2);
+  });
+
+  it('omits PaymentGroupCode when neither mapping nor config default provides a value', async () => {
+    const deps = buildDeps();
+    const useCase = new ProcessHubspotCreateQuotation(deps);
+
+    await useCase.execute({ event: baseEvent, tenantModels });
+
+    const { quotationPayload } = deps.sapQuotationAdapter.createQuotation.mock.calls[0][0];
+    expect(quotationPayload).not.toHaveProperty('PaymentGroupCode');
   });
 
   it('is idempotent: skips creation when a quotation link already exists', async () => {

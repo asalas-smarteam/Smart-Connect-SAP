@@ -24,6 +24,31 @@ describe('mappingService.getMappingsByObjectType', () => {
     expect(sort).toHaveBeenCalledWith({ _id: 1 });
   });
 
+  it('does not fall back to businessPartner when allowBusinessPartnerFallback is false', async () => {
+    const find = jest
+      .fn()
+      .mockReturnValueOnce({ sort: jest.fn().mockResolvedValue([]) });
+
+    const tenantModels = { FieldMapping: { find } };
+
+    const result = await mappingService.getMappingsByObjectType(
+      'cred-1',
+      'deal',
+      'orders-quotations',
+      tenantModels,
+      { allowBusinessPartnerFallback: false }
+    );
+
+    expect(result).toEqual([]);
+    expect(find).toHaveBeenCalledTimes(1);
+    expect(find).toHaveBeenCalledWith({
+      hubspotCredentialId: 'cred-1',
+      objectType: 'deal',
+      sourceContext: 'orders-quotations',
+      isActive: true,
+    });
+  });
+
   it('falls back to businessPartner when source context has no active mappings', async () => {
     const find = jest
       .fn()

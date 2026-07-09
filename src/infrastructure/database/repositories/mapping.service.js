@@ -5,7 +5,13 @@ const mappingRepository = new MappingSyncRepository();
 const fieldMappingRepository = new TenantFieldMappingRepository();
 
 const mappingService = {
-  async getMappingsByObjectType(hubspotCredentialId, objectType, sourceContext, tenantModels) {
+  async getMappingsByObjectType(
+    hubspotCredentialId,
+    objectType,
+    sourceContext,
+    tenantModels,
+    { allowBusinessPartnerFallback = true } = {}
+  ) {
     let mappings = await fieldMappingRepository.findByCredentialObjectAndContext({
       tenantModels,
       hubspotCredentialId,
@@ -14,7 +20,7 @@ const mappingService = {
       activeOnly: true,
     });
 
-    if (mappings.length === 0 && sourceContext !== 'businessPartner') {
+    if (mappings.length === 0 && sourceContext !== 'businessPartner' && allowBusinessPartnerFallback) {
       mappings = await fieldMappingRepository.findByCredentialObjectAndContext({
         tenantModels,
         hubspotCredentialId,

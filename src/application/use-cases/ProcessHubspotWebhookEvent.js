@@ -2,6 +2,7 @@ import {
   buildOrderPayload,
   mapDocumentLines,
   mapHubspotToSapFields,
+  resolvePaymentGroupCode,
 } from '#domain/orders/order-builder.service.js';
 import {
   resolveEventPayload,
@@ -74,6 +75,8 @@ export class ProcessHubspotWebhookEvent {
           this.runtimeRepository.resolveDefaultSeries(models),
         resolveDefaultFindSAP: (models) =>
           this.runtimeRepository.resolveDefaultFindSAP(models),
+        resolveGroupCodeDefaults: (models) =>
+          this.runtimeRepository.resolveGroupCodeDefaults(models),
       });
 
       auditTrail.payload_SAP.businessPartner = businessPartnerResult.requestPayload;
@@ -164,10 +167,15 @@ export class ProcessHubspotWebhookEvent {
         hubspotCredentials,
       });
 
+      const mappedDeal = mapHubspotToSapFields(deal || {}, mappings.dealOrdersQuotationsMappings);
+      const groupCodeDefaults = await this.runtimeRepository.resolveGroupCodeDefaults(tenantModels);
+      const paymentGroupCode = resolvePaymentGroupCode({ mappedDeal, groupCodeDefaults });
+
       const orderPayload = buildOrderPayload({
         cardCode,
         documentLines,
         slpCode,
+        paymentGroupCode,
         comments: deal?.comments,
         U_ACO_Telefono: deal?.numero_de_contacto_primario,
         U_ACO_Telefono2: deal?.numero_de_contacto_secundario,

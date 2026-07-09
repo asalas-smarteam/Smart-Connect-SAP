@@ -1,7 +1,10 @@
 import { jest } from '@jest/globals';
 import {
+  buildOrderFromQuotationPayload,
   buildOrderPayload,
+  buildQuotationPayload,
   mapDocumentLines,
+  resolvePaymentGroupCode,
 } from '../../../src/domain/orders/order-builder.service.js';
 
 describe('order-builder.service mapDocumentLines', () => {
@@ -317,5 +320,101 @@ describe('order-builder.service buildOrderPayload', () => {
     expect(payload.Address2).toBe('En Ferretería Noelito, sobre la carretera');
     expect(payload).not.toHaveProperty('U_ACO_Telefono2');
     expect(payload).not.toHaveProperty('Address');
+  });
+
+  it('adds PaymentGroupCode when an integer is provided and omits it otherwise', () => {
+    const documentLines = [
+      {
+        ItemCode: 'A56010004',
+        Quantity: 1,
+      },
+    ];
+
+    const withPaymentGroupCode = buildOrderPayload({
+      cardCode: 'CL99999',
+      documentLines,
+      paymentGroupCode: 3,
+    });
+    expect(withPaymentGroupCode.PaymentGroupCode).toBe(3);
+
+    const withoutPaymentGroupCode = buildOrderPayload({
+      cardCode: 'CL99999',
+      documentLines,
+      paymentGroupCode: null,
+    });
+    expect(withoutPaymentGroupCode).not.toHaveProperty('PaymentGroupCode');
+  });
+});
+
+describe('order-builder.service resolvePaymentGroupCode', () => {
+  it('prefers the mapped deal value over the config default', () => {
+    expect(resolvePaymentGroupCode({
+      mappedDeal: { PaymentGroupCode: '3' },
+      groupCodeDefaults: { PaymentGroupCode: 2 },
+    })).toBe(3);
+  });
+
+  it('keeps a mapped value of 0 instead of falling back to the default', () => {
+    expect(resolvePaymentGroupCode({
+      mappedDeal: { PaymentGroupCode: 0 },
+      groupCodeDefaults: { PaymentGroupCode: 2 },
+    })).toBe(0);
+  });
+
+  it('falls back to the config default when the mapped value is missing or invalid', () => {
+    expect(resolvePaymentGroupCode({
+      mappedDeal: {},
+      groupCodeDefaults: { PaymentGroupCode: 2 },
+    })).toBe(2);
+
+    expect(resolvePaymentGroupCode({
+      mappedDeal: { PaymentGroupCode: 'abc' },
+      groupCodeDefaults: { PaymentGroupCode: '2' },
+    })).toBe(2);
+  });
+
+  it('returns null when neither the mapping nor the config provides a value', () => {
+    expect(resolvePaymentGroupCode({ mappedDeal: {}, groupCodeDefaults: null })).toBeNull();
+    expect(resolvePaymentGroupCode({})).toBeNull();
+  });
+});
+
+describe('order-builder.service quotation payloads and PaymentGroupCode', () => {
+  const documentLines = [
+    {
+      ItemCode: 'A56010004',
+      Quantity: 1,
+    },
+  ];
+
+  it('adds PaymentGroupCode to the quotation payload when an integer is provided', () => {
+    const payload = buildQuotationPayload({
+      cardCode: 'CL99999',
+      documentLines,
+      paymentGroupCode: 2,
+    });
+
+    expect(payload.PaymentGroupCode).toBe(2);
+  });
+
+  it('omits PaymentGroupCode from the quotation payload when it is null', () => {
+    const payload = buildQuotationPayload({
+      cardCode: 'CL99999',
+      documentLines,
+      paymentGroupCode: null,
+    });
+
+    expect(payload).not.toHaveProperty('PaymentGroupCode');
+  });
+
+  it('never emits PaymentGroupCode when converting a quotation to an order', () => {
+    const payload = buildOrderFromQuotationPayload({
+      cardCode: 'CL99999',
+      baseEntry: 12345,
+      baseLines: [{ sapLineNum: 0 }],
+    });
+
+    expect(payload).not.toHaveProperty('PaymentGroupCode');
+    expect(payload.DocumentLines[0]).toMatchObject({ BaseEntry: 12345, BaseLine: 0 });
   });
 });

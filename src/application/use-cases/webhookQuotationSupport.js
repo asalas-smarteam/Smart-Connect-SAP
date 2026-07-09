@@ -136,6 +136,7 @@ export async function resolveBusinessPartnerForDocument({
     resolveRequireRandCardCode: (models) => runtimeRepository.resolveRequireRandCardCode(models),
     resolveDefaultSeries: (models) => runtimeRepository.resolveDefaultSeries(models),
     resolveDefaultFindSAP: (models) => runtimeRepository.resolveDefaultFindSAP(models),
+    resolveGroupCodeDefaults: (models) => runtimeRepository.resolveGroupCodeDefaults(models),
   });
 
   auditTrail.payload_SAP.businessPartner = businessPartnerResult.requestPayload;

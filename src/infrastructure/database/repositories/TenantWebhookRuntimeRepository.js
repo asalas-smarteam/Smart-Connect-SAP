@@ -3,6 +3,9 @@ import tenantConfigurationService from '#infrastructure/config/tenantConfigurati
 import { PermanentWebhookError } from '#shared/errors/index.js';
 import { normalizePositiveInteger, toNonEmptyString } from '#shared/utils/string.utils.js';
 
+// Key intencionalmente escrita "groupCodeDefauls" (sin la "t") — así existe en los tenants.
+const GROUP_CODE_DEFAULTS_CONFIG_KEY = 'groupCodeDefauls';
+
 export class TenantWebhookRuntimeRepository {
   async resolveRuntimeContext({ tenantModels, payload, tenantId, tenantKey, portalId }) {
     const { HubspotCredentials, SapCredentials } = tenantModels;
@@ -31,6 +34,7 @@ export class TenantWebhookRuntimeRepository {
       contactEmployeeMappings,
       productMappings,
       dealMappings,
+      dealOrdersQuotationsMappings,
       taxCodes,
       miscPriceCalculationConfig,
       requireDiscounts,
@@ -40,6 +44,13 @@ export class TenantWebhookRuntimeRepository {
       mappingService.getMappingsByObjectType(hubspotCredentialId, 'contact', 'contactEmployee', tenantModels),
       mappingService.getMappingsByObjectType(hubspotCredentialId, 'product', 'product', tenantModels),
       mappingService.getMappingsByObjectType(hubspotCredentialId, 'deal', 'businessPartner', tenantModels),
+      mappingService.getMappingsByObjectType(
+        hubspotCredentialId,
+        'deal',
+        'orders-quotations',
+        tenantModels,
+        { allowBusinessPartnerFallback: false }
+      ),
       tenantConfigurationService.getValue(tenantModels, 'taxCodes', []),
       this.resolveMiscPriceCalculationConfig(tenantModels),
       tenantConfigurationService.getValue(
@@ -62,6 +73,7 @@ export class TenantWebhookRuntimeRepository {
         contactEmployeeMappings,
         productMappings,
         dealMappings,
+        dealOrdersQuotationsMappings,
       },
       taxCodes,
       miscPriceCalculationConfig,
@@ -94,6 +106,21 @@ export class TenantWebhookRuntimeRepository {
     }
 
     const query = Configuration.findOne({ key: 'requireExtraValueInUnitPrice' });
+    const configuration = typeof query?.lean === 'function'
+      ? await query.lean()
+      : await query;
+
+    return configuration?.value ?? null;
+  }
+
+  async resolveGroupCodeDefaults(tenantModels) {
+    const Configuration = tenantModels?.Configuration;
+
+    if (typeof Configuration?.findOne !== 'function') {
+      return null;
+    }
+
+    const query = Configuration.findOne({ key: GROUP_CODE_DEFAULTS_CONFIG_KEY });
     const configuration = typeof query?.lean === 'function'
       ? await query.lean()
       : await query;

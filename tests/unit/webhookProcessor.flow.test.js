@@ -66,6 +66,7 @@ function buildTenantModels({
   requireRandCardCodeValue = true,
   defaultSeriesValue = null,
   defaultFindSAPValue = 'EmailAddress',
+  groupCodeDefaultsValue = null,
   taxCodesValue = [],
   portalId = '12345',
   company = null,
@@ -117,6 +118,17 @@ function buildTenantModels({
       })),
     },
     Configuration: {
+      findOne: jest.fn().mockImplementation((filter) => {
+        if (filter?.key === 'groupCodeDefauls' && groupCodeDefaultsValue) {
+          return createLeanQuery({
+            key: 'groupCodeDefauls',
+            value: groupCodeDefaultsValue,
+            userUpdated: 'admin',
+          });
+        }
+
+        return createLeanQuery(null);
+      }),
       findOneAndUpdate: jest.fn().mockImplementation(async (filter) => {
         if (filter?.key === 'priceList') {
           return {
@@ -171,7 +183,7 @@ function buildTenantModels({
   };
 }
 
-function setupMappings() {
+function setupMappings({ ordersQuotationsMappings = [] } = {}) {
   mockGetMappingsByObjectType
     .mockResolvedValueOnce([
       { sourceField: 'CardName', targetField: 'name' },
@@ -201,7 +213,8 @@ function setupMappings() {
     .mockResolvedValueOnce([
       { sourceField: 'DocEntry', targetField: 'sap_docentry' },
       { sourceField: 'DocNum', targetField: 'sap_docnum' },
-    ]);
+    ])
+    .mockResolvedValueOnce(ordersQuotationsMappings);
 }
 
 describe('webhookProcessor flow', () => {
@@ -421,6 +434,190 @@ describe('webhookProcessor flow', () => {
         }),
       })
     );
+  });
+
+  it('sends PaymentGroupCode in the SAP order payload from the orders-quotations deal mapping', async () => {
+    setupMappings({
+      ordersQuotationsMappings: [
+        { sourceField: 'PaymentGroupCode', targetField: 'paymentGroupCode' },
+      ],
+    });
+    const tenantModels = buildTenantModels({
+      deal: {
+        paymentGroupCode: '3',
+      },
+      contact: {
+        hs_object_id: 'contact-1',
+        firstname: 'Cliente Mostrador',
+        idsap: 'CL99999',
+      },
+    });
+
+    mockAxios
+      .mockResolvedValueOnce({
+        data: {
+          CardCode: 'CL99999',
+          CardName: 'Cliente Mostrador',
+          PriceListNum: 4,
+          ContactEmployees: [],
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          DocEntry: 10,
+          DocNum: 20,
+        },
+      });
+
+    const result = await webhookProcessor.processPendingEvents({
+      tenantModels,
+      tenantId: 'tenant-1',
+      tenantKey: 'tenant_1',
+      portalId: '12345',
+    });
+
+    expect(result.completed).toBe(1);
+    expect(mockAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'post',
+        url: 'https://sap.example.com:50000/b1s/v2/Orders',
+        data: expect.objectContaining({
+          CardCode: 'CL99999',
+          PaymentGroupCode: 3,
+        }),
+      })
+    );
+  });
+
+  it('falls back to groupCodeDefauls config for PaymentGroupCode and PayTermsGrpCode', async () => {
+    setupMappings();
+    const tenantModels = buildTenantModels({
+      groupCodeDefaultsValue: { PayTermsGrpCode: 2, PaymentGroupCode: 2 },
+      contact: {
+        hs_object_id: 'contact-1',
+        firstname: 'Lucia',
+      },
+    });
+
+    mockAxios.mockImplementation(async (config) => {
+      if (config.method === 'post' && config.url.endsWith('/b1s/v2/BusinessPartners')) {
+        return { data: {} };
+      }
+
+      if (config.method === 'get' && config.url.includes("/b1s/v2/BusinessPartners('")) {
+        const cardCode = decodeURIComponent(
+          config.url.split("/b1s/v2/BusinessPartners('")[1].split("')")[0]
+        );
+
+        return {
+          data: {
+            CardCode: cardCode,
+            CardName: 'Lucia',
+            PriceListNum: 4,
+            ContactEmployees: [],
+          },
+        };
+      }
+
+      if (config.method === 'post' && config.url.endsWith('/b1s/v2/Orders')) {
+        return {
+          data: {
+            DocEntry: 16,
+            DocNum: 26,
+          },
+        };
+      }
+
+      throw new Error(`Unexpected axios call: ${config.method} ${config.url}`);
+    });
+
+    const result = await webhookProcessor.processPendingEvents({
+      tenantModels,
+      tenantId: 'tenant-1',
+      tenantKey: 'tenant_1',
+      portalId: '12345',
+    });
+
+    expect(result.completed).toBe(1);
+    expect(mockAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'post',
+        url: 'https://sap.example.com:50000/b1s/v2/BusinessPartners',
+        data: expect.objectContaining({
+          CardName: 'Lucia',
+          PayTermsGrpCode: 2,
+        }),
+      })
+    );
+    expect(mockAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'post',
+        url: 'https://sap.example.com:50000/b1s/v2/Orders',
+        data: expect.objectContaining({
+          PaymentGroupCode: 2,
+        }),
+      })
+    );
+  });
+
+  it('omits PaymentGroupCode and PayTermsGrpCode when no mapping or config default exists', async () => {
+    setupMappings();
+    const tenantModels = buildTenantModels({
+      contact: {
+        hs_object_id: 'contact-1',
+        firstname: 'Lucia',
+      },
+    });
+
+    mockAxios.mockImplementation(async (config) => {
+      if (config.method === 'post' && config.url.endsWith('/b1s/v2/BusinessPartners')) {
+        return { data: {} };
+      }
+
+      if (config.method === 'get' && config.url.includes("/b1s/v2/BusinessPartners('")) {
+        const cardCode = decodeURIComponent(
+          config.url.split("/b1s/v2/BusinessPartners('")[1].split("')")[0]
+        );
+
+        return {
+          data: {
+            CardCode: cardCode,
+            CardName: 'Lucia',
+            PriceListNum: 4,
+            ContactEmployees: [],
+          },
+        };
+      }
+
+      if (config.method === 'post' && config.url.endsWith('/b1s/v2/Orders')) {
+        return {
+          data: {
+            DocEntry: 17,
+            DocNum: 27,
+          },
+        };
+      }
+
+      throw new Error(`Unexpected axios call: ${config.method} ${config.url}`);
+    });
+
+    const result = await webhookProcessor.processPendingEvents({
+      tenantModels,
+      tenantId: 'tenant-1',
+      tenantKey: 'tenant_1',
+      portalId: '12345',
+    });
+
+    const businessPartnerRequest = mockAxios.mock.calls
+      .map(([config]) => config)
+      .find((config) => config.method === 'post' && config.url.endsWith('/b1s/v2/BusinessPartners'));
+    const orderRequest = mockAxios.mock.calls
+      .map(([config]) => config)
+      .find((config) => config.method === 'post' && config.url.endsWith('/b1s/v2/Orders'));
+
+    expect(result.completed).toBe(1);
+    expect(businessPartnerRequest.data).not.toHaveProperty('PayTermsGrpCode');
+    expect(orderRequest.data).not.toHaveProperty('PaymentGroupCode');
   });
 
   it('omits SAP SalesPersonCode and logs a warning when the HubSpot owner mapping is missing', async () => {

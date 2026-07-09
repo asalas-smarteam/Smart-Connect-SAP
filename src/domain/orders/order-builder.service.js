@@ -1,7 +1,7 @@
 import { calculateUnitPriceWithMisc } from '#domain/prices/misc-price-calculation.service.js';
 import { PermanentWebhookError } from '#shared/errors/index.js';
 import { pickByPath } from '#shared/utils/object-path.utils.js';
-import { normalizeNumber, toNonEmptyString } from '#shared/utils/string.utils.js';
+import { normalizeInteger, normalizeNumber, toNonEmptyString } from '#shared/utils/string.utils.js';
 
 export function mapHubspotToSapFields(source, mappings) {
   const mapped = {};
@@ -24,6 +24,16 @@ export function mapHubspotToSapFields(source, mappings) {
   }
 
   return mapped;
+}
+
+// Precedence: mapped HubSpot value → tenant config default (groupCodeDefauls) → null (omit).
+export function resolvePaymentGroupCode({ mappedDeal, groupCodeDefaults }) {
+  const mappedValue = normalizeInteger(mappedDeal?.PaymentGroupCode);
+  if (mappedValue !== null) {
+    return mappedValue;
+  }
+
+  return normalizeInteger(groupCodeDefaults?.PaymentGroupCode);
 }
 
 export function resolveHubspotPropertyNameBySapField(mappings, sapField, fallback = null) {
@@ -200,6 +210,7 @@ export function buildOrderPayload({
   cardCode,
   documentLines,
   slpCode = null,
+  paymentGroupCode = null,
   comments = null,
   U_ACO_Telefono = null,
   U_ACO_Telefono2 = null,
@@ -218,6 +229,10 @@ export function buildOrderPayload({
 
   if (Number.isInteger(slpCode)) {
     payload.SalesPersonCode = slpCode;
+  }
+
+  if (Number.isInteger(paymentGroupCode)) {
+    payload.PaymentGroupCode = paymentGroupCode;
   }
 
   const resolvedComments = toNonEmptyString(comments);
@@ -243,6 +258,7 @@ export function buildQuotationPayload({
   cardCode,
   documentLines,
   slpCode = null,
+  paymentGroupCode = null,
   numAtCard = null,
   comments = null,
 }) {
@@ -258,6 +274,10 @@ export function buildQuotationPayload({
 
   if (Number.isInteger(slpCode)) {
     payload.SalesPersonCode = slpCode;
+  }
+
+  if (Number.isInteger(paymentGroupCode)) {
+    payload.PaymentGroupCode = paymentGroupCode;
   }
 
   const resolvedNumAtCard = toNonEmptyString(numAtCard);

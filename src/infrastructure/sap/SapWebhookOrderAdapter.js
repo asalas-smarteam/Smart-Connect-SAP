@@ -7,6 +7,7 @@ import {
 import { PermanentWebhookError } from '#shared/errors/index.js';
 import {
   escapeODataString,
+  normalizeInteger,
   normalizeNumber,
   toNonEmptyString,
 } from '#shared/utils/string.utils.js';
@@ -113,6 +114,7 @@ export class SapWebhookOrderAdapter {
     resolveRequireRandCardCode = async () => true,
     resolveDefaultSeries = async () => null,
     resolveDefaultFindSAP = async () => 'EmailAddress',
+    resolveGroupCodeDefaults = async () => null,
   }) {
     const mappedCardCode = toNonEmptyString(mappedCompany?.CardCode || mappedContact?.CardCode);
     const mappedEmail = toNonEmptyString(mappedCompany?.EmailAddress || mappedContact?.EmailAddress);
@@ -206,6 +208,17 @@ export class SapWebhookOrderAdapter {
       if (resolvedDefaultSeries) {
         payload.Series = resolvedDefaultSeries;
       }
+    }
+
+    const mappedPayTermsGrpCode = normalizeInteger(
+      mappedCompany?.PayTermsGrpCode ?? mappedContact?.PayTermsGrpCode
+    );
+    const resolvedPayTermsGrpCode = mappedPayTermsGrpCode !== null
+      ? mappedPayTermsGrpCode
+      : normalizeInteger((await resolveGroupCodeDefaults(tenantModels))?.PayTermsGrpCode);
+
+    if (resolvedPayTermsGrpCode !== null) {
+      payload.PayTermsGrpCode = resolvedPayTermsGrpCode;
     }
 
     const created = await this.request(sapConfig, {

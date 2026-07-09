@@ -1,6 +1,8 @@
 import {
   buildQuotationPayload,
   mapDocumentLines,
+  mapHubspotToSapFields,
+  resolvePaymentGroupCode,
 } from '#domain/orders/order-builder.service.js';
 import { resolveEventPayload } from '../services/webhook-payload.service.js';
 import {
@@ -114,10 +116,14 @@ export class ProcessHubspotCreateQuotation {
         hubspotCredentials,
         logger: this.logger,
       });
+      const mappedDeal = mapHubspotToSapFields(deal || {}, mappings.dealOrdersQuotationsMappings);
+      const groupCodeDefaults = await this.runtimeRepository.resolveGroupCodeDefaults(tenantModels);
+      const paymentGroupCode = resolvePaymentGroupCode({ mappedDeal, groupCodeDefaults });
       const quotationPayload = buildQuotationPayload({
         cardCode,
         documentLines,
         slpCode,
+        paymentGroupCode,
         numAtCard: buildDealNumAtCard(dealId),
         comments: 'Oferta creada desde HubSpot',
       });
