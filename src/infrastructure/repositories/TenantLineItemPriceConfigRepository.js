@@ -1,16 +1,10 @@
 import tenantConfigurationService from '../config/tenantConfiguration.service.js';
 import { getHubspotWarehouseStockPropertiesForTenant } from '../hubspot/warehouseStock.js';
-
-const DEFAULT_PRICE_LIST = '4';
+import { resolvePriceListFromConfigValue } from '#domain/prices/price-list-config.service.js';
 
 function toNonEmptyString(value) {
   const normalized = String(value ?? '').trim();
   return normalized || null;
-}
-
-function normalizePriceList(value) {
-  const normalized = Number(String(value ?? '').trim());
-  return Number.isInteger(normalized) && normalized > 0 ? normalized : null;
 }
 
 function normalizeOptionalNumber(value) {
@@ -83,16 +77,18 @@ export class TenantLineItemPriceConfigRepository {
     return credentials;
   }
 
-  async resolveTenantPriceList({ tenantModels }) {
+  async resolveTenantPriceList({ tenantModels, currency = null }) {
     const value = await tenantConfigurationService.getValue(
       tenantModels,
       'priceList',
-      DEFAULT_PRICE_LIST
+      null
     );
-    const priceList = normalizePriceList(value);
+    const priceList = resolvePriceListFromConfigValue(value, { currency });
 
     if (!priceList) {
-      throw new Error('Configuration priceList must be a positive integer');
+      throw new Error(
+        'Configuration priceList must be a currency map with positive integer values, e.g. { "default": 4, "GTQ": 4, "USD": 5 }'
+      );
     }
 
     return priceList;

@@ -1,5 +1,6 @@
 import mappingService from './mapping.service.js';
 import tenantConfigurationService from '#infrastructure/config/tenantConfiguration.service.js';
+import { resolvePriceListFromConfigValue } from '#domain/prices/price-list-config.service.js';
 import { PermanentWebhookError } from '#shared/errors/index.js';
 import { normalizePositiveInteger, toNonEmptyString } from '#shared/utils/string.utils.js';
 
@@ -134,11 +135,12 @@ export class TenantWebhookRuntimeRepository {
       'priceList',
       null
     );
-    const priceListNum = normalizePositiveInteger(value);
+    const priceListNum = resolvePriceListFromConfigValue(value);
 
     if (!priceListNum) {
       throw new PermanentWebhookError(
-        'PriceListNum is required from HubSpot mapping or tenant configuration priceList'
+        'PriceListNum is required from HubSpot mapping or tenant configuration priceList '
+        + '(currency map, e.g. { "default": 4, "GTQ": 4, "USD": 5 })'
       );
     }
 

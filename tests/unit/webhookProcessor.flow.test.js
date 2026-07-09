@@ -62,7 +62,7 @@ function createLeanQuery(value) {
 }
 
 function buildTenantModels({
-  configurationValue = '4',
+  configurationValue = { default: '4' },
   requireRandCardCodeValue = true,
   defaultSeriesValue = null,
   defaultFindSAPValue = 'EmailAddress',
@@ -309,6 +309,62 @@ describe('webhookProcessor flow', () => {
         upsert: true,
         setDefaultsOnInsert: true,
       }
+    );
+  });
+
+  it('resolves PriceListNum from the default entry when priceList config is a currency map', async () => {
+    setupMappings();
+    const tenantModels = buildTenantModels({
+      configurationValue: { default: '4', GTQ: 4, USD: 5 },
+      company: {
+        hs_object_id: 'company-1',
+        name: 'ACME',
+        email: 'ventas@acme.com',
+        phone: '555-1111',
+      },
+    });
+
+    mockAxios
+      .mockResolvedValueOnce({
+        data: { value: [] },
+      })
+      .mockResolvedValueOnce({
+        data: { CardCode: 'C20000' },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          CardCode: 'C20000',
+          CardName: 'ACME',
+          EmailAddress: 'ventas@acme.com',
+          PriceListNum: 4,
+          ContactEmployees: [],
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          DocEntry: 10,
+          DocNum: 20,
+        },
+      });
+
+    const result = await webhookProcessor.processPendingEvents({
+      tenantModels,
+      tenantId: 'tenant-1',
+      tenantKey: 'tenant_1',
+      portalId: '12345',
+    });
+
+    expect(result.completed).toBe(1);
+    expect(mockAxios).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        method: 'post',
+        url: 'https://sap.example.com:50000/b1s/v2/BusinessPartners',
+        data: expect.objectContaining({
+          CardName: 'ACME',
+          PriceListNum: 4,
+        }),
+      })
     );
   });
 
@@ -700,10 +756,37 @@ describe('webhookProcessor flow', () => {
         $set: {
           status: 'errored',
           retries: 3,
-          lastError: 'PriceListNum is required from HubSpot mapping or tenant configuration priceList',
+          lastError: 'PriceListNum is required from HubSpot mapping or tenant configuration priceList '
+            + '(currency map, e.g. { "default": 4, "GTQ": 4, "USD": 5 })',
         },
       }
     );
+  });
+
+  it('errors when the priceList config still uses the legacy scalar format', async () => {
+    setupMappings();
+    const tenantModels = buildTenantModels({
+      configurationValue: '4',
+      company: {
+        hs_object_id: 'company-1',
+        name: 'ACME',
+        email: 'ventas@acme.com',
+      },
+    });
+
+    mockAxios.mockResolvedValueOnce({
+      data: { value: [] },
+    });
+
+    const result = await webhookProcessor.processPendingEvents({
+      tenantModels,
+      tenantId: 'tenant-1',
+      tenantKey: 'tenant_1',
+      portalId: '12345',
+    });
+
+    expect(result.completed).toBe(0);
+    expect(result.errored).toBe(1);
   });
 
   it('updates HubSpot idsap when SAP partner exists by email and contact arrives without sapId', async () => {
