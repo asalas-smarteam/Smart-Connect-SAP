@@ -1,6 +1,16 @@
 import hubspotAuthService from '../hubspot/hubspotAuthService.js';
 import * as hubspotClient from '../hubspot/hubspotClient.js';
 import tenantConfigurationService from '../config/tenantConfiguration.service.js';
+import {
+  assertRequiredWebhookField,
+  buildDuplicateFilter,
+  extractAssociationIds,
+  extractLineItemAssociationIds,
+  fetchHubspotObject,
+  resolveHubspotCredentials,
+  toNonEmptyString,
+  toNumberOrNull,
+} from './lineItemPriceWebhook.shared.js';
 
 // Conjunto 1: cambio de asociación deal <-> line item
 const SUPPORTED_ASSOCIATION_TYPE = 'DEAL_TO_LINE_ITEM';
@@ -33,67 +43,8 @@ const SKIPPED_MISC_NO_ASSOC_MESSAGE =
   `${SKIPPED_MISC_NO_ASSOC_MARKER}: no deal.associationChange found for this line item — ` +
   'safe_price_value has not been set yet; skipping until the association sync runs';
 
-function toNonEmptyString(value) {
-  const normalized = String(value ?? '').trim();
-  return normalized || null;
-}
-
 function isLegacyPayload(payload = {}) {
   return Array.isArray(payload?.lineItems);
-}
-
-function buildDuplicateFilter(payload = {}) {
-  return {
-    'payload.eventId': payload.eventId,
-    'payload.subscriptionId': payload.subscriptionId,
-    'payload.portalId': payload.portalId,
-    'payload.appId': payload.appId,
-    'payload.occurredAt': payload.occurredAt,
-    'payload.fromObjectId': payload.fromObjectId,
-  };
-}
-
-function assertRequiredWebhookField(payload, fieldName) {
-  if (payload?.[fieldName] === undefined || payload?.[fieldName] === null || payload?.[fieldName] === '') {
-    throw new Error(`${fieldName} is required`);
-  }
-}
-
-async function resolveHubspotCredentials(tenantModels, tenant) {
-  const { HubspotCredentials } = tenantModels;
-  const portalId = toNonEmptyString(tenant?.client?.hubspot?.portalId);
-
-  if (portalId) {
-    const byPortalId = await HubspotCredentials.findOne({ portalId });
-    if (byPortalId) {
-      return byPortalId;
-    }
-  }
-
-  const credentials = await HubspotCredentials.findOne({});
-  if (!credentials) {
-    throw new Error('HubSpot credentials not found for tenant');
-  }
-
-  return credentials;
-}
-
-async function fetchHubspotObject(token, objectType, objectId, { properties = [], associations = [] } = {}) {
-  const params = {};
-
-  if (properties.length > 0) {
-    params.properties = properties.join(',');
-  }
-
-  if (associations.length > 0) {
-    params.associations = associations.join(',');
-  }
-
-  return hubspotClient.hubspotGet(
-    token,
-    `/crm/v3/objects/${objectType}/${encodeURIComponent(String(objectId))}`,
-    params
-  );
 }
 
 async function resolveMiscPriceCalculationConfig(tenantModels) {
@@ -109,16 +60,6 @@ async function resolveMiscPriceCalculationConfig(tenantModels) {
     : await query;
 
   return configuration?.value ?? null;
-}
-
-function extractAssociationIds(record, associationName) {
-  const results = Array.isArray(record?.associations?.[associationName]?.results)
-    ? record.associations[associationName].results
-    : [];
-
-  return results
-    .map((item) => toNonEmptyString(item?.id))
-    .filter(Boolean);
 }
 
 function resolveObjectIdSap(record) {
@@ -162,12 +103,7 @@ async function resolveCardCode(token, deal) {
 }
 
 async function resolveLineItems(token, deal, miscPriceCalculationConfig = null) {
-  const lineItemIds = [
-    ...extractAssociationIds(deal, 'line_items'),
-    ...extractAssociationIds(deal, 'lineItems'),
-    ...extractAssociationIds(deal, 'line items'),
-    ...extractAssociationIds(deal, 'products'),
-  ].filter((value, index, items) => items.indexOf(value) === index);
+  const lineItemIds = extractLineItemAssociationIds(deal);
 
   if (lineItemIds.length === 0) {
     throw new Error('Deal has no associated line items');
@@ -202,15 +138,6 @@ async function resolveLineItems(token, deal, miscPriceCalculationConfig = null) 
   );
 
   return lineItems;
-}
-
-function toNumberOrNull(value) {
-  if (value === null || value === undefined || value === '') {
-    return null;
-  }
-
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 // Flujo de cambio de propiedad: precio = safe_price_value * (1 + miscelaneo / 100).
@@ -351,12 +278,7 @@ async function recalculateDealLineItemsFromMisc(dealId, token) {
     associations: ['line_items'],
   });
 
-  const lineItemIds = [
-    ...extractAssociationIds(deal, 'line_items'),
-    ...extractAssociationIds(deal, 'lineItems'),
-    ...extractAssociationIds(deal, 'line items'),
-    ...extractAssociationIds(deal, 'products'),
-  ].filter((value, index, items) => items.indexOf(value) === index);
+  const lineItemIds = extractLineItemAssociationIds(deal);
 
   if (lineItemIds.length === 0) {
     throw new Error('Deal has no associated line items');

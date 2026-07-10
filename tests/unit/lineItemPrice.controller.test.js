@@ -96,6 +96,7 @@ describe('lineItemPrice.controller syncPrices', () => {
     expect(mockPreparePayload).toHaveBeenCalledWith(req.body[0], {
       tenantModels: req.tenantModels,
       tenant: req.tenant,
+      tenantKey: req.tenantKey,
     });
     expect(reply.send).toHaveBeenCalledWith({
       ok: true,

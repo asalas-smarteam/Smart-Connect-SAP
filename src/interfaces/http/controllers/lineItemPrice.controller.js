@@ -38,6 +38,7 @@ function createLineItemPriceController({
         preparedPayload = await dependencies.webhookPayload.preparePayload(req.body[0], {
           tenantModels,
           tenant: req.tenant,
+          tenantKey: req.tenantKey,
         });
 
         if (preparedPayload.skip) {

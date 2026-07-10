@@ -22,6 +22,26 @@ function roundCurrency(value) {
   return Math.round((normalizeNumber(value, 0) + Number.EPSILON) * 100) / 100;
 }
 
+// omitDiscount: el flujo dealPriceList no gestiona descuentos (los maneja HubSpot
+// nativamente), por lo que no debe escribir la propiedad discount.
+// additionalProperties: propiedades extra por línea (safe_price_value, lista usada).
+function buildDiscountProperties(lineItem, taxRateGroupId) {
+  if (lineItem.omitDiscount === true) {
+    return {};
+  }
+
+  if (toNonEmptyString(lineItem._discountHsProperty)) {
+    return {
+      discount: '',
+      [lineItem._discountHsProperty]: String(normalizeNumber(lineItem.Discount ?? lineItem.discount, 0)),
+    };
+  }
+
+  return taxRateGroupId
+    ? {}
+    : { discount: String(normalizeNumber(lineItem.Discount ?? lineItem.discount, 0)) };
+}
+
 function buildHubspotBatchPayload(enrichedLineItems) {
   return {
     inputs: enrichedLineItems.map((lineItem) => {
@@ -37,19 +57,10 @@ function buildHubspotBatchPayload(enrichedLineItems) {
             }
             : {}),
           quantity: String(normalizeQuantity(lineItem.quantity ?? lineItem.Quantity)),
-          ...(toNonEmptyString(lineItem._discountHsProperty)
-            ? {
-              discount: '',
-              //: String(normalizeNumber(lineItem.Discount ?? lineItem.discount, 0)),
-              [lineItem._discountHsProperty]: String(normalizeNumber(lineItem.Discount ?? lineItem.discount, 0)),
-            }
-            : {
-              ...(taxRateGroupId
-                ? {}
-                : { discount: String(normalizeNumber(lineItem.Discount ?? lineItem.discount, 0)) }),
-            }),
+          ...buildDiscountProperties(lineItem, taxRateGroupId),
           ...(taxRateGroupId ? { hs_tax_rate_group_id: taxRateGroupId } : {}),
           ...(lineItem.warehouseStockProperties || {}),
+          ...(lineItem.additionalProperties || {}),
         },
       };
     }),
@@ -111,6 +122,24 @@ export class HubspotLineItemPriceClient {
       hubspotCredentials.clientConfigId,
       hubspotCredentials,
       tenantModels
+    );
+  }
+
+  async fetchObject({ token, objectType, objectId, properties = [], associations = [] }) {
+    const params = {};
+
+    if (properties.length > 0) {
+      params.properties = properties.join(',');
+    }
+
+    if (associations.length > 0) {
+      params.associations = associations.join(',');
+    }
+
+    return hubspotClient.hubspotGet(
+      token,
+      `/crm/v3/objects/${objectType}/${encodeURIComponent(String(objectId))}`,
+      params
     );
   }
 
