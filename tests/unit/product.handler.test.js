@@ -1,12 +1,20 @@
 import { jest } from '@jest/globals';
 
 const mockGetHubspotWarehouseStockPropertiesForTenant = jest.fn();
+const mockBuildHubspotWarehouseStockProperties = jest.fn();
+const mockResolveHubspotWarehouseFields = jest.fn();
 
 jest.unstable_mockModule('../../src/infrastructure/hubspot/warehouseStock.js', () => ({
   getHubspotWarehouseStockPropertiesForTenant: mockGetHubspotWarehouseStockPropertiesForTenant,
+  buildHubspotWarehouseStockProperties: mockBuildHubspotWarehouseStockProperties,
+  resolveHubspotWarehouseFields: mockResolveHubspotWarehouseFields,
 }));
 
-const { preprocess, resolveHubspotPriceFields } = await import('../../src/infrastructure/hubspot/handlers/product.handler.js');
+const {
+  preprocess,
+  buildPreprocessContext,
+  resolveHubspotPriceFields,
+} = await import('../../src/infrastructure/hubspot/handlers/product.handler.js');
 
 describe('product.handler preprocess', () => {
   beforeEach(() => {
@@ -103,6 +111,64 @@ describe('product.handler preprocess', () => {
       B10_stock: 4,
       hs_price_nio: 150,
     });
+  });
+
+  it('buildPreprocessContext resolves warehouse and price fields for the whole run', async () => {
+    const warehouseFields = [{ warehouseCode: 'A01', propertyName: 'a01_stock' }];
+    mockResolveHubspotWarehouseFields.mockResolvedValue(warehouseFields);
+    const tenantModels = {
+      Configuration: {
+        findOne: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue({
+            key: 'fieldsPricesHS',
+            value: ['hs_price_nio'],
+          }),
+        }),
+      },
+    };
+
+    const context = await buildPreprocessContext({ tenantModels });
+
+    expect(context).toEqual({
+      warehouseFields,
+      priceFields: ['hs_price_nio'],
+    });
+    expect(mockResolveHubspotWarehouseFields).toHaveBeenCalledWith(tenantModels);
+  });
+
+  it('preprocess uses the preprocessContext without touching the database', async () => {
+    const warehouseFields = [{ warehouseCode: 'A01', propertyName: 'A01_stock' }];
+    mockBuildHubspotWarehouseStockProperties.mockReturnValue({ A01_stock: 7 });
+    const tenantModels = {
+      Configuration: {
+        findOne: jest.fn(),
+        findOneAndUpdate: jest.fn(),
+      },
+    };
+    const item = {
+      properties: {},
+      rawSapData: {
+        ItemWarehouseInfoCollection: [{ WarehouseCode: 'A01', InStock: 7 }],
+      },
+    };
+
+    await preprocess({
+      item,
+      tenantModels,
+      preprocessContext: { warehouseFields, priceFields: ['hs_price_nio'] },
+    });
+
+    expect(item.properties).toEqual({
+      A01_stock: 7,
+      hs_price_nio: 0,
+    });
+    expect(mockBuildHubspotWarehouseStockProperties).toHaveBeenCalledWith(
+      item.rawSapData.ItemWarehouseInfoCollection,
+      warehouseFields
+    );
+    expect(mockGetHubspotWarehouseStockPropertiesForTenant).not.toHaveBeenCalled();
+    expect(tenantModels.Configuration.findOne).not.toHaveBeenCalled();
+    expect(tenantModels.Configuration.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it('preserves strategy price fields when product has a selected SAP price', async () => {

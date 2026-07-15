@@ -1,5 +1,6 @@
 import {
   batchCreateProducts,
+  batchReadProductsBySku,
   batchUpdateProducts,
   createProduct,
   findProductBySKU,
@@ -8,6 +9,7 @@ import {
 
 export const hubspotProductAdapter = Object.freeze({
   batchCreateProducts,
+  batchReadProductsBySku,
   batchUpdateProducts,
   createProduct,
   findProductBySKU,

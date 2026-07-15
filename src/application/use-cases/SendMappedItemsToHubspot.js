@@ -27,6 +27,59 @@ function getValidationFailureIdentifier(objectType, item) {
   return item?.properties?.idsap ?? '';
 }
 
+// HubSpot batch endpoints (read/create/update) accept at most 100 inputs per call.
+const HUBSPOT_BATCH_INPUT_LIMIT = 100;
+// Concurrent batch calls per wave. 4 keeps us well under HubSpot's ~190 requests/10s limit.
+const BATCH_CONCURRENCY = 4;
+
+function chunkArray(array, size) {
+  const chunks = [];
+  for (let index = 0; index < array.length; index += size) {
+    chunks.push(array.slice(index, index + size));
+  }
+  return chunks;
+}
+
+async function runInWaves(chunks, concurrency, worker) {
+  const results = [];
+  for (const wave of chunkArray(chunks, concurrency)) {
+    results.push(...await Promise.all(wave.map(worker)));
+  }
+  return results;
+}
+
+function normalizePropertyValue(value) {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  return String(value).trim();
+}
+
+// HubSpot returns every property as a string, so numeric values must compare
+// numerically ("5.0" equals 5). Empty never equals a number: writing 0 into an
+// empty property is a real change.
+function propertyValuesEqual(sentValue, existingValue) {
+  const a = normalizePropertyValue(sentValue);
+  const b = normalizePropertyValue(existingValue);
+
+  if (a === b) {
+    return true;
+  }
+  if (a === '' || b === '') {
+    return false;
+  }
+
+  const numA = Number(a);
+  const numB = Number(b);
+  return !Number.isNaN(numA) && !Number.isNaN(numB) && numA === numB;
+}
+
+export function productPropertiesUnchanged(sentProperties, existingProperties) {
+  return Object.entries(sentProperties ?? {})
+    .filter(([key]) => key !== 'hs_object_id')
+    .every(([key, value]) => propertyValuesEqual(value, existingProperties?.[key]));
+}
+
 export class SendMappedItemsToHubspot {
   constructor({
     tokenProvider,
@@ -185,10 +238,11 @@ export class SendMappedItemsToHubspot {
     handler,
     mainDataInUpdate = DEFAULT_MAIN_DATA_IN_UPDATE,
     bypassEmail = false,
+    preprocessContext = null,
   }) {
     try {
       if (handler.preprocess) {
-        await handler.preprocess({ item, clientConfig, tenantModels });
+        await handler.preprocess({ item, clientConfig, tenantModels, preprocessContext });
       }
 
       const emailWasBypassed = this.applyBypassEmail({ objectType, item, bypassEmail });
@@ -287,8 +341,16 @@ export class SendMappedItemsToHubspot {
     let updated = 0;
     const errors = [];
 
+    const preprocessContext = context.preprocessContext
+      ?? (context.handler?.buildPreprocessContext
+        ? await context.handler.buildPreprocessContext({
+          clientConfig: context.clientConfig,
+          tenantModels: context.tenantModels,
+        })
+        : null);
+
     for (const item of items) {
-      const result = await this.processSingleItem({ ...context, item });
+      const result = await this.processSingleItem({ ...context, preprocessContext, item });
 
       if (result.ok) {
         sent += 1;
@@ -378,130 +440,181 @@ export class SendMappedItemsToHubspot {
     }
   }
 
-  async processProductBatch({ items, clientConfig, tenantModels, handler, getToken }) {
-    let sent = 0;
-    let failed = 0;
-    let created = 0;
-    let updated = 0;
-    const errors = [];
-    const createEntries = [];
-    const updateEntries = [];
+  async processProductBatches({ mappedItems, clientConfig, tenantModels, handler, getToken }) {
+    const stats = { sent: 0, failed: 0, created: 0, updated: 0, skipped: 0, errors: [] };
+    const preprocessed = [];
 
-    for (const item of items) {
+    // Tenant configuration is constant during the run: resolve it once instead of
+    // letting every preprocess() hit the database per item.
+    const preprocessContext = handler.buildPreprocessContext
+      ? await handler.buildPreprocessContext({ clientConfig, tenantModels })
+      : null;
+
+    for (const item of mappedItems) {
       try {
         if (handler.preprocess) {
-          await handler.preprocess({ item, clientConfig, tenantModels });
+          await handler.preprocess({ item, clientConfig, tenantModels, preprocessContext });
         }
-
-        const token = await getToken();
-        const existing = await this.retryRequest(() =>
-          handler.find({ token, item, clientConfig, tenantModels })
-        );
-
-        if (existing) {
-          updateEntries.push({ existing, item });
-        } else {
-          createEntries.push({ item });
-        }
-
-        await this.sleeper(200);
+        preprocessed.push(item);
       } catch (error) {
-        console.error('processProductBatch item error:', error);
-        failed += 1;
-        errors.push({
+        console.error('processProductBatches preprocess error:', error);
+        stats.failed += 1;
+        stats.errors.push({
           payloadHubspot: item?.properties ?? null,
           responseHubspot: error?.details?.hubspotResponse ?? null,
         });
       }
     }
 
-    if (createEntries.length > 0) {
-      try {
-        const token = await getToken();
-        const response = await this.productBatchClient.batchCreateProducts(token, {
-          inputs: createEntries.map(({ item }) => item),
-        });
+    const withSku = preprocessed.filter((item) => item?.properties?.hs_sku);
+    const withoutSku = preprocessed.filter((item) => !item?.properties?.hs_sku);
 
-        await this.finalizeCreatedProductBatch({
-          createdResults: Array.isArray(response?.results) ? response.results : [],
-          createdItems: createEntries.map(({ item }) => item),
-          clientConfig,
-          tenantModels,
-        });
-
-        sent += createEntries.length;
-        created += createEntries.length;
-      } catch (error) {
-        console.error('processProductBatch create error:', error);
-        const fallbackResult = await this.processItemsSequentially(
-          createEntries.map(({ item }) => item),
-          { objectType: 'product', clientConfig, tenantModels, handler, getToken }
-        );
-
-        sent += fallbackResult.sent;
-        failed += fallbackResult.failed;
-        created += fallbackResult.created ?? 0;
-        updated += fallbackResult.updated ?? 0;
-        errors.push(...(fallbackResult.errors ?? []));
-      }
-    }
-
-    if (updateEntries.length > 0) {
-      try {
-        const token = await getToken();
-        await this.productBatchClient.batchUpdateProducts(token, {
-          inputs: updateEntries.map(({ existing, item }) => ({
-            id: existing.id,
-            properties: item?.properties ?? {},
-          })),
-        });
-
-        sent += updateEntries.length;
-        updated += updateEntries.length;
-      } catch (error) {
-        console.error('processProductBatch update error:', error);
-        const fallbackResult = await this.processItemsSequentially(
-          updateEntries.map(({ item }) => item),
-          { objectType: 'product', clientConfig, tenantModels, handler, getToken }
-        );
-
-        sent += fallbackResult.sent;
-        failed += fallbackResult.failed;
-        created += fallbackResult.created ?? 0;
-        updated += fallbackResult.updated ?? 0;
-        errors.push(...(fallbackResult.errors ?? []));
-      }
-    }
-
-    return { sent, failed, created, updated, errors };
-  }
-
-  async processProductBatches({ mappedItems, clientConfig, tenantModels, handler, getToken }) {
-    const batchSize = Number(clientConfig?.hubspotBatchSize);
-    let sent = 0;
-    let failed = 0;
-    let created = 0;
-    let updated = 0;
-    const errors = [];
-
-    for (let index = 0; index < mappedItems.length; index += batchSize) {
-      const batch = mappedItems.slice(index, index + batchSize);
-      const batchResult = await this.processProductBatch({
-        items: batch,
+    let existingBySku;
+    try {
+      existingBySku = await this.readExistingProductsBySku({ items: withSku, getToken });
+    } catch (error) {
+      // Degraded mode: same per-item find/create/update behavior as before batching.
+      console.error('processProductBatches read error:', error);
+      const fallbackResult = await this.processItemsSequentially(preprocessed, {
+        objectType: 'product',
         clientConfig,
         tenantModels,
         handler,
         getToken,
+        preprocessContext,
       });
-
-      sent += batchResult.sent;
-      failed += batchResult.failed;
-      created += batchResult.created ?? 0;
-      updated += batchResult.updated ?? 0;
-      errors.push(...(batchResult.errors ?? []));
+      this.mergeProductStats(stats, fallbackResult);
+      return { ok: true, ...stats };
     }
 
-    return { ok: true, sent, failed, created, updated, errors };
+    const createEntries = withoutSku.map((item) => ({ item }));
+    const updateEntries = [];
+
+    for (const item of withSku) {
+      const existing = existingBySku.get(String(item.properties.hs_sku));
+
+      if (!existing) {
+        createEntries.push({ item });
+      } else if (productPropertiesUnchanged(item.properties, existing.properties)) {
+        stats.sent += 1;
+        stats.skipped += 1;
+      } else {
+        updateEntries.push({ existing, item });
+      }
+    }
+
+    const writeChunkSize = Math.min(
+      Number(clientConfig?.hubspotBatchSize) || HUBSPOT_BATCH_INPUT_LIMIT,
+      HUBSPOT_BATCH_INPUT_LIMIT
+    );
+
+    const createResults = await runInWaves(
+      chunkArray(createEntries, writeChunkSize),
+      BATCH_CONCURRENCY,
+      async (entryChunk) => {
+        const chunkItems = entryChunk.map(({ item }) => item);
+
+        try {
+          const token = await getToken();
+          const response = await this.retryRequest(() =>
+            this.productBatchClient.batchCreateProducts(token, { inputs: chunkItems })
+          );
+
+          await this.finalizeCreatedProductBatch({
+            createdResults: Array.isArray(response?.results) ? response.results : [],
+            createdItems: chunkItems,
+            clientConfig,
+            tenantModels,
+          });
+
+          return { sent: chunkItems.length, created: chunkItems.length };
+        } catch (error) {
+          console.error('processProductBatches create error:', error);
+          return this.processItemsSequentially(chunkItems, {
+            objectType: 'product',
+            clientConfig,
+            tenantModels,
+            handler,
+            getToken,
+            preprocessContext,
+          });
+        }
+      }
+    );
+
+    const updateResults = await runInWaves(
+      chunkArray(updateEntries, writeChunkSize),
+      BATCH_CONCURRENCY,
+      async (entryChunk) => {
+        try {
+          const token = await getToken();
+          await this.retryRequest(() =>
+            this.productBatchClient.batchUpdateProducts(token, {
+              inputs: entryChunk.map(({ existing, item }) => ({
+                id: existing.id,
+                properties: item?.properties ?? {},
+              })),
+            })
+          );
+
+          return { sent: entryChunk.length, updated: entryChunk.length };
+        } catch (error) {
+          console.error('processProductBatches update error:', error);
+          return this.processItemsSequentially(
+            entryChunk.map(({ item }) => item),
+            { objectType: 'product', clientConfig, tenantModels, handler, getToken, preprocessContext }
+          );
+        }
+      }
+    );
+
+    for (const result of [...createResults, ...updateResults]) {
+      this.mergeProductStats(stats, result);
+    }
+
+    return { ok: true, ...stats };
+  }
+
+  // Reads every existing product keyed by hs_sku via batch/read (100 SKUs per call, in
+  // concurrent waves), requesting all properties we are about to send so the change
+  // diff can compare against current HubSpot values.
+  async readExistingProductsBySku({ items, getToken }) {
+    const skus = [...new Set(items.map((item) => String(item.properties.hs_sku)))];
+    const propertyNames = [...new Set([
+      'hs_sku',
+      ...items.flatMap((item) => Object.keys(item?.properties ?? {})),
+    ])].filter((name) => name !== 'hs_object_id');
+
+    const existingBySku = new Map();
+
+    await runInWaves(
+      chunkArray(skus, HUBSPOT_BATCH_INPUT_LIMIT),
+      BATCH_CONCURRENCY,
+      async (skuChunk) => {
+        const token = await getToken();
+        const response = await this.retryRequest(() =>
+          this.productBatchClient.batchReadProductsBySku(token, skuChunk, propertyNames)
+        );
+
+        for (const result of response?.results ?? []) {
+          const sku = result?.properties?.hs_sku;
+          if (sku !== null && sku !== undefined && sku !== '' && !existingBySku.has(String(sku))) {
+            existingBySku.set(String(sku), result);
+          }
+        }
+      }
+    );
+
+    return existingBySku;
+  }
+
+  mergeProductStats(stats, result) {
+    stats.sent += result?.sent ?? 0;
+    stats.failed += result?.failed ?? 0;
+    stats.created += result?.created ?? 0;
+    stats.updated += result?.updated ?? 0;
+    stats.skipped += result?.skipped ?? 0;
+    stats.errors.push(...(result?.errors ?? []));
   }
 }
 

@@ -215,6 +215,22 @@ export async function batchUpdateProducts(token, data) {
   );
 }
 
+// Reads up to 100 products keyed by hs_sku. Missing SKUs are reported by HubSpot in
+// `errors` (207 Multi-Status), not as a request failure — callers treat absence from
+// `results` as "does not exist".
+export async function batchReadProductsBySku(token, skus, properties = []) {
+  return hubspotRequest(
+    'post',
+    '/crm/v3/objects/products/batch/read',
+    token,
+    {
+      idProperty: 'hs_sku',
+      inputs: skus.map((sku) => ({ id: String(sku) })),
+      ...(Array.isArray(properties) && properties.length > 0 ? { properties } : {}),
+    },
+  );
+}
+
 export async function batchCreate(token, dataArray) {
   return hubspotRequest(
     'post',

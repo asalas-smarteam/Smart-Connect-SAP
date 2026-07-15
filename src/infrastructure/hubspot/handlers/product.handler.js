@@ -1,7 +1,11 @@
 import * as hubspotClient from '../hubspotClient.js';
 import tenantConfigurationService from '#infrastructure/config/tenantConfiguration.service.js';
 import { KEEP_MAPPED_PRICE_FLAG } from '#domain/products/product-sync-strategy.constants.js';
-import { getHubspotWarehouseStockPropertiesForTenant } from '../warehouseStock.js';
+import {
+  buildHubspotWarehouseStockProperties,
+  getHubspotWarehouseStockPropertiesForTenant,
+  resolveHubspotWarehouseFields,
+} from '../warehouseStock.js';
 
 const DEFAULT_PRICE_FIELDS = ['hs_price_usd'];
 const PRICE_FIELDS_CONFIG_KEY = 'fieldsPricesHS';
@@ -30,12 +34,30 @@ export async function resolveHubspotPriceFields(tenantModels) {
   return normalizeHubspotPriceFields(value);
 }
 
-export async function preprocess({ item, tenantModels }) {
-  const warehouseStockProperties = await getHubspotWarehouseStockPropertiesForTenant(
-    tenantModels,
-    item?.rawSapData?.ItemWarehouseInfoCollection
-  );
-  const priceFields = await resolveHubspotPriceFields(tenantModels);
+// Resolves the tenant configuration preprocess() depends on. Callers processing many
+// items should call this once per run and pass the result as `preprocessContext` to
+// every preprocess() call — otherwise each item pays two Configuration reads.
+export async function buildPreprocessContext({ tenantModels }) {
+  const [warehouseFields, priceFields] = await Promise.all([
+    resolveHubspotWarehouseFields(tenantModels),
+    resolveHubspotPriceFields(tenantModels),
+  ]);
+
+  return { warehouseFields, priceFields };
+}
+
+export async function preprocess({ item, tenantModels, preprocessContext }) {
+  const warehouseStockProperties = preprocessContext?.warehouseFields
+    ? buildHubspotWarehouseStockProperties(
+      item?.rawSapData?.ItemWarehouseInfoCollection,
+      preprocessContext.warehouseFields
+    )
+    : await getHubspotWarehouseStockPropertiesForTenant(
+      tenantModels,
+      item?.rawSapData?.ItemWarehouseInfoCollection
+    );
+  const priceFields = preprocessContext?.priceFields
+    ?? await resolveHubspotPriceFields(tenantModels);
   item.properties = item.properties || {};
 
   Object.assign(item.properties, warehouseStockProperties);
@@ -78,4 +100,5 @@ export default {
   create,
   update,
   preprocess,
+  buildPreprocessContext,
 };
