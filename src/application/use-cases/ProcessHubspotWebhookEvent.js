@@ -176,6 +176,7 @@ export class ProcessHubspotWebhookEvent {
         documentLines,
         slpCode,
         paymentGroupCode,
+        mappedDealFields: mappedDeal,
         comments: deal?.comments,
         U_ACO_Telefono: deal?.numero_de_contacto_primario,
         U_ACO_Telefono2: deal?.numero_de_contacto_secundario,

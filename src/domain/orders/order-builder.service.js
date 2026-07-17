@@ -26,6 +26,22 @@ export function mapHubspotToSapFields(source, mappings) {
   return mapped;
 }
 
+// Header fields owned by the builders (or with dedicated coercion, like PaymentGroupCode)
+// are excluded from the generic deal-mapping spread so mapped raw values cannot clobber them.
+const RESERVED_HEADER_FIELDS = new Set(['CardCode', 'DocDueDate', 'DocumentLines', 'PaymentGroupCode']);
+
+function pickMappedHeaderFields(mappedDealFields) {
+  const fields = {};
+
+  for (const [field, value] of Object.entries(mappedDealFields || {})) {
+    if (!RESERVED_HEADER_FIELDS.has(field)) {
+      fields[field] = value;
+    }
+  }
+
+  return fields;
+}
+
 // Precedence: mapped HubSpot value → tenant config default (groupCodeDefauls) → null (omit).
 export function resolvePaymentGroupCode({ mappedDeal, groupCodeDefaults }) {
   const mappedValue = normalizeInteger(mappedDeal?.PaymentGroupCode);
@@ -211,6 +227,7 @@ export function buildOrderPayload({
   documentLines,
   slpCode = null,
   paymentGroupCode = null,
+  mappedDealFields = {},
   comments = null,
   U_ACO_Telefono = null,
   U_ACO_Telefono2 = null,
@@ -222,6 +239,7 @@ export function buildOrderPayload({
   }
 
   const payload = {
+    ...pickMappedHeaderFields(mappedDealFields),
     CardCode: cardCode,
     DocDueDate: new Date().toISOString().slice(0, 10),
     DocumentLines: documentLines,
@@ -259,6 +277,7 @@ export function buildQuotationPayload({
   documentLines,
   slpCode = null,
   paymentGroupCode = null,
+  mappedDealFields = {},
   numAtCard = null,
   comments = null,
 }) {
@@ -267,6 +286,7 @@ export function buildQuotationPayload({
   }
 
   const payload = {
+    ...pickMappedHeaderFields(mappedDealFields),
     CardCode: cardCode,
     DocDueDate: new Date().toISOString().slice(0, 10),
     DocumentLines: documentLines,

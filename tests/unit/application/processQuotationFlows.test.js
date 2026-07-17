@@ -154,6 +154,41 @@ describe('ProcessHubspotCreateQuotation', () => {
     expect(deps.runtimeRepository.resolveGroupCodeDefaults).toHaveBeenCalled();
   });
 
+  it('sends mapped deal header fields like CardName and skips them when the deal has no value', async () => {
+    const context = buildContext();
+    context.mappings.dealOrdersQuotationsMappings = [
+      { sourceField: 'CardName', targetField: 'cardName' },
+    ];
+    const deps = buildDeps();
+    deps.runtimeRepository = buildRuntimeRepository(context);
+    const useCase = new ProcessHubspotCreateQuotation(deps);
+
+    const event = {
+      ...baseEvent,
+      payload: {
+        ...baseEvent.payload,
+        deal: { hs_object_id: '59680314911', cardName: 'Maleny Benavides' },
+      },
+    };
+
+    await useCase.execute({ event, tenantModels });
+
+    const { quotationPayload } = deps.sapQuotationAdapter.createQuotation.mock.calls[0][0];
+    expect(quotationPayload.CardName).toBe('Maleny Benavides');
+    expect(quotationPayload.CardCode).toBe('CL00129');
+
+    // Same mapping but the deal arrives without cardName: the field must be omitted.
+    const depsWithoutValue = buildDeps();
+    depsWithoutValue.runtimeRepository = buildRuntimeRepository(context);
+    const useCaseWithoutValue = new ProcessHubspotCreateQuotation(depsWithoutValue);
+
+    await useCaseWithoutValue.execute({ event: baseEvent, tenantModels });
+
+    const secondPayload = depsWithoutValue.sapQuotationAdapter.createQuotation.mock.calls[0][0]
+      .quotationPayload;
+    expect(secondPayload).not.toHaveProperty('CardName');
+  });
+
   it('falls back to the groupCodeDefauls config when the deal has no paymentGroupCode', async () => {
     const deps = buildDeps();
     deps.runtimeRepository.resolveGroupCodeDefaults.mockResolvedValue({

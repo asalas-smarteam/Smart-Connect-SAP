@@ -344,6 +344,36 @@ describe('order-builder.service buildOrderPayload', () => {
     });
     expect(withoutPaymentGroupCode).not.toHaveProperty('PaymentGroupCode');
   });
+
+  it('spreads mapped deal header fields like CardName into the payload', () => {
+    const payload = buildOrderPayload({
+      cardCode: 'CL99999',
+      documentLines: [{ ItemCode: 'A56010004', Quantity: 1 }],
+      mappedDealFields: { CardName: 'Maleny Benavides', U_CustomField: 'X' },
+    });
+
+    expect(payload.CardName).toBe('Maleny Benavides');
+    expect(payload.U_CustomField).toBe('X');
+  });
+
+  it('never lets mapped deal fields clobber CardCode, DocumentLines or PaymentGroupCode', () => {
+    const payload = buildOrderPayload({
+      cardCode: 'CL99999',
+      documentLines: [{ ItemCode: 'A56010004', Quantity: 1 }],
+      paymentGroupCode: null,
+      mappedDealFields: {
+        CardCode: 'HACKED',
+        DocDueDate: '1999-01-01',
+        DocumentLines: [],
+        PaymentGroupCode: 'abc',
+      },
+    });
+
+    expect(payload.CardCode).toBe('CL99999');
+    expect(payload.DocDueDate).not.toBe('1999-01-01');
+    expect(payload.DocumentLines).toHaveLength(1);
+    expect(payload).not.toHaveProperty('PaymentGroupCode');
+  });
 });
 
 describe('order-builder.service resolvePaymentGroupCode', () => {
@@ -405,6 +435,26 @@ describe('order-builder.service quotation payloads and PaymentGroupCode', () => 
     });
 
     expect(payload).not.toHaveProperty('PaymentGroupCode');
+  });
+
+  it('spreads mapped deal header fields like CardName into the quotation payload', () => {
+    const payload = buildQuotationPayload({
+      cardCode: 'CL99999',
+      documentLines,
+      mappedDealFields: { CardName: 'Maleny Benavides', CardCode: 'HACKED' },
+    });
+
+    expect(payload.CardName).toBe('Maleny Benavides');
+    expect(payload.CardCode).toBe('CL99999');
+  });
+
+  it('omits mapped deal header fields when no mapping produced values', () => {
+    const payload = buildQuotationPayload({
+      cardCode: 'CL99999',
+      documentLines,
+    });
+
+    expect(payload).not.toHaveProperty('CardName');
   });
 
   it('never emits PaymentGroupCode when converting a quotation to an order', () => {

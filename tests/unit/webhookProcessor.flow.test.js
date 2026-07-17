@@ -545,6 +545,104 @@ describe('webhookProcessor flow', () => {
     );
   });
 
+  it('sends mapped deal header fields like CardName in the SAP order payload', async () => {
+    setupMappings({
+      ordersQuotationsMappings: [
+        { sourceField: 'CardName', targetField: 'cardName' },
+      ],
+    });
+    const tenantModels = buildTenantModels({
+      deal: {
+        cardName: 'Maleny Benavides',
+      },
+      contact: {
+        hs_object_id: 'contact-1',
+        firstname: 'Maleny Benavides',
+        idsap: 'CL00557',
+      },
+    });
+
+    mockAxios
+      .mockResolvedValueOnce({
+        data: {
+          CardCode: 'CL00557',
+          CardName: 'Maleny Benavides',
+          PriceListNum: 4,
+          ContactEmployees: [],
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          DocEntry: 18,
+          DocNum: 28,
+        },
+      });
+
+    const result = await webhookProcessor.processPendingEvents({
+      tenantModels,
+      tenantId: 'tenant-1',
+      tenantKey: 'tenant_1',
+      portalId: '12345',
+    });
+
+    expect(result.completed).toBe(1);
+    expect(mockAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'post',
+        url: 'https://sap.example.com:50000/b1s/v2/Orders',
+        data: expect.objectContaining({
+          CardCode: 'CL00557',
+          CardName: 'Maleny Benavides',
+        }),
+      })
+    );
+  });
+
+  it('omits mapped deal header fields when the deal does not send them', async () => {
+    setupMappings({
+      ordersQuotationsMappings: [
+        { sourceField: 'CardName', targetField: 'cardName' },
+      ],
+    });
+    const tenantModels = buildTenantModels({
+      contact: {
+        hs_object_id: 'contact-1',
+        firstname: 'Cliente Mostrador',
+        idsap: 'CL99999',
+      },
+    });
+
+    mockAxios
+      .mockResolvedValueOnce({
+        data: {
+          CardCode: 'CL99999',
+          CardName: 'Cliente Mostrador',
+          PriceListNum: 4,
+          ContactEmployees: [],
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          DocEntry: 19,
+          DocNum: 29,
+        },
+      });
+
+    const result = await webhookProcessor.processPendingEvents({
+      tenantModels,
+      tenantId: 'tenant-1',
+      tenantKey: 'tenant_1',
+      portalId: '12345',
+    });
+
+    const orderRequest = mockAxios.mock.calls
+      .map(([config]) => config)
+      .find((config) => config.method === 'post' && config.url.endsWith('/b1s/v2/Orders'));
+
+    expect(result.completed).toBe(1);
+    expect(orderRequest.data).not.toHaveProperty('CardName');
+  });
+
   it('falls back to groupCodeDefauls config for PaymentGroupCode and PayTermsGrpCode', async () => {
     setupMappings();
     const tenantModels = buildTenantModels({

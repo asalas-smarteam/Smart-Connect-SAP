@@ -124,6 +124,7 @@ export class ProcessHubspotCreateQuotation {
         documentLines,
         slpCode,
         paymentGroupCode,
+        mappedDealFields: mappedDeal,
         numAtCard: buildDealNumAtCard(dealId),
         comments: 'Oferta creada desde HubSpot',
       });
