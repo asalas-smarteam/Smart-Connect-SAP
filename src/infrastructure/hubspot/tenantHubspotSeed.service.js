@@ -1,4 +1,8 @@
 import {
+  DEFAULT_SAP_FLAVOR,
+  SAP_FLAVORS,
+} from '#domain/sap/sap-flavor.constants.js';
+import {
   ensureObjectProperty,
   fetchDealPipelines,
   fetchDealStages,
@@ -119,7 +123,7 @@ export async function seedHubspotMappings({ tenantConnection, hubspotCredential 
   };
 }
 
-export async function seedCreateFieldsHubspot({ hubspotCredential }) {
+export async function seedCreateFieldsHubspot({ hubspotCredential, sapFlavor = DEFAULT_SAP_FLAVOR }) {
   const accessToken = hubspotCredential?.accessToken;
   const hubspotCredentialId = hubspotCredential?._id;
 
@@ -166,6 +170,26 @@ export async function seedCreateFieldsHubspot({ hubspotCredential }) {
     { objectType: 'deal', label: 'Doc Num SAP', name: 'sap_docnum' },
     { objectType: 'products', label: 'Código de producto', name: 'itemCode' },
   ];
+
+  // S/4 exposes the tax id (RNC/cédula) and the customer grouping, which have
+  // no B1 counterpart. They are only created for S/4 tenants so B1 portals do
+  // not get properties they can never populate.
+  if (sapFlavor === SAP_FLAVORS.S4) {
+    fieldsToEnsure.push(
+      { objectType: 'companies', label: 'Cédula / RNC', name: 'cedula' },
+      {
+        objectType: 'companies',
+        label: 'Tipo de cliente',
+        name: 'tipo_cliente',
+        type: 'enumeration',
+        fieldType: 'select',
+        options: [
+          { label: 'Local', value: 'ZC01' },
+          { label: 'Extranjero', value: 'ZC02' },
+        ],
+      }
+    );
+  }
 
   const results = [];
   for (const field of fieldsToEnsure) {

@@ -114,6 +114,7 @@ describe('provisionTenant', () => {
       status: 'active',
       billingEmail: 'billing@acme.test',
       hubspot: { portalId: 123 },
+      sapFlavor: 'B1',
     });
     expect(mockSubscription.create).toHaveBeenCalledWith({
       clientId: 'client-id',
@@ -124,7 +125,19 @@ describe('provisionTenant', () => {
     expect(mockReplicateDefaultSapFilters).toHaveBeenCalledWith({
       masterConnection: mockMasterConnection,
       tenantConnection,
+      sapFlavor: 'B1',
     });
+    expect(configurationModel.updateOne).toHaveBeenCalledWith(
+      { key: 'sapFlavor' },
+      {
+        $setOnInsert: {
+          key: 'sapFlavor',
+          userUpdated: 'admin',
+          value: 'B1',
+        },
+      },
+      { upsert: true }
+    );
     expect(configurationModel.updateOne).toHaveBeenCalledWith(
       { key: 'bypassEmail' },
       {
@@ -161,6 +174,7 @@ describe('provisionTenant', () => {
         planId: 'plan-1',
         billingEmail: 'billing@acme.test',
         hubspot: { portalId: 123 },
+        sapFlavor: 'B1',
         subscriptionId: 'subscription-id',
       },
     });
@@ -220,6 +234,7 @@ describe('provisionTenant', () => {
         planId: 'plan-9',
         billingEmail: null,
         hubspot: null,
+        sapFlavor: 'B1',
         error: {
           message: 'collection failed',
           stack: expect.any(String),
@@ -282,5 +297,102 @@ describe('provisionTenant', () => {
       expiresAt: null,
       scope: null,
     });
+  });
+
+  it('persists sapFlavor S4 in SaaSClient and tenant configuration', async () => {
+    mockSanitizeMongoCollectionName.mockReturnValue('hana_inc');
+    mockBuildTenantDatabaseName.mockReturnValue('tenant_hana_inc');
+
+    const client = { _id: 'client-id', companyName: 'Hana Inc' };
+    const subscription = { _id: 'subscription-id' };
+
+    mockSaaSClient.create.mockResolvedValue(client);
+    mockSubscription.create.mockResolvedValue(subscription);
+
+    const configurationModel = {
+      collection: { name: 'Configurations' },
+      updateOne: jest.fn().mockResolvedValue(),
+    };
+
+    const tenantConnection = {
+      db: {
+        listCollections: jest.fn().mockReturnValue({
+          toArray: jest.fn().mockResolvedValue([]),
+        }),
+      },
+      createCollection: jest.fn().mockResolvedValue(),
+    };
+
+    mockGetTenantConnection.mockResolvedValue(tenantConnection);
+
+    mockRegisterTenantModels.mockReturnValue({
+      Configuration: configurationModel,
+      IntegrationMode: {
+        collection: { name: 'integrationmodes' },
+        updateOne: jest.fn().mockResolvedValue(),
+      },
+    });
+
+    mockFeatureFlags.updateOne.mockResolvedValue();
+    mockGlobalAuditLog.create.mockResolvedValue();
+
+    await provisionTenant({
+      companyName: 'Hana Inc',
+      planId: 'plan-3',
+      sapFlavor: 'S4',
+    });
+
+    expect(mockSaaSClient.create).toHaveBeenCalledWith(
+      expect.objectContaining({ sapFlavor: 'S4' })
+    );
+    expect(configurationModel.updateOne).toHaveBeenCalledWith(
+      { key: 'sapFlavor' },
+      {
+        $setOnInsert: {
+          key: 'sapFlavor',
+          userUpdated: 'admin',
+          value: 'S4',
+        },
+      },
+      { upsert: true }
+    );
+  });
+
+  it('falls back to B1 when sapFlavor is invalid', async () => {
+    mockSanitizeMongoCollectionName.mockReturnValue('legacy_inc');
+    mockBuildTenantDatabaseName.mockReturnValue('tenant_legacy_inc');
+
+    mockSaaSClient.create.mockResolvedValue({ _id: 'client-id' });
+    mockSubscription.create.mockResolvedValue({ _id: 'subscription-id' });
+
+    const tenantConnection = {
+      db: {
+        listCollections: jest.fn().mockReturnValue({
+          toArray: jest.fn().mockResolvedValue([]),
+        }),
+      },
+      createCollection: jest.fn().mockResolvedValue(),
+    };
+
+    mockGetTenantConnection.mockResolvedValue(tenantConnection);
+    mockRegisterTenantModels.mockReturnValue({
+      IntegrationMode: {
+        collection: { name: 'integrationmodes' },
+        updateOne: jest.fn().mockResolvedValue(),
+      },
+    });
+
+    mockFeatureFlags.updateOne.mockResolvedValue();
+    mockGlobalAuditLog.create.mockResolvedValue();
+
+    await provisionTenant({
+      companyName: 'Legacy Inc',
+      planId: 'plan-4',
+      sapFlavor: 'not-a-flavor',
+    });
+
+    expect(mockSaaSClient.create).toHaveBeenCalledWith(
+      expect.objectContaining({ sapFlavor: 'B1' })
+    );
   });
 });

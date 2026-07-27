@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { SAP_FILTER_OPERATORS } from '#domain/sap/sap-filter.constants.js';
 
 const { Schema } = mongoose;
 
@@ -16,10 +17,11 @@ export const sapFilterSchema = new Schema(
     operator: {
       type: String,
       required: true,
-      enum: ['eq', 'ge', 'startswith', 'not_startswith'],
+      enum: SAP_FILTER_OPERATORS,
     },
+    // Mixed rather than String: the 'in' operator carries an array of values.
     value: {
-      type: String,
+      type: Schema.Types.Mixed,
       default: null,
     },
     isDefault: {

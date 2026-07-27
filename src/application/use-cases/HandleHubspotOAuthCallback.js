@@ -10,12 +10,17 @@ export class HandleHubspotOAuthCallback {
     hubspotAuthProvider,
     masterConfigReplicator,
     tenantHubspotSeeder,
+    // Resolves the tenant SAP flavor so the HubSpot seed can create the
+    // properties that only exist for one flavor. Injected to keep this
+    // use case free of infrastructure imports.
+    sapFlavorResolver = null,
     logger = console,
   }) {
     this.tenantRepository = tenantRepository;
     this.hubspotAuthProvider = hubspotAuthProvider;
     this.masterConfigReplicator = masterConfigReplicator;
     this.tenantHubspotSeeder = tenantHubspotSeeder;
+    this.sapFlavorResolver = sapFlavorResolver;
     this.logger = logger;
   }
 
@@ -58,7 +63,8 @@ export class HandleHubspotOAuthCallback {
 
       try {
         const tenantConnection = await this.tenantRepository.getTenantConnection(resolvedTenantKey);
-        await this.tenantHubspotSeeder.seed({ tenantConnection, credentials });
+        const sapFlavor = await this.sapFlavorResolver?.resolveSapFlavor({ tenantModels });
+        await this.tenantHubspotSeeder.seed({ tenantConnection, credentials, sapFlavor });
       } catch (seedError) {
         this.logger.error?.({
           msg: 'HubSpot tenant seed failed after OAuth callback',

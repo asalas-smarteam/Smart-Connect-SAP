@@ -16,13 +16,14 @@ export class MasterConfigReplicatorAdapter {
 }
 
 export class TenantHubspotSeederAdapter {
-  async seed({ tenantConnection, credentials }) {
+  async seed({ tenantConnection, credentials, sapFlavor }) {
     await seedHubspotMappings({
       tenantConnection,
       hubspotCredential: credentials,
     });
     await seedCreateFieldsHubspot({
       hubspotCredential: credentials,
+      sapFlavor,
     });
   }
 }

@@ -1,5 +1,7 @@
 import logger from '../logger/logger.js';
 import { createMasterClientConfigModel } from '../database/models/master/ClientConfig.js';
+import { SAP_FLAVORS } from '#domain/sap/sap-flavor.constants.js';
+import { resolveSapFlavor } from '#infrastructure/config/SapFlavorConfigRepository.js';
 import { buildMergedFilters } from '#application/services/clientConfigFilters.service.js';
 import {
   ensureDefaultContactEmployeeMappings,
@@ -50,17 +52,35 @@ export async function replicateMasterClientConfigs({
   } = tenantModels;
 
   try {
+    // The tenant flavor decides both which templates apply (entity paths
+    // differ) and which integration mode they get. Templates predating the
+    // sapFlavor field are treated as B1.
+    const sapFlavor = await resolveSapFlavor({ tenantModels });
+    const flavorScope = sapFlavor === SAP_FLAVORS.S4
+      ? { sapFlavor: SAP_FLAVORS.S4 }
+      : {
+        $or: [
+          { sapFlavor: SAP_FLAVORS.B1 },
+          { sapFlavor: { $exists: false } },
+          { sapFlavor: null },
+        ],
+      };
+
     const MasterClientConfig = createMasterClientConfigModel(masterConnection);
-    const masterConfigs = await MasterClientConfig.find({ syncInTenant: true }).lean();
+    const masterConfigs = await MasterClientConfig
+      .find({ syncInTenant: true, ...flavorScope })
+      .lean();
 
     if (!masterConfigs.length) {
       logger.info({ msg: 'No master ClientConfigs marked for tenant synchronization' });
       return;
     }
 
-    const serviceLayerMode = await IntegrationMode.findOne({ name: 'SERVICE_LAYER' }).lean();
+    const integrationModeName = sapFlavor === SAP_FLAVORS.S4 ? 'S4_ODATA' : 'SERVICE_LAYER';
+
+    const serviceLayerMode = await IntegrationMode.findOne({ name: integrationModeName }).lean();
     if (!serviceLayerMode?._id) {
-      throw new Error('SERVICE_LAYER integration mode not found in tenant database');
+      throw new Error(`${integrationModeName} integration mode not found in tenant database`);
     }
 
     const existingClientNames = new Set(
@@ -100,21 +120,25 @@ export async function replicateMasterClientConfigs({
       await ensureDefaultCompanyEmployeeMappings({
         FieldMapping,
         clientConfig: createdConfig,
+        sapFlavor,
       });
 
       await ensureDefaultContactEmployeeMappings({
         FieldMapping,
         clientConfig: createdConfig,
+        sapFlavor,
       });
 
       await ensureDefaultDealMappings({
         FieldMapping,
         clientConfig: createdConfig,
+        sapFlavor,
       });
-      
+
       await ensureDefaultProductMappings({
         FieldMapping,
         clientConfig: createdConfig,
+        sapFlavor,
       });
       existingClientNames.add(clientName);
     }

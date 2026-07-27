@@ -1,3 +1,8 @@
+import {
+  SAP_FLAVORS,
+  normalizeSapFlavor,
+} from '#domain/sap/sap-flavor.constants.js';
+
 const COMPANY_NAME_MIN_LENGTH = 3;
 const COMPANY_NAME_MAX_LENGTH = 80;
 const COLLECTION_NAME_MIN_LENGTH = 3;
@@ -52,10 +57,21 @@ function validateProvisioningPayload(payload) {
     };
   }
 
+  // Optional field: absent resolves to B1 so existing callers keep working.
+  const normalizedSapFlavor = normalizeSapFlavor(payload?.sapFlavor);
+
+  if (!normalizedSapFlavor) {
+    return {
+      valid: false,
+      error: `sapFlavor must be one of: ${Object.values(SAP_FLAVORS).join(', ')}`,
+    };
+  }
+
   return {
     valid: true,
     normalizedCompanyName,
     sanitizedCollectionName,
+    normalizedSapFlavor,
   };
 }
 

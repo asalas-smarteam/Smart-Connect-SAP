@@ -1,4 +1,5 @@
 import logger from '#infrastructure/logger/logger.js';
+import { SAP_FLAVORS } from '#domain/sap/sap-flavor.constants.js';
 import { createMasterClientConfigModel } from '../models/master/ClientConfig.js';
 
 const BASE_MASTER_CLIENT_CONFIGS = [
@@ -12,6 +13,7 @@ const BASE_MASTER_CLIENT_CONFIGS = [
     hubspotBatchSize: 100,
     active: false,
     syncInTenant: true,
+    sapFlavor: SAP_FLAVORS.B1,
   },
   {
     clientName: 'Obtener contactos',
@@ -23,6 +25,7 @@ const BASE_MASTER_CLIENT_CONFIGS = [
     hubspotBatchSize: 1,
     active: false,
     syncInTenant: true,
+    sapFlavor: SAP_FLAVORS.B1,
   },
   {
     clientName: 'Obtener Empresas',
@@ -34,6 +37,7 @@ const BASE_MASTER_CLIENT_CONFIGS = [
     hubspotBatchSize: 1,
     active: false,
     syncInTenant: true,
+    sapFlavor: SAP_FLAVORS.B1,
   },
   {
     clientName: 'Obtener Negocios',
@@ -45,6 +49,47 @@ const BASE_MASTER_CLIENT_CONFIGS = [
     hubspotBatchSize: 30,
     active: false,
     syncInTenant: true,
+    sapFlavor: SAP_FLAVORS.B1,
+  },
+  // --- SAP S/4HANA -------------------------------------------------------
+  // Entity paths are the Gateway service + entity set. All customers in S/4
+  // carry the organization category, so contacts are not seeded: B2B tenants
+  // sync companies only (see Obtener Empresas below).
+  {
+    clientName: 'Obtener Productos S4',
+    objectType: 'product',
+    mode: 'FULL',
+    executionTime: '01:00',
+    intervalMinutes: null,
+    serviceLayerPath: '/API_PRODUCT_SRV/A_Product',
+    hubspotBatchSize: 100,
+    active: false,
+    syncInTenant: true,
+    sapFlavor: SAP_FLAVORS.S4,
+  },
+  {
+    clientName: 'Obtener Empresas S4',
+    objectType: 'company',
+    mode: 'FULL',
+    executionTime: '03:00',
+    intervalMinutes: null,
+    serviceLayerPath: '/API_BUSINESS_PARTNER/A_BusinessPartner',
+    hubspotBatchSize: 1,
+    active: false,
+    syncInTenant: true,
+    sapFlavor: SAP_FLAVORS.S4,
+  },
+  {
+    clientName: 'Obtener Negocios S4',
+    objectType: 'deal',
+    mode: 'INCREMENTAL',
+    executionTime: null,
+    intervalMinutes: 2,
+    serviceLayerPath: '/API_SALES_ORDER_SRV/A_SalesOrder',
+    hubspotBatchSize: 30,
+    active: false,
+    syncInTenant: true,
+    sapFlavor: SAP_FLAVORS.S4,
   },
 ];
 

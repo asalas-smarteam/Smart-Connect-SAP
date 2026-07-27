@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { SAP_FILTER_OPERATORS } from '#domain/sap/sap-filter.constants.js';
 
 const { Schema } = mongoose;
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -16,7 +17,7 @@ const clientFilterSchema = new Schema(
   {
     operator: {
       type: String,
-      enum: ['eq', 'ge', 'startswith', 'not_startswith'],
+      enum: SAP_FILTER_OPERATORS,
       required: true,
     },
     property: {

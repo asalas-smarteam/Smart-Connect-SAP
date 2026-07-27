@@ -1,3 +1,8 @@
+import {
+  DEFAULT_SAP_FLAVOR,
+  SAP_FLAVORS,
+} from '#domain/sap/sap-flavor.constants.js';
+
 const DEFAULT_CONTACT_EMPLOYEE_MAPPINGS = [
   { sourceField: 'Name', targetField: 'firstname', sourceContext: 'contactEmployee' },
   { sourceField: 'InternalCode', targetField: 'internalcode', sourceContext: 'contactEmployee' },
@@ -19,10 +24,13 @@ const DEFAULT_COMPANY_EMPLOYEE_MAPPINGS = [
   { sourceField: 'PriceListNum', targetField: 'pricelist', sourceContext: 'businessPartner' },
 ];
 
+// NOTE: sourceField must be unique per (objectType, sourceContext) here.
+// The FieldMapping unique index is { hubspotCredentialId, objectType,
+// sourceContext, sourceField } and ignores targetField, so mapping one SAP
+// field to two HubSpot properties raises E11000 during tenant seeding.
 const DEFAULT_DEAL_MAPPINGS = [
   { sourceField: 'DocEntry', targetField: 'sap_docentry', sourceContext: 'businessPartner' },
   { sourceField: 'DocNum', targetField: 'sap_docnum', sourceContext: 'businessPartner' },
-  { sourceField: 'DocNum', targetField: 'dealname', sourceContext: 'businessPartner' },
   { sourceField: 'DocTotal', targetField: 'amount', sourceContext: 'businessPartner' },
   { sourceField: 'DocumentStatus', targetField: 'dealstage', sourceContext: 'businessPartner' },
 ];
@@ -45,6 +53,30 @@ export const DEFAULT_INVOICE_MAPPINGS = [
   { sourceField: 'DocTotal', targetField: 'doctotal', sourceContext: 'businessPartner' },
   { sourceField: 'UpdateDate', targetField: 'update_date', sourceContext: 'businessPartner' },
   { sourceField: 'UpdateTime', targetField: 'update_time', sourceContext: 'businessPartner' },
+];
+
+// --- SAP S/4HANA -----------------------------------------------------------
+// Field names and navigation paths validated against a live Gateway. The
+// mapping layer resolves dotted paths and steps into arrays automatically
+// (see resolveValueByPath), so nested contact data works without flattening.
+//
+// All S/4 customers carry the organization category, so these tenants are
+// B2B: only the company object is synced and no contact defaults are seeded.
+const DEFAULT_S4_COMPANY_MAPPINGS = [
+  { sourceField: 'BusinessPartner', targetField: 'idsap', sourceContext: 'businessPartner' },
+  { sourceField: 'BusinessPartnerFullName', targetField: 'name', sourceContext: 'businessPartner' },
+  { sourceField: 'BusinessPartnerGrouping', targetField: 'tipo_cliente', sourceContext: 'businessPartner' },
+  { sourceField: 'to_Customer.TaxNumber1', targetField: 'cedula', sourceContext: 'businessPartner' },
+  { sourceField: 'to_BusinessPartnerAddress.to_EmailAddress.EmailAddress', targetField: 'email', sourceContext: 'businessPartner' },
+  { sourceField: 'to_BusinessPartnerAddress.to_PhoneNumber.PhoneNumber', targetField: 'phone', sourceContext: 'businessPartner' },
+  { sourceField: 'to_BusinessPartnerAddress.CityName', targetField: 'city', sourceContext: 'businessPartner' },
+  { sourceField: 'to_BusinessPartnerAddress.Country', targetField: 'country', sourceContext: 'businessPartner' },
+];
+
+const DEFAULT_S4_PRODUCT_MAPPINGS = [
+  { sourceField: 'Product', targetField: 'hs_sku', sourceContext: 'product' },
+  { sourceField: 'to_Description.ProductDescription', targetField: 'name', sourceContext: 'product' },
+  { sourceField: 'BaseUnit', targetField: 'unidad_medida', sourceContext: 'product', includeInServiceLayerSelect: true },
 ];
 
 async function ensureDefaultMappings({
@@ -99,7 +131,11 @@ async function ensureDefaultMappings({
 }
 
 
-export async function ensureDefaultCompanyEmployeeMappings({ FieldMapping, clientConfig }) {
+export async function ensureDefaultCompanyEmployeeMappings({
+  FieldMapping,
+  clientConfig,
+  sapFlavor = DEFAULT_SAP_FLAVOR,
+}) {
   if (clientConfig?.objectType !== 'company') {
     return;
   }
@@ -107,14 +143,23 @@ export async function ensureDefaultCompanyEmployeeMappings({ FieldMapping, clien
   await ensureDefaultMappings({
     FieldMapping,
     clientConfig,
-    mappings: DEFAULT_COMPANY_EMPLOYEE_MAPPINGS,
+    mappings: sapFlavor === SAP_FLAVORS.S4
+      ? DEFAULT_S4_COMPANY_MAPPINGS
+      : DEFAULT_COMPANY_EMPLOYEE_MAPPINGS,
     objectType: 'company',
     sourceContext: 'businessPartner',
   });
 }
 
-export async function ensureDefaultContactEmployeeMappings({ FieldMapping, clientConfig }) {
-  if (clientConfig?.objectType !== 'company') {
+export async function ensureDefaultContactEmployeeMappings({
+  FieldMapping,
+  clientConfig,
+  sapFlavor = DEFAULT_SAP_FLAVOR,
+}) {
+  // S/4 tenants are B2B: every customer is an organization, and contact
+  // persons live behind to_BusinessPartnerContact rather than in the same
+  // fetch. No contact defaults are seeded until that flow is defined.
+  if (clientConfig?.objectType !== 'company' || sapFlavor === SAP_FLAVORS.S4) {
     return;
   }
 
@@ -127,8 +172,19 @@ export async function ensureDefaultContactEmployeeMappings({ FieldMapping, clien
   });
 }
 
-export async function ensureDefaultDealMappings({ FieldMapping, clientConfig }) {
+export async function ensureDefaultDealMappings({
+  FieldMapping,
+  clientConfig,
+  sapFlavor = DEFAULT_SAP_FLAVOR,
+}) {
   if (clientConfig?.objectType !== 'deal') {
+    return;
+  }
+
+  // A_SalesOrder has not been profiled against a live Gateway yet, so no
+  // S/4 deal defaults are seeded: wrong field names would produce silent
+  // nulls in HubSpot. The tenant maps them from the UI meanwhile.
+  if (sapFlavor === SAP_FLAVORS.S4) {
     return;
   }
 
@@ -141,7 +197,11 @@ export async function ensureDefaultDealMappings({ FieldMapping, clientConfig }) 
   });
 }
 
-export async function ensureDefaultProductMappings({ FieldMapping, clientConfig }) {
+export async function ensureDefaultProductMappings({
+  FieldMapping,
+  clientConfig,
+  sapFlavor = DEFAULT_SAP_FLAVOR,
+}) {
   if (clientConfig?.objectType !== 'product') {
     return;
   }
@@ -149,7 +209,9 @@ export async function ensureDefaultProductMappings({ FieldMapping, clientConfig 
   await ensureDefaultMappings({
     FieldMapping,
     clientConfig,
-    mappings: DEFAULT_PRODUCT_MAPPINGS,
+    mappings: sapFlavor === SAP_FLAVORS.S4
+      ? DEFAULT_S4_PRODUCT_MAPPINGS
+      : DEFAULT_PRODUCT_MAPPINGS,
     objectType: 'product',
     editable: false,
   });

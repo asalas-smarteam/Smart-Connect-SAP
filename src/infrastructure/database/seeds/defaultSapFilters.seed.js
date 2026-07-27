@@ -1,4 +1,5 @@
 import { createDefaultSapFilterModel } from '../models/master/defaultSapFilter.model.js';
+import { DEFAULT_SAP_FLAVOR, SAP_FLAVORS } from '#domain/sap/sap-flavor.constants.js';
 import logger from '#infrastructure/logger/logger.js';
 
 const BASE_DEFAULT_SAP_FILTERS = [
@@ -103,19 +104,91 @@ const BASE_DEFAULT_SAP_FILTERS = [
     dynamicType: 'time',
     active: true,
   },
+  // --- SAP S/4HANA -------------------------------------------------------
+  // Validated against a live Gateway: `Customer ne ''` isolates the customer
+  // role (8.300 of 14.394 business partners have no customer role) and the
+  // ZC01/ZC02 grouping split is local vs foreign customer.
+  {
+    objectType: 'company',
+    sapFlavor: SAP_FLAVORS.S4,
+    property: 'Customer',
+    operator: 'ne',
+    value: '',
+    isDefault: true,
+    isDynamic: false,
+    active: true,
+  },
+  {
+    objectType: 'company',
+    sapFlavor: SAP_FLAVORS.S4,
+    property: 'BusinessPartnerGrouping',
+    operator: 'in',
+    value: ['ZC01', 'ZC02'],
+    isDefault: true,
+    isDynamic: false,
+    active: true,
+  },
+  {
+    objectType: 'company',
+    sapFlavor: SAP_FLAVORS.S4,
+    property: 'LastChangeDate',
+    operator: 'ge',
+    value: null,
+    isDefault: true,
+    isDynamic: true,
+    dynamicType: 'datetime',
+    active: true,
+  },
+  {
+    objectType: 'product',
+    sapFlavor: SAP_FLAVORS.S4,
+    property: 'IsMarkedForDeletion',
+    operator: 'eq',
+    value: false,
+    isDefault: true,
+    isDynamic: false,
+    active: true,
+  },
+  {
+    objectType: 'product',
+    sapFlavor: SAP_FLAVORS.S4,
+    property: 'LastChangeDate',
+    operator: 'ge',
+    value: null,
+    isDefault: true,
+    isDynamic: true,
+    dynamicType: 'datetime',
+    active: true,
+  },
+  {
+    objectType: 'deal',
+    sapFlavor: SAP_FLAVORS.S4,
+    property: 'LastChangeDate',
+    operator: 'ge',
+    value: null,
+    isDefault: true,
+    isDynamic: true,
+    dynamicType: 'datetime',
+    active: true,
+  },
 ];
 
 export async function seedDefaultSapFilters(masterConnection) {
   try {
     const DefaultSapFilter = createDefaultSapFilterModel(masterConnection);
 
-    // Seed per objectType so that new object types (e.g. 'deal') are added to
-    // installations that were seeded before they existed, while staying idempotent.
-    const seededObjectTypes = await DefaultSapFilter.distinct('objectType', { active: true });
-    const seededSet = new Set(seededObjectTypes.map((type) => String(type)));
+    // Seed per (flavor, objectType) so new object types AND new SAP flavors
+    // are added to installations seeded before they existed, while staying
+    // idempotent. Documents predating sapFlavor count as B1.
+    const seeded = await DefaultSapFilter
+      .find({ active: true }, { objectType: 1, sapFlavor: 1 })
+      .lean();
+    const seededSet = new Set(
+      seeded.map((filter) => `${filter.sapFlavor || DEFAULT_SAP_FLAVOR}|${filter.objectType}`)
+    );
 
     const missingFilters = BASE_DEFAULT_SAP_FILTERS.filter(
-      (filter) => !seededSet.has(filter.objectType)
+      (filter) => !seededSet.has(`${filter.sapFlavor || DEFAULT_SAP_FLAVOR}|${filter.objectType}`)
     );
 
     if (missingFilters.length === 0) {

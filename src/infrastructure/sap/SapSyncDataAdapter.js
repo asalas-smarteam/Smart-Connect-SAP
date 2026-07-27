@@ -3,6 +3,7 @@ import spMode from './modes/spMode.js';
 import scriptMode from './modes/scriptMode.js';
 import apiMode from './modes/apiMode.js';
 import serviceLayerService from './serviceLayer.service.js';
+import s4ODataService from './s4ODataService.js';
 
 export class SapSyncDataAdapter {
   async fetchData({ clientConfigId, clientConfig = null, tenantContext, fetchOptions = {} }) {
@@ -32,6 +33,8 @@ export class SapSyncDataAdapter {
           return apiMode.execute(config);
         case 'SERVICE_LAYER':
           return this.fetchServiceLayerData({ config, SapCredentials, fetchOptions });
+        case 'S4_ODATA':
+          return this.fetchS4ODataData({ config, SapCredentials, fetchOptions });
         default:
           return null;
       }
@@ -55,6 +58,22 @@ export class SapSyncDataAdapter {
     };
 
     return serviceLayerService.execute(mergedConfig, mappings, fetchOptions);
+  }
+
+  async fetchS4ODataData({ config, SapCredentials, fetchOptions }) {
+    const sapCredentials = await SapCredentials.find().lean();
+
+    if (!sapCredentials || sapCredentials.length === 0) {
+      throw new Error('SAP credentials not found for S4_ODATA mode');
+    }
+
+    const mappings = Array.isArray(fetchOptions.mappings) ? fetchOptions.mappings : [];
+    const mergedConfig = {
+      ...sapCredentials[0],
+      ...(typeof config.toObject === 'function' ? config.toObject() : config),
+    };
+
+    return s4ODataService.execute(mergedConfig, mappings, fetchOptions);
   }
 }
 

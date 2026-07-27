@@ -96,6 +96,8 @@ describe('oauth.controller oauthCallback', () => {
     });
     expect(mockSeedCreateFieldsHubspot).toHaveBeenCalledWith({
       hubspotCredential: credentials,
+      // Tenants without the sapFlavor configuration key resolve to B1.
+      sapFlavor: 'B1',
     });
     expect(reply.send).toHaveBeenCalledWith({ ok: true, message: 'HubSpot connected' });
   });

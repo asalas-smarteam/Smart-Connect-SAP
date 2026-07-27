@@ -6,6 +6,7 @@ import {
   MasterConfigReplicatorAdapter,
   TenantHubspotSeederAdapter,
 } from '#infrastructure/hubspot/TenantHubspotSeederAdapter.js';
+import SapFlavorConfigRepository from '#infrastructure/config/SapFlavorConfigRepository.js';
 import logger from '#infrastructure/logger/logger.js';
 
 export function buildHubspotAuthProvider() {
@@ -18,6 +19,7 @@ export function buildOAuthCallbackUseCase() {
     hubspotAuthProvider: buildHubspotAuthProvider(),
     masterConfigReplicator: new MasterConfigReplicatorAdapter(),
     tenantHubspotSeeder: new TenantHubspotSeederAdapter(),
+    sapFlavorResolver: new SapFlavorConfigRepository(),
     logger,
   });
 }

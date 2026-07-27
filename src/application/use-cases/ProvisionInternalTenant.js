@@ -34,6 +34,7 @@ export class ProvisionInternalTenant {
       planId,
       billingEmail,
       hubspot,
+      sapFlavor: validation.normalizedSapFlavor,
     });
 
     return {

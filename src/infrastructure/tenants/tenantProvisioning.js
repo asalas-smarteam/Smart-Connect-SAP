@@ -14,6 +14,11 @@ import {
   DEFAULT_UPDATE_DEAL_STAGE_CONFIG,
 } from '#infrastructure/config/updateDealStage.config.js';
 import { sanitizeMongoCollectionName } from '#shared/utils/provisioningValidation.js';
+import {
+  DEFAULT_SAP_FLAVOR,
+  normalizeSapFlavor,
+} from '#domain/sap/sap-flavor.constants.js';
+import { SAP_FLAVOR_CONFIG_KEY } from '#infrastructure/config/SapFlavorConfigRepository.js';
 import { replicateDefaultSapFilters } from './replicateDefaultSapFilters.js';
 
 function slugifyCompanyName(companyName) {
@@ -51,6 +56,10 @@ const defaultIntegrationModes = [
     name: 'SERVICE_LAYER',
     description: 'Integración mediante SAP Business One Service Layer',
   },
+  {
+    name: 'S4_ODATA',
+    description: 'Integración mediante SAP S/4HANA Gateway OData',
+  },
 ];
 
 async function ensureIntegrationModes({ IntegrationMode }) {
@@ -63,11 +72,22 @@ async function ensureIntegrationModes({ IntegrationMode }) {
   );
 }
 
-async function ensureTenantConfigurations({ Configuration }) {
+async function ensureTenantConfigurations({ Configuration }, { sapFlavor = DEFAULT_SAP_FLAVOR } = {}) {
   if (typeof Configuration?.updateOne !== 'function') {
     return;
   }
 
+  await Configuration.updateOne(
+    { key: SAP_FLAVOR_CONFIG_KEY },
+    {
+      $setOnInsert: {
+        key: SAP_FLAVOR_CONFIG_KEY,
+        userUpdated: 'admin',
+        value: sapFlavor,
+      },
+    },
+    { upsert: true }
+  );
   await Configuration.updateOne(
     { key: BYPASS_EMAIL_CONFIG_KEY },
     {
@@ -213,9 +233,13 @@ export async function provisionTenant({
   planId,
   billingEmail = null,
   hubspot = null,
+  sapFlavor = DEFAULT_SAP_FLAVOR,
 }) {
   const slug = slugifyCompanyName(companyName);
   const tenantKey = buildTenantDatabaseName(slug);
+  // Defensive normalization: invalid/absent values resolve to B1 so callers
+  // that predate this field keep provisioning tenants exactly as before.
+  const resolvedSapFlavor = normalizeSapFlavor(sapFlavor) || DEFAULT_SAP_FLAVOR;
 
   try {
     await ensureGlobalDocuments({ planId });
@@ -226,6 +250,7 @@ export async function provisionTenant({
       status: 'active',
       billingEmail,
       hubspot,
+      sapFlavor: resolvedSapFlavor,
     });
 
     const subscription = await Subscription.create({
@@ -240,10 +265,11 @@ export async function provisionTenant({
 
     await ensureTenantCollections(tenantConnection, tenantModels);
     await ensureIntegrationModes(tenantModels);
-    await ensureTenantConfigurations(tenantModels);
+    await ensureTenantConfigurations(tenantModels, { sapFlavor: resolvedSapFlavor });
     await replicateDefaultSapFilters({
       masterConnection: FeatureFlags.db,
       tenantConnection,
+      sapFlavor: resolvedSapFlavor,
     });
 
     await resolveHubspotCredential({
@@ -262,6 +288,7 @@ export async function provisionTenant({
         planId,
         billingEmail,
         hubspot,
+        sapFlavor: resolvedSapFlavor,
         subscriptionId: subscription._id.toString(),
       },
     });
@@ -281,6 +308,7 @@ export async function provisionTenant({
           planId,
           billingEmail,
           hubspot,
+          sapFlavor: resolvedSapFlavor,
           error: {
             message: error?.message ?? 'Unknown error',
             stack: error?.stack ?? null,

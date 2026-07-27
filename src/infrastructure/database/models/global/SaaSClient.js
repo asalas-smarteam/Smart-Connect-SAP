@@ -1,4 +1,8 @@
 import mongoose from 'mongoose';
+import {
+  DEFAULT_SAP_FLAVOR,
+  SAP_FLAVORS,
+} from '#domain/sap/sap-flavor.constants.js';
 
 const { Schema } = mongoose;
 
@@ -37,6 +41,14 @@ const saasClientSchema = new Schema(
     billingEmail: {
       type: String,
       default: null,
+    },
+    // SAP product family the tenant connects to. Existing documents predate
+    // this field; runtime reads the tenant Configuration key instead, so a
+    // missing value here is informational only and implies B1.
+    sapFlavor: {
+      type: String,
+      enum: Object.values(SAP_FLAVORS),
+      default: DEFAULT_SAP_FLAVOR,
     },
     hubspot: {
       type: hubspotMetadataSchema,
