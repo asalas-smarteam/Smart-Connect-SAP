@@ -69,6 +69,18 @@ export class SyncCompanyContactsInBatches {
     return retryRequest(fn, { sleeper: this.sleeper });
   }
 
+  // Every SAP internal code that resolves to this contact: the entry's own plus
+  // the codes of the twins deduped away by the shared find value.
+  static sapIdsForEntry(entry, sapIdsByKey) {
+    const sapIds = entry.key ? sapIdsByKey?.get(entry.key) : null;
+
+    if (sapIds?.size) {
+      return [...sapIds];
+    }
+
+    return entry.sapInternalCode ? [entry.sapInternalCode] : [];
+  }
+
   async execute({ companies, clientConfig, tenantModels, getToken, syncLogId = null }) {
     const contactErrors = [];
     const clientConfigId = clientConfig?.id ?? clientConfig?._id ?? null;
@@ -117,14 +129,38 @@ export class SyncCompanyContactsInBatches {
     }
     const uniqueEntries = [...byKey.values(), ...entries.filter((entry) => entry.alwaysCreate)];
 
-    const existingByKey = await this.readExistingContacts({
-      keys: [...byKey.keys()],
-      findProperty,
-      uniqueEntries,
-      clientConfig,
-      tenantModels,
-      getToken,
-    });
+    // Deduping collapses twins that share a find value, but every twin's SAP id
+    // still needs its own registry row — otherwise the next run cannot resolve
+    // the dropped code and would create a duplicate contact.
+    const sapIdsByKey = new Map();
+    for (const entry of entries) {
+      if (!entry.key || !entry.sapInternalCode) {
+        continue;
+      }
+      if (!sapIdsByKey.has(entry.key)) {
+        sapIdsByKey.set(entry.key, new Set());
+      }
+      sapIdsByKey.get(entry.key).add(entry.sapInternalCode);
+    }
+
+    let existingByKey;
+    try {
+      existingByKey = await this.readExistingContacts({
+        keys: [...byKey.keys()],
+        findProperty,
+        uniqueEntries,
+        clientConfig,
+        tenantModels,
+        getToken,
+      });
+    } catch (readError) {
+      // Batch read AND its search fallback both failed: we cannot tell creates
+      // from updates, so abort child-contact sync with a single error entry
+      // rather than rejecting and breaking the caller's { contactErrors }.
+      this.logger.error?.('Company contact batch sync error:', readError);
+      contactErrors.push(buildContactErrorEntry({ error: readError }));
+      return { contactErrors };
+    }
 
     const createEntries = [];
     const updateEntries = [];
@@ -146,7 +182,7 @@ export class SyncCompanyContactsInBatches {
       }
     }
 
-    await this.createContactBatches({ createEntries, hubspotIdByKey, findProperty, clientConfig, tenantModels, getToken, contactErrors });
+    await this.createContactBatches({ createEntries, hubspotIdByKey, sapIdsByKey, findProperty, clientConfig, tenantModels, getToken, contactErrors });
     await this.updateContactBatches({ updateEntries, clientConfig, tenantModels, getToken, contactErrors });
     await this.associateContactBatches({ entries, hubspotIdByKey, getToken, contactErrors });
 
@@ -315,7 +351,7 @@ export class SyncCompanyContactsInBatches {
     return existingByKey;
   }
 
-  async createContactBatches({ createEntries, hubspotIdByKey, findProperty, clientConfig, tenantModels, getToken, contactErrors }) {
+  async createContactBatches({ createEntries, hubspotIdByKey, sapIdsByKey, findProperty, clientConfig, tenantModels, getToken, contactErrors }) {
     await runInWaves(
       chunkArray(createEntries, HUBSPOT_BATCH_INPUT_LIMIT),
       BATCH_CONCURRENCY,
@@ -339,6 +375,7 @@ export class SyncCompanyContactsInBatches {
           }
 
           const mappings = [];
+          const seenMappings = new Set();
           for (const [index, entry] of entryChunk.entries()) {
             const created = resultByKey.get(entry.key)
               ?? response?.results?.[index];
@@ -349,8 +386,12 @@ export class SyncCompanyContactsInBatches {
               } else {
                 entry.hubspotId = created.id;
               }
-              if (entry.sapInternalCode) {
-                mappings.push({ sapId: entry.sapInternalCode, hubspotId: created.id });
+              for (const sapId of SyncCompanyContactsInBatches.sapIdsForEntry(entry, sapIdsByKey)) {
+                const mappingKey = `${sapId}::${created.id}`;
+                if (!seenMappings.has(mappingKey)) {
+                  seenMappings.add(mappingKey);
+                  mappings.push({ sapId, hubspotId: created.id });
+                }
               }
             }
           }
@@ -365,7 +406,7 @@ export class SyncCompanyContactsInBatches {
           }
         } catch (error) {
           this.logger.error?.('Contact batch create failed, falling back per contact:', error);
-          await this.sequentialContactFallback({ entryChunk, hubspotIdByKey, clientConfig, tenantModels, getToken, contactErrors });
+          await this.sequentialContactFallback({ entryChunk, hubspotIdByKey, sapIdsByKey, clientConfig, tenantModels, getToken, contactErrors });
         }
       }
     );
@@ -414,7 +455,7 @@ export class SyncCompanyContactsInBatches {
 
   // Degraded path for a failed create chunk: one contact at a time with the
   // same handler the sequential flow uses, isolating individual failures.
-  async sequentialContactFallback({ entryChunk, hubspotIdByKey, clientConfig, tenantModels, getToken, contactErrors }) {
+  async sequentialContactFallback({ entryChunk, hubspotIdByKey, sapIdsByKey, clientConfig, tenantModels, getToken, contactErrors }) {
     for (const entry of entryChunk) {
       try {
         const token = await getToken();
@@ -435,12 +476,15 @@ export class SyncCompanyContactsInBatches {
             tenantModels,
           });
           contactHubspotId = createdContact?.id;
+          const sapIds = contactHubspotId
+            ? SyncCompanyContactsInBatches.sapIdsForEntry(entry, sapIdsByKey)
+            : [];
 
-          if (contactHubspotId && entry.sapInternalCode) {
+          if (sapIds.length > 0) {
             await this.associationRegistry.registerBaseObjectMappings(
               clientConfig.hubspotCredentialId,
               'contact',
-              [{ sapId: entry.sapInternalCode, hubspotId: contactHubspotId }],
+              sapIds.map((sapId) => ({ sapId, hubspotId: contactHubspotId })),
               tenantModels
             );
           }

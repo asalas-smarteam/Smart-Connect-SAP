@@ -186,4 +186,45 @@ describe('SyncCompanyContactsInBatches', () => {
       status: 409,
     });
   });
+
+  it('resolves with a single contactError when both the batch read and the search fallback fail', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.batchReadObjectsByProperty.mockRejectedValue(new Error('batch read down'));
+    useCase.crmBatchClient.searchObjectsByPropertyIn.mockRejectedValue(new Error('search down'));
+
+    const companies = [{
+      hubspotId: 'hs-co-1',
+      item: { properties: {}, rawSapData: { CardCode: 'C1', ContactEmployees: [{ InternalCode: 1, E_Mail: 'a@x.com' }] } },
+    }];
+
+    const { contactErrors } = await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
+
+    expect(contactErrors).toHaveLength(1);
+    expect(contactErrors[0]).toMatchObject({ errorType: 'contactEmployee' });
+    expect(useCase.crmBatchClient.batchCreateObjects).not.toHaveBeenCalled();
+  });
+
+  it('registers a mapping for every SAP internal code sharing a deduped contact', async () => {
+    const useCase = buildUseCase();
+    const companies = [
+      {
+        hubspotId: 'hs-co-1',
+        item: { properties: {}, rawSapData: { CardCode: 'C1', ContactEmployees: [{ InternalCode: 9, E_Mail: 'shared@x.com' }] } },
+      },
+      {
+        hubspotId: 'hs-co-2',
+        item: { properties: {}, rawSapData: { CardCode: 'C2', ContactEmployees: [{ InternalCode: 10, E_Mail: 'shared@x.com' }] } },
+      },
+    ];
+
+    await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
+
+    expect(useCase.crmBatchClient.batchCreateObjects.mock.calls[0][2].inputs).toHaveLength(1);
+    const mappings = useCase.associationRegistry.registerBaseObjectMappings.mock.calls[0][2];
+    expect(mappings).toEqual(expect.arrayContaining([
+      { sapId: 9, hubspotId: 'hs-c-0' },
+      { sapId: 10, hubspotId: 'hs-c-0' },
+    ]));
+    expect(mappings).toHaveLength(2);
+  });
 });
