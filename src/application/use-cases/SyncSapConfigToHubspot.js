@@ -13,6 +13,7 @@ export class SyncSapConfigToHubspot {
     productSyncStrategyFactory = null,
     sapDiscountClient = null,
     discountConfigRepository = null,
+    s4ContactEnricher = null,
     dateProvider = () => new Date(),
   }) {
     this.sapDataSource = sapDataSource;
@@ -25,6 +26,7 @@ export class SyncSapConfigToHubspot {
     this.productSyncStrategyFactory = productSyncStrategyFactory;
     this.sapDiscountClient = sapDiscountClient;
     this.discountConfigRepository = discountConfigRepository;
+    this.s4ContactEnricher = s4ContactEnricher;
     this.dateProvider = dateProvider;
   }
 
@@ -130,12 +132,23 @@ export class SyncSapConfigToHubspot {
         tenantContext,
       });
 
+      // Attaches each company's contact persons to rawSapData for the
+      // association step (S/4 only; a no-op otherwise).
+      if (this.s4ContactEnricher) {
+        await this.s4ContactEnricher.enrich({
+          mappedRecords: mappedRecordsWithRawSap,
+          objectType,
+          tenantModels: tenantContext?.tenantModels,
+        });
+      }
+
       const hubspotResult = await this.sendMappedRecords({
         mappedRecords: mappedRecordsWithRawSap,
         config: activeConfig,
         objectType,
         tenantContext,
         credentials,
+        syncLogId: syncLog?.id ?? syncLog?._id ?? null,
       });
       const metrics = this.buildMetrics({
         sapRecords: rawData,
@@ -302,6 +315,7 @@ export class SyncSapConfigToHubspot {
     objectType,
     tenantContext,
     credentials,
+    syncLogId = null,
   }) {
     if (objectType === 'product' && this.productSyncConfigRepository && this.productSyncStrategyFactory) {
       const strategyConfig = await this.productSyncConfigRepository.getProductSyncStrategyConfig({
@@ -328,6 +342,7 @@ export class SyncSapConfigToHubspot {
         objectType,
         tenantContext,
         credentials,
+        syncLogId,
       });
 
       return {
