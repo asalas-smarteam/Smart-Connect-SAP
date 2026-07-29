@@ -7,20 +7,23 @@ import { HandleHubspotAssociations } from '../../../src/application/use-cases/Ha
 function buildHandler({ bypassEmail = true } = {}) {
   const contactHandler = {
     find: jest.fn(async () => null),
-    create: jest.fn(async ({ item }) => ({ id: `hs-${item.properties.idsap}` })),
+    create: jest.fn(async ({ item }) => ({ id: `hs-${item.properties.internalcode}` })),
     update: jest.fn(async () => ({})),
   };
   const associationService = { associateCompanyWithContacts: jest.fn(async () => ({})) };
   const associationRegistry = { registerBaseObjectMapping: jest.fn(async () => ({})) };
 
   const fieldMappingService = {
+    // Child contacts are keyed by internalcode, not idsap: idsap is the
+    // company-level SAP key, so mapping the person-BP there would make every
+    // contact collide with its parent company's identity.
     getMappingsByObjectType: jest.fn(async () => [
-      { sourceField: 'BusinessPartner', targetField: 'idsap', sourceContext: 'contactEmployee' },
+      { sourceField: 'BusinessPartner', targetField: 'internalcode', sourceContext: 'contactEmployee' },
     ]),
     // Emulates mapRecords over the person-BPs using the S/4 contact mappings.
     mapRecords: jest.fn(async (records) => records.map((r) => ({
       properties: {
-        idsap: r.BusinessPartner,
+        internalcode: r.BusinessPartner,
         firstname: r.FirstName,
         lastname: r.LastName,
         email: r.to_BusinessPartnerAddress?.[0]?.to_EmailAddress?.[0]?.EmailAddress ?? '',
@@ -97,7 +100,7 @@ describe('syncCompanyContacts (S/4 path)', () => {
     expect(contactHandler.create).toHaveBeenCalledWith(expect.objectContaining({
       item: expect.objectContaining({
         properties: expect.objectContaining({
-          idsap: '100000', firstname: 'Oscar', email: 'arosa@acerocibao.com',
+          internalcode: '100000', firstname: 'Oscar', email: 'arosa@acerocibao.com',
         }),
       }),
     }));
@@ -255,7 +258,7 @@ describe('syncCompanyContacts error reporting', () => {
       }),
     }));
     expect(result.contactErrors[0].payloadHubspot).toEqual(expect.objectContaining({
-      idsap: '100000',
+      internalcode: '100000',
       email: 'oscar@acme.com',
     }));
   });

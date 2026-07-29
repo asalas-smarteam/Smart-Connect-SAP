@@ -43,6 +43,8 @@ export const validationFailureWriter = {
 export function buildSendMappedItemsToHubspot() {
   const handleHubspotAssociations = buildHandleHubspotAssociations();
 
+  // Second tier only: the tenant's configured defaultFindHubspot property, used
+  // when the identity property below matches nothing. Never the primary key.
   const findPropertyResolver = ({ tenantModels }) => getConfiguredFindProperty({ tenantModels });
 
   const syncCompanyContactsInBatches = new SyncCompanyContactsInBatches({
@@ -53,6 +55,9 @@ export function buildSendMappedItemsToHubspot() {
       fieldMappingRepository: new TenantFieldMappingRepository(),
     }),
     fallbackEmailGenerator: generateFallbackEmail,
+    // Company child contacts are keyed by their own SAP internal code; the
+    // tenant's defaultFindHubspot property is only the second tier.
+    identityProperty: 'internalcode',
     findPropertyResolver,
     bypassEmailConfigRepository: new BypassEmailConfigRepository(),
     syncWarningRepository: new MongooseSyncWarningRepository(),
@@ -64,6 +69,8 @@ export function buildSendMappedItemsToHubspot() {
     associationRegistry: associationRegistryService,
     sapHubspotIdUpdater: sapSyncAdapter,
     validationFailureWriter,
+    // idsap is the key between SAP and HubSpot for main records.
+    identityProperty: 'idsap',
     findPropertyResolver,
     fetchFallbackAssociations: ({ clientConfig, objectType }) =>
       handleHubspotAssociations.fetchAssociationsIfNeeded(clientConfig, objectType),
