@@ -84,7 +84,10 @@ const DEFAULT_S4_PRODUCT_MAPPINGS = [
 // extraction (relationship -> person join -> HubSpot association) is not yet
 // implemented; this only seeds the structure so S/4 tenants are complete.
 const DEFAULT_S4_CONTACT_MAPPINGS = [
-  { sourceField: 'BusinessPartner', targetField: 'idsap', sourceContext: 'contactEmployee' },
+  // The contact person is its own BusinessPartner in S/4. It is the contact's
+  // internal code, not the customer's idsap: idsap identifies the company a
+  // contact belongs to, and reusing it here would collide with company ids.
+  { sourceField: 'BusinessPartner', targetField: 'internalcode', sourceContext: 'contactEmployee' },
   { sourceField: 'FirstName', targetField: 'firstname', sourceContext: 'contactEmployee' },
   { sourceField: 'LastName', targetField: 'lastname', sourceContext: 'contactEmployee' },
   { sourceField: 'to_BusinessPartnerAddress.to_EmailAddress.EmailAddress', targetField: 'email', sourceContext: 'contactEmployee' },

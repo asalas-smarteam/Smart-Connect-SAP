@@ -105,7 +105,7 @@ describe('default mappings by SAP flavor', () => {
         FieldMapping.rows.map((row) => [row.targetField, row.sourceField])
       );
       expect(byTarget).toEqual({
-        idsap: 'BusinessPartner',
+        internalcode: 'BusinessPartner',
         firstname: 'FirstName',
         lastname: 'LastName',
         email: 'to_BusinessPartnerAddress.to_EmailAddress.EmailAddress',
@@ -113,6 +113,26 @@ describe('default mappings by SAP flavor', () => {
       });
       expect(FieldMapping.rows.every((row) => row.objectType === 'contact')).toBe(true);
       expect(FieldMapping.rows.every((row) => row.sourceContext === 'contactEmployee')).toBe(true);
+    });
+
+    it('identifies S/4 company contacts by internalcode, like B1 does', async () => {
+      const FieldMapping = buildFieldMapping();
+
+      await ensureDefaultContactEmployeeMappings({
+        FieldMapping,
+        clientConfig: contactConfig,
+        sapFlavor: 'S4',
+      });
+
+      const identity = FieldMapping.rows.filter(
+        (m) => m.sourceContext === 'contactEmployee' && m.targetField === 'internalcode'
+      );
+
+      expect(identity).toHaveLength(1);
+      expect(identity[0].sourceField).toBe('BusinessPartner');
+      expect(FieldMapping.rows.some(
+        (m) => m.sourceContext === 'contactEmployee' && m.targetField === 'idsap'
+      )).toBe(false);
     });
 
     it('does not seed S/4 contact mappings under a company config', async () => {
