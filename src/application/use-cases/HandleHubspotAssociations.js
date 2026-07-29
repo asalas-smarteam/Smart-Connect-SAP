@@ -275,22 +275,25 @@ export class HandleHubspotAssociations {
 
     for (const [index, mappedContact] of mappedContacts.entries()) {
       const sapContact = sapContacts[index] || {};
+      // Declared outside the try so the catch below can still report them.
       // B1 identifies a contact by InternalCode; S/4 person-BPs use their
       // BusinessPartner id (drives fallback email + SAP->HubSpot registry).
-      const { contactPayload: builtPayload, sapInternalCode } = buildCompanyContactPayload({
-        mappedContact,
-        sapContact,
-        companyFallbackSourceEmail: item?.rawSapData?.EmailAddress,
-        fallbackEmailGenerator: this.fallbackEmailGenerator,
-      });
-      // Declared outside the try so the catch below can still report it.
+      let sapInternalCode = null;
       let contactPayload = null;
-
-      contactPayload = builtPayload;
 
       // Each contact is isolated: a failure on one (e.g. a HubSpot 409) must
       // not abort the remaining contacts of the same company.
       try {
+        const built = buildCompanyContactPayload({
+          mappedContact,
+          sapContact,
+          companyFallbackSourceEmail: item?.rawSapData?.EmailAddress,
+          fallbackEmailGenerator: this.fallbackEmailGenerator,
+        });
+
+        sapInternalCode = built.sapInternalCode;
+        contactPayload = built.contactPayload;
+
         const bypassWarnings = [];
         const emailWasBypassed = applyBypassEmail({
           objectType: 'contact',
