@@ -129,7 +129,9 @@ export class SyncCompanyContactsInBatches {
 
       if (key && !byKey.has(key)) {
         byKey.set(key, entry);
-        rawValueByKey.set(key, String(rawValue));
+        // Trimmed but NOT lowercased: whitespace is noise SAP often carries,
+        // case is significant for idsap/internalcode lookups.
+        rawValueByKey.set(key, String(rawValue).trim());
       } else if (!key) {
         // No find value (e.g. bypassed email with findProperty=email): cannot
         // be matched to an existing record — always created, never deduped.

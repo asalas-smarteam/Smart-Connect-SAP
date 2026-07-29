@@ -270,6 +270,36 @@ describe('ProcessCrmObjectBatches', () => {
     expect(mappings).toEqual([{ sapId: 'C001', hubspotId: 'hs-0' }]);
   });
 
+  it('never falls back to positional matching on a 207, so no item gets another record id', async () => {
+    const useCase = buildUseCase();
+    // 207: one input succeeded, but the echoed record carries no find property,
+    // so it cannot be matched by key. Positional matching would hand it to the
+    // FIRST item and write a corrupted sapId -> hubspotId mapping.
+    useCase.crmBatchClient.batchCreateObjects.mockResolvedValue({
+      results: [{ id: 'hs-mystery', properties: {} }],
+      numErrors: 1,
+      errors: [{ status: 'error', message: 'Property values were not valid' }],
+    });
+    const params = baseParams();
+    const mappedItems = [
+      { properties: { email: 'a@x.com', idsap: 'C001' }, rawSapData: {} },
+      { properties: { email: 'b@x.com', idsap: 'C002' }, rawSapData: {} },
+    ];
+
+    const result = await useCase.execute({ mappedItems, ...params });
+
+    // Neither item can be matched, so no registry mapping is written at all --
+    // an unmapped record is recoverable, a mapping pointing at the wrong SAP id
+    // is not.
+    expect(useCase.associationRegistry.registerBaseObjectMappings).not.toHaveBeenCalled();
+    // HubSpot really did create one record (we just cannot attribute it), and
+    // the rejected input is counted as failed.
+    expect(result).toMatchObject({ sent: 1, created: 1, failed: 1 });
+    expect(result.errors).toHaveLength(1);
+    // Nothing reached `processed`, so no association work is attempted either.
+    expect(useCase.syncCompanyContactsInBatches.execute).not.toHaveBeenCalled();
+  });
+
   it('drops an update chunk from processed before its sequential fallback runs', async () => {
     const useCase = buildUseCase();
     useCase.crmBatchClient.batchReadObjectsByProperty.mockResolvedValue({

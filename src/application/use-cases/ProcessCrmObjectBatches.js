@@ -274,10 +274,16 @@ export class ProcessCrmObjectBatches {
             }
           }
 
+          // Positional matching is only sound when every input came back: on a
+          // partial response the results are shifted, so results[index] would
+          // hand an item somebody else's HubSpot id and write a corrupted
+          // sapId -> hubspotId registry mapping.
+          const positionalSafe = failed === 0 && results.length === chunkItems.length;
+
           const mappings = [];
           for (const [index, item] of chunkItems.entries()) {
             const created = resultByKey.get(normalizeKey(item?.properties?.[findProperty]))
-              ?? results[index];
+              ?? (positionalSafe ? results[index] : null);
 
             if (created?.id) {
               processed.push({ item, hubspotId: created.id });
