@@ -215,6 +215,28 @@ describe('ProcessCrmObjectBatches', () => {
     expect(inputs).toHaveLength(1);
   });
 
+  it('creates one record when two SAP rows share only the fallback find property', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.batchCreateObjects.mockResolvedValue({
+      results: [{ id: 'hs-1', properties: { email: 'shared@x.com' } }],
+    });
+    const params = baseParams();
+
+    // No idsap on either row, so index.find() would resolve both through the
+    // email fallback tier -- creating both would duplicate the record.
+    const result = await useCase.execute({
+      mappedItems: [
+        { properties: { email: 'shared@x.com', name: 'A' }, rawSapData: {} },
+        { properties: { email: 'shared@x.com', name: 'B' }, rawSapData: {} },
+      ],
+      ...params,
+    });
+
+    const inputs = useCase.crmBatchClient.batchCreateObjects.mock.calls[0][2].inputs;
+    expect(inputs).toHaveLength(1);
+    expect(result).toMatchObject({ sent: 2, skipped: 1 });
+  });
+
   it('strips properties the portal does not accept before sending', async () => {
     const useCase = buildUseCase();
     useCase.crmBatchClient.listWritablePropertyNames.mockResolvedValue(new Set(['idsap', 'email', 'name']));

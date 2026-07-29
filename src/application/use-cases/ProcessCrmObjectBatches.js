@@ -205,22 +205,22 @@ export class ProcessCrmObjectBatches {
     // sapId -> hubspotId for every item that ends the run with a HubSpot id;
     // feeds the association phase.
     const processed = [];
-    // Two SAP rows carrying the same identity must not create two records.
-    const claimedIdentities = new Set();
+    // Two SAP rows that resolve to the same record must not create two records.
+    const claimedKeys = new Set();
 
     for (const item of syncable) {
       const existing = index.find(item?.properties);
 
       if (!existing) {
-        const identity = normalizeIndexKey(item?.properties?.[this.identityProperty]);
+        const claimKey = this.dedupeKey(item?.properties, fallbackProperty);
 
-        if (identity && claimedIdentities.has(identity)) {
+        if (claimKey && claimedKeys.has(claimKey)) {
           stats.sent += 1;
           stats.skipped += 1;
           continue;
         }
-        if (identity) {
-          claimedIdentities.add(identity);
+        if (claimKey) {
+          claimedKeys.add(claimKey);
         }
 
         createEntries.push({ item });
@@ -411,6 +411,23 @@ export class ProcessCrmObjectBatches {
 
   writeChunkSize(clientConfig) {
     return writeChunkSize(clientConfig);
+  }
+
+  // Dedupe on the same value index.find() matches on, otherwise two rows that
+  // resolve to the same record through the fallback tier would both be created.
+  // Null means nothing can ever match this row, so it is always created.
+  dedupeKey(properties, fallbackProperty) {
+    const identity = normalizeIndexKey(properties?.[this.identityProperty]);
+    if (identity) {
+      return `${this.identityProperty}:${identity}`;
+    }
+    if (fallbackProperty && fallbackProperty !== this.identityProperty) {
+      const fallback = normalizeIndexKey(properties?.[fallbackProperty]);
+      if (fallback) {
+        return `${fallbackProperty}:${fallback}`;
+      }
+    }
+    return null;
   }
 
   // One sweep of the whole object type, indexed in memory. This is what makes
