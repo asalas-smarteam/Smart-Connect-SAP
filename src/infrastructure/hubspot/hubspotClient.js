@@ -231,6 +231,114 @@ export async function batchReadProductsBySku(token, skus, properties = []) {
   );
 }
 
+const CRM_BATCH_COLLECTIONS = {
+  company: 'companies',
+  contact: 'contacts',
+};
+
+function crmCollection(objectType) {
+  const collection = CRM_BATCH_COLLECTIONS[objectType];
+  if (!collection) {
+    throw new Error(`Unsupported CRM batch object type: ${objectType}`);
+  }
+  return collection;
+}
+
+// Reads up to 100 companies/contacts keyed by a unique-value property (e.g. email
+// for contacts, or a custom unique property like idsap). Missing values come back
+// in `errors` (207 Multi-Status), not as a request failure — callers treat absence
+// from `results` as "does not exist". Throws 400 when idProperty is not unique,
+// which callers use to fall back to the Search API.
+export async function batchReadObjectsByProperty(token, objectType, { idProperty, values, properties = [] }) {
+  return hubspotRequest(
+    'post',
+    `/crm/v3/objects/${crmCollection(objectType)}/batch/read`,
+    token,
+    {
+      idProperty,
+      inputs: values.map((value) => ({ id: String(value) })),
+      ...(Array.isArray(properties) && properties.length > 0 ? { properties } : {}),
+    },
+  );
+}
+
+export async function batchCreateObjects(token, objectType, data) {
+  return hubspotRequest(
+    'post',
+    `/crm/v3/objects/${crmCollection(objectType)}/batch/create`,
+    token,
+    data,
+  );
+}
+
+export async function batchUpdateObjects(token, objectType, data) {
+  data?.inputs?.forEach((item) => {
+    delete item?.properties?.hs_object_id;
+  });
+
+  return hubspotRequest(
+    'post',
+    `/crm/v3/objects/${crmCollection(objectType)}/batch/update`,
+    token,
+    data,
+  );
+}
+
+// Search fallback when the tenant's find property is not unique-flagged in
+// HubSpot (batch/read rejects it). One IN-filter search per <=100 values,
+// paginated. Search is rate-limited (~4 req/s) so callers use narrow waves.
+export async function searchObjectsByPropertyIn(token, objectType, propertyName, values, properties = []) {
+  const results = [];
+  let after;
+
+  do {
+    const payload = {
+      filterGroups: [
+        {
+          filters: [
+            {
+              propertyName,
+              operator: 'IN',
+              values: values.map((value) => String(value)),
+            },
+          ],
+        },
+      ],
+      limit: 100,
+      ...(after ? { after } : {}),
+      ...(Array.isArray(properties) && properties.length > 0 ? { properties } : {}),
+    };
+
+    // eslint-disable-next-line no-await-in-loop
+    const response = await hubspotRequest(
+      'post',
+      `/crm/v3/objects/${crmCollection(objectType)}/search`,
+      token,
+      payload,
+    );
+
+    results.push(...(response?.results ?? []));
+    after = response?.paging?.next?.after;
+  } while (after);
+
+  return results;
+}
+
+// Creates default-typed associations for up to 100 pairs per call.
+export async function batchAssociateDefault(token, fromObjectType, toObjectType, pairs) {
+  return hubspotRequest(
+    'post',
+    `/crm/v4/associations/${fromObjectType}/${toObjectType}/batch/associate/default`,
+    token,
+    {
+      inputs: pairs.map(({ fromId, toId }) => ({
+        from: { id: String(fromId) },
+        to: { id: String(toId) },
+      })),
+    },
+  );
+}
+
 export async function batchCreate(token, dataArray) {
   return hubspotRequest(
     'post',
