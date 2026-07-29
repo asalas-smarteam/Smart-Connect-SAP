@@ -11,7 +11,7 @@ jest.unstable_mockModule('../../src/infrastructure/hubspot/hubspotClient.js', ()
   createCompany: jest.fn(),
 }));
 
-const { find, update } = await import('../../src/infrastructure/hubspot/handlers/company.handler.js');
+const { find, update, buildBatchUpdateEntry } = await import('../../src/infrastructure/hubspot/handlers/company.handler.js');
 
 describe('company.handler', () => {
   beforeEach(() => {
@@ -130,5 +130,28 @@ describe('company.handler', () => {
 
     expect(result).toBe(existing);
     expect(mockUpdateCompany).not.toHaveBeenCalled();
+  });
+});
+
+describe('company.handler buildBatchUpdateEntry', () => {
+  it('returns null when the identifier-only payload is empty', () => {
+    expect(buildBatchUpdateEntry({
+      existing: { id: 'hs-1', properties: { name: 'Acme' } },
+      item: { properties: { name: 'Acme' } },
+    })).toBeNull();
+  });
+
+  it('returns null when key fields are unchanged', () => {
+    expect(buildBatchUpdateEntry({
+      existing: { id: 'hs-1', properties: { name: 'Acme', phone: '1', idsap: 'C001' } },
+      item: { properties: { name: 'Acme', phone: '1', idsap: 'C001' } },
+    })).toBeNull();
+  });
+
+  it('returns an id + identifier payload when key fields changed', () => {
+    expect(buildBatchUpdateEntry({
+      existing: { id: 'hs-1', properties: { name: 'Old', idsap: 'C001' } },
+      item: { properties: { name: 'New', idsap: 'C001' } },
+    })).toEqual({ id: 'hs-1', properties: { idsap: 'C001' } });
   });
 });

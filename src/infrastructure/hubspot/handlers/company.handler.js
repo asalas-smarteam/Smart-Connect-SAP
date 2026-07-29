@@ -68,8 +68,43 @@ export async function update({ token, id, item, existing }) {
   return hubspotClient.updateCompany(token, id, payload);
 }
 
+export async function getSearchProperties({ clientConfig, tenantModels }) {
+  return buildMappedSearchProperties({
+    tenantModels,
+    clientConfig,
+    objectType: 'company',
+    defaults: COMPANY_SEARCH_PROPERTIES,
+  });
+}
+
+// Batch analogue of update(): null means "skip". Same identifier-only payload
+// and key-field gate, but returns the input for a batch/update call instead of
+// performing the PATCH.
+export function buildBatchUpdateEntry({ existing, item }) {
+  const properties = item?.properties ?? {};
+  const payload = buildIdentifierOnlyPayload(properties);
+
+  if (!payload || !existing?.id) {
+    return null;
+  }
+
+  if (
+    !shouldUpdateByKeyFields({
+      existingProperties: existing?.properties,
+      incomingProperties: properties,
+      nameField: 'name',
+    })
+  ) {
+    return null;
+  }
+
+  return { id: existing.id, properties: payload.properties };
+}
+
 export default {
   find,
   create,
   update,
+  getSearchProperties,
+  buildBatchUpdateEntry,
 };

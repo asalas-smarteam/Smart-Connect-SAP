@@ -6,14 +6,21 @@ function hasSearchValue(value) {
   return value !== undefined && value !== null && value !== '';
 }
 
-export async function buildConfiguredSearchCriteria({
-  item,
+export async function getConfiguredFindProperty({
   tenantModels,
   fallbackPropertyName = 'email',
 }) {
   const configuredPropertyName = await defaultFindHubspotConfigRepository
     .getDefaultFindHubspotProperty({ tenantModels });
-  const propertyName = configuredPropertyName || fallbackPropertyName;
+  return configuredPropertyName || fallbackPropertyName;
+}
+
+export async function buildConfiguredSearchCriteria({
+  item,
+  tenantModels,
+  fallbackPropertyName = 'email',
+}) {
+  const propertyName = await getConfiguredFindProperty({ tenantModels, fallbackPropertyName });
   const value = item?.properties?.[propertyName];
 
   if (!hasSearchValue(value)) {
@@ -28,4 +35,5 @@ export async function buildConfiguredSearchCriteria({
 
 export default {
   buildConfiguredSearchCriteria,
+  getConfiguredFindProperty,
 };

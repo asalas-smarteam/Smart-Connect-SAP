@@ -11,7 +11,7 @@ jest.unstable_mockModule('../../src/infrastructure/hubspot/hubspotClient.js', ()
   createContact: jest.fn(),
 }));
 
-const { find, update } = await import('../../src/infrastructure/hubspot/handlers/contact.handler.js');
+const { find, update, buildBatchUpdateEntry } = await import('../../src/infrastructure/hubspot/handlers/contact.handler.js');
 
 describe('contact.handler', () => {
   beforeEach(() => {
@@ -159,5 +159,21 @@ describe('contact.handler', () => {
         internalcode: '20',
       },
     });
+  });
+});
+
+describe('contact.handler buildBatchUpdateEntry', () => {
+  it('returns null when key fields are unchanged', () => {
+    expect(buildBatchUpdateEntry({
+      existing: { id: 'hs-9', properties: { firstname: 'Ana', phone: '1', idsap: 'P001' } },
+      item: { properties: { firstname: 'Ana', phone: '1', idsap: 'P001' } },
+    })).toBeNull();
+  });
+
+  it('returns an id + identifier payload when key fields changed', () => {
+    expect(buildBatchUpdateEntry({
+      existing: { id: 'hs-9', properties: { firstname: 'Old', idsap: 'P001' } },
+      item: { properties: { firstname: 'New', idsap: 'P001', internalcode: 'IC-1' } },
+    })).toEqual({ id: 'hs-9', properties: { idsap: 'P001', internalcode: 'IC-1' } });
   });
 });
