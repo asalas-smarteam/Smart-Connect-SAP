@@ -456,6 +456,35 @@ describe('SendMappedItemsToHubspot product batch sync via batch read', () => {
     }
     expect(result).toEqual(expect.objectContaining({ sent: 60, created: 60 }));
   });
+
+  it('does not pair a created product with another product by position', async () => {
+    const sapHubspotIdUpdater = {
+      updateHubspotIdInSap: jest.fn().mockResolvedValue(null),
+      updateBusinessPartnerInSapFromHubspot: jest.fn().mockResolvedValue(null),
+    };
+    const associationRegistry = { registerBaseObjectMapping: jest.fn().mockResolvedValue(null) };
+    const useCase = buildUseCase({ sapHubspotIdUpdater, associationRegistry });
+
+    await useCase.finalizeCreatedProductBatch({
+      // Response carries no hs_sku for the second entry: it must not be
+      // attributed to createdItems[1].
+      createdResults: [
+        { id: 'hs-2', properties: { hs_sku: 'SKU-2' } },
+        { id: 'hs-x', properties: {} },
+      ],
+      createdItems: [
+        { properties: { hs_sku: 'SKU-1', idsap: 'P1' } },
+        { properties: { hs_sku: 'SKU-2', idsap: 'P2' } },
+      ],
+      clientConfig: { hubspotCredentialId: 'cred-1' },
+      tenantModels: {},
+    });
+
+    expect(sapHubspotIdUpdater.updateHubspotIdInSap).toHaveBeenCalledTimes(1);
+    expect(sapHubspotIdUpdater.updateHubspotIdInSap).toHaveBeenCalledWith(
+      expect.objectContaining({ hubspotId: 'hs-2', sapRecord: { hs_sku: 'SKU-2', idsap: 'P2' } })
+    );
+  });
 });
 
 describe('SendMappedItemsToHubspot contact error reporting', () => {

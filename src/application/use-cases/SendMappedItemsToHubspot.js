@@ -484,10 +484,15 @@ export class SendMappedItemsToHubspot {
         .filter(([sku]) => sku)
     );
 
-    for (const [index, created] of createdResults.entries()) {
-      const item = itemsBySku.get(created?.properties?.hs_sku) ?? createdItems[index];
+    for (const created of createdResults) {
+      // HubSpot does not preserve input order in batch/create responses, so
+      // hs_sku echoed in the result is the only sound way to attribute an id.
+      const item = itemsBySku.get(created?.properties?.hs_sku);
 
       if (!item || !created?.id) {
+        this.logger?.warn?.('Batch create: product result without a matching hs_sku', {
+          hubspotId: created?.id ?? null,
+        });
         continue;
       }
 
