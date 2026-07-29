@@ -59,9 +59,6 @@ export const DEFAULT_INVOICE_MAPPINGS = [
 // Field names and navigation paths validated against a live Gateway. The
 // mapping layer resolves dotted paths and steps into arrays automatically
 // (see resolveValueByPath), so nested contact data works without flattening.
-//
-// All S/4 customers carry the organization category, so these tenants are
-// B2B: only the company object is synced and no contact defaults are seeded.
 const DEFAULT_S4_COMPANY_MAPPINGS = [
   { sourceField: 'BusinessPartner', targetField: 'idsap', sourceContext: 'businessPartner' },
   { sourceField: 'BusinessPartnerFullName', targetField: 'name', sourceContext: 'businessPartner' },
@@ -77,6 +74,21 @@ const DEFAULT_S4_PRODUCT_MAPPINGS = [
   { sourceField: 'Product', targetField: 'hs_sku', sourceContext: 'product' },
   { sourceField: 'to_Description.ProductDescription', targetField: 'name', sourceContext: 'product' },
   { sourceField: 'BaseUnit', targetField: 'unidad_medida', sourceContext: 'product', includeInServiceLayerSelect: true },
+];
+
+// S/4 contacts are the person-BP (BusinessPartnerCategory '1') reached from a
+// company through to_BusinessPartnerContact. Unlike B1 (ContactEmployees
+// embedded in the BusinessPartner), the person's name/email/phone live in its
+// own A_BusinessPartner record. These mappings target that person-BP shape and
+// are seeded under the tenant's own 'contact' ClientConfig. NOTE: the runtime
+// extraction (relationship -> person join -> HubSpot association) is not yet
+// implemented; this only seeds the structure so S/4 tenants are complete.
+const DEFAULT_S4_CONTACT_MAPPINGS = [
+  { sourceField: 'BusinessPartner', targetField: 'idsap', sourceContext: 'contactEmployee' },
+  { sourceField: 'FirstName', targetField: 'firstname', sourceContext: 'contactEmployee' },
+  { sourceField: 'LastName', targetField: 'lastname', sourceContext: 'contactEmployee' },
+  { sourceField: 'to_BusinessPartnerAddress.to_EmailAddress.EmailAddress', targetField: 'email', sourceContext: 'contactEmployee' },
+  { sourceField: 'to_BusinessPartnerAddress.to_PhoneNumber.PhoneNumber', targetField: 'phone', sourceContext: 'contactEmployee' },
 ];
 
 async function ensureDefaultMappings({
@@ -156,10 +168,27 @@ export async function ensureDefaultContactEmployeeMappings({
   clientConfig,
   sapFlavor = DEFAULT_SAP_FLAVOR,
 }) {
-  // S/4 tenants are B2B: every customer is an organization, and contact
-  // persons live behind to_BusinessPartnerContact rather than in the same
-  // fetch. No contact defaults are seeded until that flow is defined.
-  if (clientConfig?.objectType !== 'company' || sapFlavor === SAP_FLAVORS.S4) {
+  // Contact defaults live under different ClientConfigs per flavor:
+  //  - B1: seeded under the 'company' config, because the company sync is what
+  //    iterates the embedded ContactEmployees at association time.
+  //  - S/4: seeded under the tenant's own 'contact' config, because contacts
+  //    are separate person-BPs reached via to_BusinessPartnerContact.
+  if (sapFlavor === SAP_FLAVORS.S4) {
+    if (clientConfig?.objectType !== 'contact') {
+      return;
+    }
+
+    await ensureDefaultMappings({
+      FieldMapping,
+      clientConfig,
+      mappings: DEFAULT_S4_CONTACT_MAPPINGS,
+      objectType: 'contact',
+      sourceContext: 'contactEmployee',
+    });
+    return;
+  }
+
+  if (clientConfig?.objectType !== 'company') {
     return;
   }
 

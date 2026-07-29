@@ -52,9 +52,10 @@ const BASE_MASTER_CLIENT_CONFIGS = [
     sapFlavor: SAP_FLAVORS.B1,
   },
   // --- SAP S/4HANA -------------------------------------------------------
-  // Entity paths are the Gateway service + entity set. All customers in S/4
-  // carry the organization category, so contacts are not seeded: B2B tenants
-  // sync companies only (see Obtener Empresas below).
+  // Entity paths are the Gateway service + entity set. Contacts are the
+  // person-BPs reached via to_BusinessPartnerContact; the structure is seeded
+  // for every S/4 tenant (even B2B ones like Multiquimica that won't use it),
+  // but the runtime extraction is not yet implemented.
   {
     clientName: 'Obtener Productos S4',
     objectType: 'product',
@@ -63,6 +64,18 @@ const BASE_MASTER_CLIENT_CONFIGS = [
     intervalMinutes: null,
     serviceLayerPath: '/API_PRODUCT_SRV/A_Product',
     hubspotBatchSize: 100,
+    active: false,
+    syncInTenant: true,
+    sapFlavor: SAP_FLAVORS.S4,
+  },
+  {
+    clientName: 'Obtener contactos S4',
+    objectType: 'contact',
+    mode: 'FULL',
+    executionTime: '02:00',
+    intervalMinutes: null,
+    serviceLayerPath: '/API_BUSINESS_PARTNER/A_BusinessPartner',
+    hubspotBatchSize: 1,
     active: false,
     syncInTenant: true,
     sapFlavor: SAP_FLAVORS.S4,

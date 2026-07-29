@@ -38,6 +38,7 @@ function buildFieldMapping() {
 const companyConfig = { _id: 'c1', hubspotCredentialId: 'cred-1', objectType: 'company' };
 const productConfig = { _id: 'c2', hubspotCredentialId: 'cred-1', objectType: 'product' };
 const dealConfig = { _id: 'c3', hubspotCredentialId: 'cred-1', objectType: 'deal' };
+const contactConfig = { _id: 'c4', hubspotCredentialId: 'cred-1', objectType: 'contact' };
 
 describe('default mappings by SAP flavor', () => {
   describe('B1 (unchanged behavior)', () => {
@@ -91,7 +92,30 @@ describe('default mappings by SAP flavor', () => {
       expect(FieldMapping.rows.every((row) => row.objectType === 'company')).toBe(true);
     });
 
-    it('does not seed contact mappings for S/4 (B2B only)', async () => {
+    it('seeds S/4 contact mappings under the contact config (person-BP shape)', async () => {
+      const FieldMapping = buildFieldMapping();
+
+      await ensureDefaultContactEmployeeMappings({
+        FieldMapping,
+        clientConfig: contactConfig,
+        sapFlavor: 'S4',
+      });
+
+      const byTarget = Object.fromEntries(
+        FieldMapping.rows.map((row) => [row.targetField, row.sourceField])
+      );
+      expect(byTarget).toEqual({
+        idsap: 'BusinessPartner',
+        firstname: 'FirstName',
+        lastname: 'LastName',
+        email: 'to_BusinessPartnerAddress.to_EmailAddress.EmailAddress',
+        phone: 'to_BusinessPartnerAddress.to_PhoneNumber.PhoneNumber',
+      });
+      expect(FieldMapping.rows.every((row) => row.objectType === 'contact')).toBe(true);
+      expect(FieldMapping.rows.every((row) => row.sourceContext === 'contactEmployee')).toBe(true);
+    });
+
+    it('does not seed S/4 contact mappings under a company config', async () => {
       const FieldMapping = buildFieldMapping();
 
       await ensureDefaultContactEmployeeMappings({
@@ -132,6 +156,17 @@ describe('default mappings by SAP flavor', () => {
     });
   });
 
+  it('B1 does not seed contact mappings under a contact config (unchanged)', async () => {
+    const FieldMapping = buildFieldMapping();
+
+    await ensureDefaultContactEmployeeMappings({
+      FieldMapping,
+      clientConfig: contactConfig,
+    });
+
+    expect(FieldMapping.rows).toHaveLength(0);
+  });
+
   it('no flavor collides with the unique index', async () => {
     for (const sapFlavor of ['B1', 'S4']) {
       const FieldMapping = buildFieldMapping();
@@ -139,6 +174,11 @@ describe('default mappings by SAP flavor', () => {
         ensureDefaultCompanyEmployeeMappings({ FieldMapping, clientConfig: companyConfig, sapFlavor }),
         ensureDefaultContactEmployeeMappings({ FieldMapping, clientConfig: companyConfig, sapFlavor }),
       ])).resolves.not.toThrow();
+
+      const contactMapping = buildFieldMapping();
+      await expect(
+        ensureDefaultContactEmployeeMappings({ FieldMapping: contactMapping, clientConfig: contactConfig, sapFlavor })
+      ).resolves.not.toThrow();
 
       const productMapping = buildFieldMapping();
       await expect(

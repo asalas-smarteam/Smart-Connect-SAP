@@ -23,12 +23,18 @@ export async function resolveBypassEmail({
   }
 }
 
+export const MISSING_EMAIL_BYPASSED_MESSAGE =
+  'Missing business partner email bypassed before HubSpot sync';
+export const INVALID_EMAIL_BYPASSED_MESSAGE =
+  'Invalid business partner email removed before HubSpot sync';
+
 export function applyBypassEmail({
   objectType,
   item,
   bypassEmail,
   logger = console,
   sapId = item?.properties?.idsap ?? null,
+  onWarning = null,
 }) {
   if (!bypassEmail || !EMAIL_BYPASS_OBJECT_TYPES.has(objectType)) {
     return false;
@@ -44,9 +50,15 @@ export function applyBypassEmail({
   if (!email) {
     item.properties.email = '';
     logger?.warn?.({
-      msg: 'Missing business partner email bypassed before HubSpot sync',
+      msg: MISSING_EMAIL_BYPASSED_MESSAGE,
       objectType,
       sapId,
+    });
+    onWarning?.({
+      code: 'missingEmailBypassed',
+      objectType,
+      sapId,
+      message: MISSING_EMAIL_BYPASSED_MESSAGE,
     });
     return true;
   }
@@ -57,9 +69,16 @@ export function applyBypassEmail({
 
   item.properties.email = '';
   logger?.warn?.({
-    msg: 'Invalid business partner email removed before HubSpot sync',
+    msg: INVALID_EMAIL_BYPASSED_MESSAGE,
     objectType,
     sapId,
+    email,
+  });
+  onWarning?.({
+    code: 'invalidEmailBypassed',
+    objectType,
+    sapId,
+    message: INVALID_EMAIL_BYPASSED_MESSAGE,
     email,
   });
   return true;

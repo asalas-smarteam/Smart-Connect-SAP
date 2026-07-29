@@ -25,6 +25,7 @@ describe('HubspotSyncAdapter', () => {
       objectType: 'contact',
       tenantContext,
       credentials,
+      syncLogId: 'sync-log-1',
     });
 
     expect(sendMappedItemsToHubspot.execute).toHaveBeenCalledWith({
@@ -33,6 +34,7 @@ describe('HubspotSyncAdapter', () => {
       objectType: 'contact',
       tenantModels: tenantContext.tenantModels,
       credentials,
+      syncLogId: 'sync-log-1',
     });
     expect(result).toEqual({
       sent: 2,

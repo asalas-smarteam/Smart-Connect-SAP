@@ -3,7 +3,7 @@ export class HubspotSyncAdapter {
     this.sendMappedItemsToHubspot = sendMappedItemsToHubspot;
   }
 
-  async send({ mappedRecords, config, objectType, tenantContext, credentials }) {
+  async send({ mappedRecords, config, objectType, tenantContext, credentials, syncLogId = null }) {
     if (!this.sendMappedItemsToHubspot?.execute) {
       throw new Error('HubSpot sync transport dependency is required');
     }
@@ -14,6 +14,7 @@ export class HubspotSyncAdapter {
       objectType,
       tenantModels: tenantContext?.tenantModels,
       credentials,
+      syncLogId,
     });
 
     return {
