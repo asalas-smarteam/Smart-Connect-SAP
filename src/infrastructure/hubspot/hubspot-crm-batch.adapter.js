@@ -2,18 +2,18 @@ import {
   associateObjects,
   batchAssociateDefault,
   batchCreateObjects,
-  batchReadObjectsByProperty,
   batchUpdateObjects,
-  searchObjectsByPropertyIn,
+  listAllObjects,
+  listWritablePropertyNames,
 } from './hubspotClient.js';
 
 export const hubspotCrmBatchAdapter = Object.freeze({
   associateObjects,
   batchAssociateDefault,
   batchCreateObjects,
-  batchReadObjectsByProperty,
   batchUpdateObjects,
-  searchObjectsByPropertyIn,
+  listAllObjects,
+  listWritablePropertyNames,
 });
 
 export default hubspotCrmBatchAdapter;

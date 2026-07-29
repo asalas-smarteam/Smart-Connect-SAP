@@ -244,21 +244,44 @@ function crmCollection(objectType) {
   return collection;
 }
 
-// Reads up to 100 companies/contacts keyed by a unique-value property (e.g. email
-// for contacts, or a custom unique property like idsap). Missing values come back
-// in `errors` (207 Multi-Status), not as a request failure — callers treat absence
-// from `results` as "does not exist". Throws 400 when idProperty is not unique,
-// which callers use to fall back to the Search API.
-export async function batchReadObjectsByProperty(token, objectType, { idProperty, values, properties = [] }) {
-  return hubspotRequest(
-    'post',
-    `/crm/v3/objects/${crmCollection(objectType)}/batch/read`,
-    token,
-    {
-      idProperty,
-      inputs: values.map((value) => ({ id: String(value) })),
-      ...(Array.isArray(properties) && properties.length > 0 ? { properties } : {}),
-    },
+// Loads every record of an object type, 100 per page, following the cursor.
+// This is the authoritative read: unlike the Search API it hits the CRM
+// directly, so records created moments earlier are already visible, and
+// unlike batch/read with idProperty it works with non-unique properties.
+export async function listAllObjects(token, objectType, properties = [], { pageLimit = 100, maxPages = 2000 } = {}) {
+  const collection = crmCollection(objectType);
+  const records = [];
+  let after;
+  let pages = 0;
+
+  do {
+    // eslint-disable-next-line no-await-in-loop
+    const response = await hubspotGet(token, `/crm/v3/objects/${collection}`, {
+      limit: pageLimit,
+      ...(Array.isArray(properties) && properties.length > 0 ? { properties: properties.join(',') } : {}),
+      ...(after ? { after } : {}),
+    });
+
+    records.push(...(response?.results ?? []));
+    after = response?.paging?.next?.after;
+    pages += 1;
+  } while (after && pages < maxPages);
+
+  return records;
+}
+
+// Writable property names for an object type. A single unknown or read-only
+// property makes HubSpot reject an entire 100-record batch with 400
+// PROPERTY_DOESNT_EXIST, so payloads are filtered against this set.
+export async function listWritablePropertyNames(token, objectType) {
+  const collection = crmCollection(objectType);
+  const response = await hubspotGet(token, `/crm/v3/properties/${collection}`);
+
+  return new Set(
+    (response?.results ?? [])
+      .filter((property) => property?.modificationMetadata?.readOnlyValue !== true)
+      .map((property) => property?.name)
+      .filter(Boolean)
   );
 }
 
@@ -282,46 +305,6 @@ export async function batchUpdateObjects(token, objectType, data) {
     token,
     data,
   );
-}
-
-// Search fallback when the tenant's find property is not unique-flagged in
-// HubSpot (batch/read rejects it). One IN-filter search per <=100 values,
-// paginated. Search is rate-limited (~4 req/s) so callers use narrow waves.
-export async function searchObjectsByPropertyIn(token, objectType, propertyName, values, properties = []) {
-  const results = [];
-  let after;
-
-  do {
-    const payload = {
-      filterGroups: [
-        {
-          filters: [
-            {
-              propertyName,
-              operator: 'IN',
-              values: values.map((value) => String(value)),
-            },
-          ],
-        },
-      ],
-      limit: 100,
-      ...(after ? { after } : {}),
-      ...(Array.isArray(properties) && properties.length > 0 ? { properties } : {}),
-    };
-
-    // eslint-disable-next-line no-await-in-loop
-    const response = await hubspotRequest(
-      'post',
-      `/crm/v3/objects/${crmCollection(objectType)}/search`,
-      token,
-      payload,
-    );
-
-    results.push(...(response?.results ?? []));
-    after = response?.paging?.next?.after;
-  } while (after);
-
-  return results;
 }
 
 // Creates default-typed associations for up to 100 pairs per call.
