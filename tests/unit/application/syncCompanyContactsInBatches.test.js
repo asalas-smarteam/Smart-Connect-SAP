@@ -202,6 +202,41 @@ describe('SyncCompanyContactsInBatches', () => {
     expect(useCase.crmBatchClient.batchCreateObjects).not.toHaveBeenCalled();
   });
 
+  it('refuses to create when the portal cannot write the identity property', async () => {
+    const useCase = buildUseCase();
+    // internalcode absent from the allow-list: sanitizeProperties would strip it
+    // from every input, HubSpot would echo nothing back to match on, and the
+    // next run would find none of them and re-create the whole contact base.
+    useCase.crmBatchClient.listWritablePropertyNames.mockResolvedValue(new Set(['email', 'firstname']));
+
+    const companies = [{
+      hubspotId: 'hs-co-1',
+      item: { properties: {}, rawSapData: { CardCode: 'C1', ContactEmployees: [{ InternalCode: 1, E_Mail: 'a@x.com' }] } },
+    }];
+
+    const { contactErrors } = await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
+
+    expect(contactErrors).toHaveLength(1);
+    expect(useCase.crmBatchClient.batchCreateObjects).not.toHaveBeenCalled();
+    expect(useCase.crmBatchClient.batchUpdateObjects).not.toHaveBeenCalled();
+    expect(useCase.contactHandler.create).not.toHaveBeenCalled();
+  });
+
+  it('keeps syncing when the allow-list is null, which means the lookup soft-failed', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.listWritablePropertyNames.mockResolvedValue(null);
+
+    const companies = [{
+      hubspotId: 'hs-co-1',
+      item: { properties: {}, rawSapData: { CardCode: 'C1', ContactEmployees: [{ InternalCode: 1, E_Mail: 'a@x.com' }] } },
+    }];
+
+    const { contactErrors } = await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
+
+    expect(contactErrors).toEqual([]);
+    expect(useCase.crmBatchClient.batchCreateObjects).toHaveBeenCalledTimes(1);
+  });
+
   it('identifies child contacts by internalcode, not by the tenant find property', async () => {
     const useCase = buildUseCase();
     useCase.findPropertyResolver.mockResolvedValue('email');

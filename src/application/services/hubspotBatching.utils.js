@@ -2,8 +2,6 @@
 export const HUBSPOT_BATCH_INPUT_LIMIT = 100;
 // Concurrent batch calls per wave. 4 keeps us well under HubSpot's ~190 requests/10s limit.
 export const BATCH_CONCURRENCY = 4;
-// The Search API is limited to ~4 requests/second, so its fallback waves are narrower.
-export const SEARCH_FALLBACK_CONCURRENCY = 2;
 
 // Per-run write chunk size: honors the tenant's hubspotBatchSize, never above
 // HubSpot's hard 100-input limit. Read chunks always use the full limit.

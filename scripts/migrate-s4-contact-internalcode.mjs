@@ -7,10 +7,18 @@ import { MongoClient } from 'mongodb';
 
 const [, , tenantDb, ...flags] = process.argv;
 const apply = flags.includes('--apply');
-const uri = process.env.MONGODB_URI ?? 'mongodb://localhost:27017';
+const uri = process.env.MONGODB_URI;
 
 if (!tenantDb) {
-  console.error('Usage: node scripts/migrate-s4-contact-internalcode.mjs <tenantDbName> [--apply]');
+  console.error('Usage: node --env-file=.env scripts/migrate-s4-contact-internalcode.mjs <tenantDbName> [--apply]');
+  process.exit(1);
+}
+
+// No localhost default: silently pointing at an empty local Mongo makes even a
+// bare `--apply` report a reassuring "Updated 0 mapping(s)" while the real
+// tenant stays unmigrated.
+if (!uri) {
+  console.error('MONGODB_URI is not set. Run with `node --env-file=.env scripts/migrate-s4-contact-internalcode.mjs <tenantDbName> [--apply]` or export MONGODB_URI.');
   process.exit(1);
 }
 

@@ -2,7 +2,6 @@ import { jest } from '@jest/globals';
 import {
   BATCH_CONCURRENCY,
   HUBSPOT_BATCH_INPUT_LIMIT,
-  SEARCH_FALLBACK_CONCURRENCY,
   chunkArray,
   retryRequest,
   runInWaves,
@@ -14,7 +13,6 @@ describe('hubspotBatching.utils', () => {
   it('exposes the HubSpot batch limits', () => {
     expect(HUBSPOT_BATCH_INPUT_LIMIT).toBe(100);
     expect(BATCH_CONCURRENCY).toBe(4);
-    expect(SEARCH_FALLBACK_CONCURRENCY).toBe(2);
   });
 
   it('chunks arrays preserving order', () => {

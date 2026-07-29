@@ -206,6 +206,21 @@ export class ProcessCrmObjectBatches {
       this.logger.warn?.('ProcessCrmObjectBatches writable property lookup failed, sending unfiltered payloads:', error);
     }
 
+    // If the portal cannot write the identity property (never seeded, archived,
+    // or read-only), sanitizeProperties would strip it from every create input.
+    // HubSpot would then create records carrying no identity, echo nothing to
+    // match back, and the NEXT run would find none of them and create them all
+    // again: the 5,691-duplicate incident, silently. A null allow-list means the
+    // catalog lookup soft-failed, not that the property is missing.
+    if (writableProperties && !writableProperties.has(this.identityProperty)) {
+      this.logger.error?.(
+        `ProcessCrmObjectBatches: identity property "${this.identityProperty}" is not writable in this portal for ${objectType}; refusing to create unmatched records and degrading to the sequential path`
+      );
+      const fallbackResult = await sequentialFallback(syncable);
+      this.mergeStats(stats, fallbackResult);
+      return { ok: true, ...stats };
+    }
+
     const createEntries = [];
     const updateEntries = [];
     const sapModeEntries = [];
@@ -220,14 +235,25 @@ export class ProcessCrmObjectBatches {
 
       if (!existing) {
         const claimKeys = this.dedupeKeys(item?.properties, fallbackProperty);
+        // Only the row's OWN primary tier can absorb it. Two genuinely distinct
+        // SAP customers of one corporate group share a contact email all the
+        // time: rejecting on ANY claimed tier would drop the second one with no
+        // record, no registry row and no child contacts. A row with no identity
+        // of its own has the fallback key as its primary tier, so it still
+        // collapses onto the earlier row. Mirrors SyncCompanyContactsInBatches.
+        const primaryKey = claimKeys[0] ?? null;
 
-        // Rejected if ANY tier is already claimed; otherwise every tier is
-        // claimed, so a later row cannot slip through on the other one.
-        if (claimKeys.some((key) => claimedKeys.has(key))) {
+        if (primaryKey && claimedKeys.has(primaryKey)) {
+          // Never silent: a dropped SAP row has to be traceable in the log.
+          this.logger.warn?.(
+            `ProcessCrmObjectBatches: skipping duplicate ${objectType} row already claimed in this run by ${primaryKey}`
+          );
           stats.sent += 1;
           stats.skipped += 1;
           continue;
         }
+        // ALL tiers are claimed, not just the primary one, so a later row that
+        // carries only the fallback value still collapses onto this one.
         for (const key of claimKeys) {
           claimedKeys.add(key);
         }

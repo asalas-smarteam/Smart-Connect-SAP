@@ -145,6 +145,21 @@ export class SyncCompanyContactsInBatches {
       this.logger.warn?.('Contact writable property lookup failed, sending unfiltered payloads:', propertyError);
     }
 
+    // If the portal cannot write the identity property (never seeded, archived,
+    // or read-only), sanitizeProperties would strip it from every create input.
+    // HubSpot would then create contacts carrying no identity, echo nothing to
+    // match back, and the NEXT run would find none of them and create them all
+    // again -- mass duplication, silently. A null allow-list means the catalog
+    // lookup soft-failed, not that the property is missing.
+    if (writableProperties && !writableProperties.has(this.identityProperty)) {
+      const error = new Error(
+        `Contact identity property "${this.identityProperty}" is not writable in this portal; refusing to create unmatched contacts`
+      );
+      this.logger.error?.('Company contact batch sync error:', error);
+      contactErrors.push(buildContactErrorEntry({ error }));
+      return { contactErrors };
+    }
+
     // Entries resolving to the same contact collapse into one write; every
     // company still gets its association pair and every twin SAP id is still
     // registered. `entry.key` is the group id shared by the collapsed twins.

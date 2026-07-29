@@ -28,7 +28,10 @@ function record(id) {
 
 describe('hubspotClient.listAllObjects', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    // clearAllMocks only clears calls: a persistent mockImplementation (the
+    // infinite-cursor case below) would survive and leak into later tests,
+    // which would then only pass by queue ordering.
+    mockAxios.mockReset();
   });
 
   it('follows the cursor and concatenates every page in order', async () => {

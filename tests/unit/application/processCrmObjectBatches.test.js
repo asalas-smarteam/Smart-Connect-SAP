@@ -259,6 +259,79 @@ describe('ProcessCrmObjectBatches', () => {
     expect(result).toMatchObject({ sent: 2, skipped: 1 });
   });
 
+  it('creates BOTH rows when two distinct idsap values share the fallback email', async () => {
+    const useCase = buildUseCase();
+    const params = baseParams();
+
+    // Two genuinely different SAP customers of one corporate group sharing a
+    // single purchasing mailbox. Rejecting the second on the shared email would
+    // drop it entirely: no record, no registry row, no child contacts.
+    const result = await useCase.execute({
+      mappedItems: [
+        { properties: { idsap: 'C001', email: 'ventas@grupo.com' }, rawSapData: {} },
+        { properties: { idsap: 'C002', email: 'ventas@grupo.com' }, rawSapData: {} },
+      ],
+      ...params,
+    });
+
+    const inputs = useCase.crmBatchClient.batchCreateObjects.mock.calls[0][2].inputs;
+    expect(inputs).toHaveLength(2);
+    expect(inputs.map(({ properties }) => properties.idsap)).toEqual(['C001', 'C002']);
+    expect(result).toMatchObject({ sent: 2, created: 2, skipped: 0 });
+  });
+
+  it('logs a warning for every row dropped by the in-run dedupe', async () => {
+    const useCase = buildUseCase();
+    const params = baseParams();
+
+    await useCase.execute({
+      mappedItems: [
+        { properties: { idsap: 'C001', email: 'a@x.com' }, rawSapData: {} },
+        { properties: { idsap: 'C001', email: 'dupe@x.com' }, rawSapData: {} },
+      ],
+      ...params,
+    });
+
+    // A silently skipped record is indistinguishable from a synced one.
+    expect(useCase.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('idsap:c001')
+    );
+  });
+
+  it('refuses to create when the portal cannot write the identity property', async () => {
+    const useCase = buildUseCase();
+    // idsap absent from the allow-list: sanitizeProperties would strip it from
+    // every input, HubSpot would echo nothing back, and the next run would find
+    // none of them and re-create the whole base.
+    useCase.crmBatchClient.listWritablePropertyNames.mockResolvedValue(new Set(['email', 'name']));
+    const params = baseParams();
+    params.sequentialFallback.mockResolvedValue({ sent: 1, failed: 0, created: 1, updated: 0, errors: [] });
+
+    const result = await useCase.execute({
+      mappedItems: [{ properties: { idsap: 'C001', email: 'a@x.com' }, rawSapData: {} }],
+      ...params,
+    });
+
+    expect(useCase.crmBatchClient.batchCreateObjects).not.toHaveBeenCalled();
+    expect(params.sequentialFallback).toHaveBeenCalledTimes(1);
+    expect(useCase.logger.error).toHaveBeenCalledWith(expect.stringContaining('not writable'));
+    expect(result).toMatchObject({ ok: true, sent: 1, created: 1 });
+  });
+
+  it('still batches when the allow-list is null, which means the lookup soft-failed', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.listWritablePropertyNames.mockResolvedValue(null);
+    const params = baseParams();
+
+    await useCase.execute({
+      mappedItems: [{ properties: { idsap: 'C001', email: 'a@x.com' }, rawSapData: {} }],
+      ...params,
+    });
+
+    expect(params.sequentialFallback).not.toHaveBeenCalled();
+    expect(useCase.crmBatchClient.batchCreateObjects).toHaveBeenCalledTimes(1);
+  });
+
   it('still batches when the writable-property lookup fails', async () => {
     const useCase = buildUseCase();
     useCase.crmBatchClient.listWritablePropertyNames.mockRejectedValue(new Error('properties down'));
