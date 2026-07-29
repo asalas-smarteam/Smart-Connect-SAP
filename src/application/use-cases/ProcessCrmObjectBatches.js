@@ -1,4 +1,8 @@
-import { shouldUpdateSapFromHubspot } from '#domain/sync/main-data-in-update.constants.js';
+import {
+  MAIN_DATA_IN_UPDATE,
+  normalizeMainDataInUpdate,
+  shouldUpdateSapFromHubspot,
+} from '#domain/sync/main-data-in-update.constants.js';
 import { applyBypassEmail } from '#application/services/bypassEmail.service.js';
 import {
   BATCH_CONCURRENCY,
@@ -207,7 +211,7 @@ export class ProcessCrmObjectBatches {
 
       if (shouldUpdateSapFromHubspot({ mainDataInUpdate, objectType })) {
         sapModeEntries.push({ item, existing });
-      } else if (mainDataInUpdate === 'HUBSPOT') {
+      } else if (normalizeMainDataInUpdate(mainDataInUpdate) === MAIN_DATA_IN_UPDATE.HUBSPOT) {
         const updateInput = handler.buildBatchUpdateEntry({ existing, item });
 
         if (updateInput) {
@@ -532,7 +536,9 @@ export class ProcessCrmObjectBatches {
           for (const { fromId, toId } of pairChunk) {
             try {
               const token = await getToken();
-              await this.crmBatchClient.associateObjects(token, fromObjectType, fromId, toObjectType, toId);
+              await this.retry(() =>
+                this.crmBatchClient.associateObjects(token, fromObjectType, fromId, toObjectType, toId)
+              );
             } catch (pairError) {
               this.logger.error?.('Failed to associate objects', {
                 fromObjectType,

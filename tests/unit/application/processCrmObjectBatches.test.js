@@ -202,6 +202,48 @@ describe('ProcessCrmObjectBatches', () => {
     expect(useCase.syncCompanyContactsInBatches.execute).not.toHaveBeenCalled();
   });
 
+  it('retries a 429 in the per-pair association fallback', async () => {
+    const useCase = buildUseCase();
+    useCase.associationRegistry.findHubspotIdsForSapIds.mockResolvedValue(new Map([['C001', 'hs-co-1']]));
+    useCase.crmBatchClient.batchAssociateDefault.mockRejectedValue(new Error('batch associate down'));
+    const rateLimited = new Error('rate limited');
+    rateLimited.response = { status: 429 };
+    useCase.crmBatchClient.associateObjects
+      .mockRejectedValueOnce(rateLimited)
+      .mockResolvedValueOnce({});
+
+    const params = baseParams({ objectType: 'contact' });
+    params.handler = {
+      getSearchProperties: jest.fn().mockResolvedValue(['email', 'idsap']),
+      buildBatchUpdateEntry: jest.fn().mockReturnValue(null),
+    };
+    const mappedItems = [{
+      properties: { email: 'a@x.com', idsap: 'P001', associations: { companies: ['C001'] } },
+      rawSapData: {},
+    }];
+
+    await useCase.execute({ mappedItems, ...params });
+
+    expect(useCase.crmBatchClient.associateObjects).toHaveBeenCalledTimes(2);
+    expect(useCase.sleeper).toHaveBeenCalled();
+  });
+
+  it('batch-updates when mainDataInUpdate arrives in lowercase', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.batchReadObjectsByProperty.mockResolvedValue({
+      results: [{ id: 'hs-1', properties: { email: 'a@x.com', name: 'Old' } }],
+    });
+    const params = baseParams({ mainDataInUpdate: 'hubspot' });
+    params.handler.buildBatchUpdateEntry.mockReturnValue({ id: 'hs-1', properties: { idsap: 'C001' } });
+
+    const mappedItems = [{ properties: { email: 'a@x.com', idsap: 'C001', name: 'New' }, rawSapData: {} }];
+
+    const result = await useCase.execute({ mappedItems, ...params });
+
+    expect(useCase.crmBatchClient.batchUpdateObjects).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ sent: 1, updated: 1, skipped: 0, failed: 0 });
+  });
+
   it('merges contactErrors from the child-contact sync into errors', async () => {
     const useCase = buildUseCase({
       syncCompanyContactsInBatches: {
