@@ -12,14 +12,14 @@ function buildCompanyHandler() {
 function buildUseCase(overrides = {}) {
   return new ProcessCrmObjectBatches({
     crmBatchClient: {
-      batchReadObjectsByProperty: jest.fn().mockResolvedValue({ results: [] }),
+      listAllObjects: jest.fn().mockResolvedValue([]),
+      listWritablePropertyNames: jest.fn().mockResolvedValue(null),
       batchCreateObjects: jest.fn().mockImplementation(async (_t, _o, { inputs }) => ({
         results: inputs.map((input, index) => ({ id: `hs-${index}`, properties: { ...input.properties } })),
       })),
       batchUpdateObjects: jest.fn().mockResolvedValue({ results: [] }),
       batchAssociateDefault: jest.fn().mockResolvedValue({}),
       associateObjects: jest.fn().mockResolvedValue({}),
-      searchObjectsByPropertyIn: jest.fn().mockResolvedValue([]),
     },
     associationRegistry: {
       findHubspotIdsForSapIds: jest.fn().mockResolvedValue(new Map()),
@@ -83,12 +83,10 @@ describe('ProcessCrmObjectBatches', () => {
 
   it('skips unchanged existing records and batch-updates changed ones', async () => {
     const useCase = buildUseCase();
-    useCase.crmBatchClient.batchReadObjectsByProperty.mockResolvedValue({
-      results: [
-        { id: 'hs-1', properties: { email: 'a@x.com', name: 'A' } },
-        { id: 'hs-2', properties: { email: 'b@x.com', name: 'Old' } },
-      ],
-    });
+    useCase.crmBatchClient.listAllObjects.mockResolvedValue([
+      { id: 'hs-1', properties: { email: 'a@x.com', name: 'A' } },
+      { id: 'hs-2', properties: { email: 'b@x.com', name: 'Old' } },
+    ]);
     const params = baseParams();
     params.handler.buildBatchUpdateEntry
       .mockReturnValueOnce(null)
@@ -108,9 +106,9 @@ describe('ProcessCrmObjectBatches', () => {
 
   it('updates SAP sequentially when mainDataInUpdate is SAP', async () => {
     const useCase = buildUseCase();
-    useCase.crmBatchClient.batchReadObjectsByProperty.mockResolvedValue({
-      results: [{ id: 'hs-1', properties: { email: 'a@x.com' } }],
-    });
+    useCase.crmBatchClient.listAllObjects.mockResolvedValue([
+      { id: 'hs-1', properties: { email: 'a@x.com' } },
+    ]);
     const params = baseParams({ mainDataInUpdate: 'SAP' });
     const mappedItems = [{ properties: { email: 'a@x.com', idsap: 'C001' }, rawSapData: {} }];
 
@@ -136,29 +134,115 @@ describe('ProcessCrmObjectBatches', () => {
     expect(useCase.crmBatchClient.batchCreateObjects).not.toHaveBeenCalled();
   });
 
-  it('falls back to search IN when batch read rejects, then to sequential when both fail', async () => {
+  it('matches existing records from the prefetched index without any lookup call', async () => {
     const useCase = buildUseCase();
-    useCase.crmBatchClient.batchReadObjectsByProperty.mockRejectedValue(new Error('idProperty not unique'));
-    useCase.crmBatchClient.searchObjectsByPropertyIn.mockResolvedValue([
-      { id: 'hs-1', properties: { email: 'a@x.com', name: 'A' } },
+    useCase.crmBatchClient.listAllObjects.mockResolvedValue([
+      { id: 'hs-1', properties: { idsap: 'C001', name: 'A' } },
     ]);
     const params = baseParams();
-    const mappedItems = [{ properties: { email: 'a@x.com', idsap: 'C001', name: 'A' }, rawSapData: {} }];
+    params.handler.buildBatchUpdateEntry.mockReturnValue(null);
 
-    const result = await useCase.execute({ mappedItems, ...params });
-    expect(result).toMatchObject({ sent: 1, created: 0 });
-    expect(params.sequentialFallback).not.toHaveBeenCalled();
+    const result = await useCase.execute({
+      mappedItems: [{ properties: { idsap: 'C001', email: 'a@x.com', name: 'A' }, rawSapData: {} }],
+      ...params,
+    });
 
-    // Both read paths fail -> whole run degrades to sequential.
-    const useCase2 = buildUseCase();
-    useCase2.crmBatchClient.batchReadObjectsByProperty.mockRejectedValue(new Error('read down'));
-    useCase2.crmBatchClient.searchObjectsByPropertyIn.mockRejectedValue(new Error('search down'));
-    const params2 = baseParams();
-    params2.sequentialFallback.mockResolvedValue({ sent: 1, failed: 0, created: 1, updated: 0, errors: [] });
+    expect(useCase.crmBatchClient.listAllObjects).toHaveBeenCalledTimes(1);
+    expect(useCase.crmBatchClient.batchCreateObjects).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ sent: 1, created: 0, skipped: 1 });
+  });
 
-    const degraded = await useCase2.execute({ mappedItems, ...params2 });
-    expect(params2.sequentialFallback).toHaveBeenCalledTimes(1);
-    expect(degraded).toMatchObject({ sent: 1, created: 1 });
+  it('falls back to the configured find property when idsap does not match', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.listAllObjects.mockResolvedValue([
+      { id: 'hs-9', properties: { idsap: 'OTRO', email: 'a@x.com' } },
+    ]);
+    const params = baseParams();
+    params.handler.buildBatchUpdateEntry.mockReturnValue({ id: 'hs-9', properties: { idsap: 'C001' } });
+
+    const result = await useCase.execute({
+      mappedItems: [{ properties: { idsap: 'C001', email: 'a@x.com' }, rawSapData: {} }],
+      ...params,
+    });
+
+    expect(useCase.crmBatchClient.batchCreateObjects).not.toHaveBeenCalled();
+    expect(useCase.crmBatchClient.batchUpdateObjects).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ sent: 1, updated: 1, created: 0 });
+  });
+
+  it('matches created records by identity property, never by position', async () => {
+    const useCase = buildUseCase();
+    // HubSpot returns results in a different order than the inputs.
+    useCase.crmBatchClient.batchCreateObjects.mockResolvedValue({
+      results: [
+        { id: 'hs-B', properties: { idsap: 'C002' } },
+        { id: 'hs-A', properties: { idsap: 'C001' } },
+      ],
+    });
+    const params = baseParams();
+
+    await useCase.execute({
+      mappedItems: [
+        { properties: { idsap: 'C001', email: 'a@x.com' }, rawSapData: {} },
+        { properties: { idsap: 'C002', email: 'b@x.com' }, rawSapData: {} },
+      ],
+      ...params,
+    });
+
+    const [, , mappings] = useCase.associationRegistry.registerBaseObjectMappings.mock.calls[0];
+    expect(mappings).toEqual(expect.arrayContaining([
+      { sapId: 'C001', hubspotId: 'hs-A' },
+      { sapId: 'C002', hubspotId: 'hs-B' },
+    ]));
+  });
+
+  it('creates one record when two SAP rows share an identity value', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.batchCreateObjects.mockResolvedValue({
+      results: [{ id: 'hs-1', properties: { idsap: 'C001' } }],
+    });
+    const params = baseParams();
+
+    await useCase.execute({
+      mappedItems: [
+        { properties: { idsap: 'C001', email: 'a@x.com' }, rawSapData: {} },
+        { properties: { idsap: 'C001', email: 'dupe@x.com' }, rawSapData: {} },
+      ],
+      ...params,
+    });
+
+    const inputs = useCase.crmBatchClient.batchCreateObjects.mock.calls[0][2].inputs;
+    expect(inputs).toHaveLength(1);
+  });
+
+  it('strips properties the portal does not accept before sending', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.listWritablePropertyNames.mockResolvedValue(new Set(['idsap', 'email', 'name']));
+    const params = baseParams();
+
+    await useCase.execute({
+      mappedItems: [{ properties: { idsap: 'C001', email: 'a@x.com', propiedad_inventada: 'x', vacia: null }, rawSapData: {} }],
+      ...params,
+    });
+
+    const inputs = useCase.crmBatchClient.batchCreateObjects.mock.calls[0][2].inputs;
+    expect(inputs[0].properties).toEqual({ idsap: 'C001', email: 'a@x.com' });
+  });
+
+  it('degrades the whole run to sequential when the index sweep fails', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.listAllObjects.mockRejectedValue(new Error('list down'));
+    const params = baseParams();
+    params.sequentialFallback.mockResolvedValue({ sent: 1, failed: 0, created: 1, updated: 0, errors: [] });
+
+    const result = await useCase.execute({
+      mappedItems: [{ properties: { idsap: 'C001', email: 'a@x.com' }, rawSapData: {} }],
+      ...params,
+    });
+
+    expect(params.sequentialFallback).toHaveBeenCalledTimes(1);
+    expect(useCase.crmBatchClient.batchCreateObjects).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ sent: 1, created: 1 });
   });
 
   it('falls back to sequential for a failed create chunk only', async () => {
@@ -230,9 +314,9 @@ describe('ProcessCrmObjectBatches', () => {
 
   it('batch-updates when mainDataInUpdate arrives in lowercase', async () => {
     const useCase = buildUseCase();
-    useCase.crmBatchClient.batchReadObjectsByProperty.mockResolvedValue({
-      results: [{ id: 'hs-1', properties: { email: 'a@x.com', name: 'Old' } }],
-    });
+    useCase.crmBatchClient.listAllObjects.mockResolvedValue([
+      { id: 'hs-1', properties: { email: 'a@x.com', name: 'Old' } },
+    ]);
     const params = baseParams({ mainDataInUpdate: 'hubspot' });
     params.handler.buildBatchUpdateEntry.mockReturnValue({ id: 'hs-1', properties: { idsap: 'C001' } });
 
@@ -302,9 +386,9 @@ describe('ProcessCrmObjectBatches', () => {
 
   it('drops an update chunk from processed before its sequential fallback runs', async () => {
     const useCase = buildUseCase();
-    useCase.crmBatchClient.batchReadObjectsByProperty.mockResolvedValue({
-      results: [{ id: 'hs-1', properties: { email: 'a@x.com', name: 'Old' } }],
-    });
+    useCase.crmBatchClient.listAllObjects.mockResolvedValue([
+      { id: 'hs-1', properties: { email: 'a@x.com', name: 'Old' } },
+    ]);
     useCase.crmBatchClient.batchUpdateObjects.mockRejectedValue(new Error('update down'));
     const params = baseParams();
     params.handler.buildBatchUpdateEntry.mockReturnValue({ id: 'hs-1', properties: { idsap: 'C001' } });

@@ -4,10 +4,11 @@ import {
   shouldUpdateSapFromHubspot,
 } from '#domain/sync/main-data-in-update.constants.js';
 import { applyBypassEmail } from '#application/services/bypassEmail.service.js';
+import { CrmObjectIndex, normalizeIndexKey } from '#application/services/crmObjectIndex.service.js';
+import { sanitizeProperties } from '#application/services/hubspotPropertyPayload.service.js';
 import {
   BATCH_CONCURRENCY,
   HUBSPOT_BATCH_INPUT_LIMIT,
-  SEARCH_FALLBACK_CONCURRENCY,
   chunkArray,
   retryRequest,
   runInWaves,
@@ -15,16 +16,12 @@ import {
   writeChunkSize,
 } from '#application/services/hubspotBatching.utils.js';
 
-function normalizeKey(value) {
-  return String(value ?? '').trim().toLowerCase();
-}
-
 function getSapId(item) {
   return item?.properties?.idsap ?? null;
 }
 
-// Batched company/contact flow: batch read (idProperty) -> diff -> batch
-// create/update in waves -> bulk registry -> batch associations. Mirrors
+// Batched company/contact flow: one prefetch sweep indexed in memory -> diff ->
+// batch create/update in waves -> bulk registry -> batch associations. Mirrors
 // SendMappedItemsToHubspot.processProductBatches, including its degraded
 // sequential fallbacks. Flavor-agnostic: B1 and S/4 feed the same mappedItems.
 export class ProcessCrmObjectBatches {
@@ -34,6 +31,7 @@ export class ProcessCrmObjectBatches {
     sapHubspotIdUpdater,
     validationFailureWriter,
     findPropertyResolver,
+    identityProperty = 'idsap',
     fetchFallbackAssociations = null,
     syncCompanyContactsInBatches = null,
     syncWarningRepository = null,
@@ -44,7 +42,10 @@ export class ProcessCrmObjectBatches {
     this.associationRegistry = associationRegistry;
     this.sapHubspotIdUpdater = sapHubspotIdUpdater;
     this.validationFailureWriter = validationFailureWriter;
+    // Fallback resolver: the tenant's configured defaultFindHubspot property,
+    // only consulted when the identity property finds nothing.
     this.findPropertyResolver = findPropertyResolver;
+    this.identityProperty = identityProperty;
     this.fetchFallbackAssociations = fetchFallbackAssociations;
     this.syncCompanyContactsInBatches = syncCompanyContactsInBatches;
     this.syncWarningRepository = syncWarningRepository;
@@ -171,40 +172,57 @@ export class ProcessCrmObjectBatches {
       return { ok: true, ...stats };
     }
 
-    const findProperty = await this.findPropertyResolver({ tenantModels });
-    const withValue = syncable.filter((item) => normalizeKey(item?.properties?.[findProperty]));
-    const withoutValue = syncable.filter((item) => !normalizeKey(item?.properties?.[findProperty]));
+    const fallbackProperty = await this.findPropertyResolver({ tenantModels });
 
-    let existingByKey;
+    let index;
+    let writableProperties = null;
     try {
-      existingByKey = await this.readExisting({
-        items: withValue,
-        findProperty,
+      index = await this.buildIndex({
         objectType,
+        fallbackProperty,
         clientConfig,
         tenantModels,
         handler,
         getToken,
       });
+
+      const token = await getToken();
+      writableProperties = await this.retry(() =>
+        this.crmBatchClient.listWritablePropertyNames(token, objectType)
+      );
     } catch (error) {
-      // Degraded mode: same per-item find/create/update behavior as before batching.
-      this.logger.error?.('ProcessCrmObjectBatches read error:', error);
+      // Without the index we cannot tell creates from updates, and guessing
+      // would duplicate the whole base: fall back to the per-item path.
+      this.logger.error?.('ProcessCrmObjectBatches index error:', error);
       const fallbackResult = await sequentialFallback(syncable);
       this.mergeStats(stats, fallbackResult);
       return { ok: true, ...stats };
     }
 
-    const createEntries = withoutValue.map((item) => ({ item }));
+    const createEntries = [];
     const updateEntries = [];
     const sapModeEntries = [];
     // sapId -> hubspotId for every item that ends the run with a HubSpot id;
     // feeds the association phase.
     const processed = [];
+    // Two SAP rows carrying the same identity must not create two records.
+    const claimedIdentities = new Set();
 
-    for (const item of withValue) {
-      const existing = existingByKey.get(normalizeKey(item.properties[findProperty]));
+    for (const item of syncable) {
+      const existing = index.find(item?.properties);
 
       if (!existing) {
+        const identity = normalizeIndexKey(item?.properties?.[this.identityProperty]);
+
+        if (identity && claimedIdentities.has(identity)) {
+          stats.sent += 1;
+          stats.skipped += 1;
+          continue;
+        }
+        if (identity) {
+          claimedIdentities.add(identity);
+        }
+
         createEntries.push({ item });
         continue;
       }
@@ -260,37 +278,44 @@ export class ProcessCrmObjectBatches {
           const token = await getToken();
           const response = await this.retry(() =>
             this.crmBatchClient.batchCreateObjects(token, objectType, {
-              inputs: chunkItems.map((item) => ({ properties: item.properties })),
+              inputs: chunkItems.map((item) => ({
+                properties: sanitizeProperties(item.properties, writableProperties),
+              })),
             })
           );
 
-          // 207 partial failure: only `results` actually made it into HubSpot.
-          const { results, errors, succeeded, failed } = summarizeBatchResponse(response, chunkItems.length);
-          const resultByKey = new Map();
+          // batch/create echoes every record it actually created, so `results`
+          // alone tells us what went through (a 207 leaves the rest out).
+          const results = Array.isArray(response?.results) ? response.results : [];
+          const batchErrors = Array.isArray(response?.errors) ? response.errors : [];
+          // HubSpot does not preserve input order in batch/create responses,
+          // so the identity property echoed back is the only sound match.
+          const resultByIdentity = new Map();
           for (const result of results) {
-            const key = normalizeKey(result?.properties?.[findProperty]);
-            if (key && !resultByKey.has(key)) {
-              resultByKey.set(key, result);
+            const key = normalizeIndexKey(result?.properties?.[this.identityProperty]);
+            if (key && !resultByIdentity.has(key)) {
+              resultByIdentity.set(key, result);
             }
           }
 
-          // Positional matching is only sound when every input came back: on a
-          // partial response the results are shifted, so results[index] would
-          // hand an item somebody else's HubSpot id and write a corrupted
-          // sapId -> hubspotId registry mapping.
-          const positionalSafe = failed === 0 && results.length === chunkItems.length;
-
           const mappings = [];
-          for (const [index, item] of chunkItems.entries()) {
-            const created = resultByKey.get(normalizeKey(item?.properties?.[findProperty]))
-              ?? (positionalSafe ? results[index] : null);
+          let unmatched = 0;
 
-            if (created?.id) {
-              processed.push({ item, hubspotId: created.id });
-              const sapId = getSapId(item);
-              if (sapId) {
-                mappings.push({ sapId, hubspotId: created.id });
-              }
+          for (const item of chunkItems) {
+            const created = resultByIdentity.get(
+              normalizeIndexKey(item?.properties?.[this.identityProperty])
+            );
+
+            if (!created?.id) {
+              unmatched += 1;
+              continue;
+            }
+
+            index.add(created);
+            processed.push({ item, hubspotId: created.id });
+            const sapId = getSapId(item);
+            if (sapId) {
+              mappings.push({ sapId, hubspotId: created.id });
             }
           }
 
@@ -303,11 +328,15 @@ export class ProcessCrmObjectBatches {
             );
           }
 
+          if (unmatched > 0) {
+            this.logger.warn?.(`Batch create: ${unmatched} record(s) could not be matched back by ${this.identityProperty}`);
+          }
+
           return {
-            sent: succeeded,
-            created: succeeded,
-            failed,
-            errors: errors.map((batchError) => ({
+            sent: results.length,
+            created: results.length,
+            failed: chunkItems.length - results.length,
+            errors: batchErrors.map((batchError) => ({
               payloadHubspot: null,
               responseHubspot: batchError,
             })),
@@ -327,7 +356,10 @@ export class ProcessCrmObjectBatches {
           const token = await getToken();
           const response = await this.retry(() =>
             this.crmBatchClient.batchUpdateObjects(token, objectType, {
-              inputs: entryChunk.map(({ updateInput }) => updateInput),
+              inputs: entryChunk.map(({ updateInput }) => ({
+                id: updateInput.id,
+                properties: sanitizeProperties(updateInput.properties, writableProperties),
+              })),
             })
           );
 
@@ -381,67 +413,30 @@ export class ProcessCrmObjectBatches {
     return writeChunkSize(clientConfig);
   }
 
-  // Batch read keyed by the tenant's configured find property; falls back to
-  // Search IN when the property is not unique-flagged; rethrows when both fail
-  // so the caller can degrade the whole run to the sequential path.
-  async readExisting({ items, findProperty, objectType, clientConfig, tenantModels, handler, getToken }) {
-    const existingByKey = new Map();
-    const values = [...new Set(items.map((item) => String(item.properties[findProperty])))];
-
-    if (values.length === 0) {
-      return existingByKey;
-    }
-
+  // One sweep of the whole object type, indexed in memory. This is what makes
+  // the run fast: every later existence check is a Map lookup instead of an
+  // API call. See the plan's evidence section for why batch/read and Search
+  // cannot do this job.
+  async buildIndex({ objectType, fallbackProperty, clientConfig, tenantModels, handler, getToken }) {
     const searchProperties = await handler.getSearchProperties({ clientConfig, tenantModels });
-    const propertyNames = [...new Set([
-      findProperty,
+    const properties = [...new Set([
+      this.identityProperty,
+      fallbackProperty,
       ...searchProperties,
-      ...items.flatMap((item) => Object.keys(item?.properties ?? {})),
-    ])].filter((name) => name !== 'hs_object_id' && name !== 'associations');
+    ].filter(Boolean))].filter((name) => name !== 'hs_object_id' && name !== 'associations');
 
-    const collect = (results) => {
-      for (const result of results ?? []) {
-        const key = normalizeKey(result?.properties?.[findProperty]);
-        if (key && !existingByKey.has(key)) {
-          existingByKey.set(key, result);
-        }
-      }
-    };
-
-    try {
-      await runInWaves(
-        chunkArray(values, HUBSPOT_BATCH_INPUT_LIMIT),
-        BATCH_CONCURRENCY,
-        async (valueChunk) => {
-          const token = await getToken();
-          const response = await this.retry(() =>
-            this.crmBatchClient.batchReadObjectsByProperty(token, objectType, {
-              idProperty: findProperty,
-              values: valueChunk,
-              properties: propertyNames,
-            })
-          );
-          collect(response?.results);
-        }
-      );
-      return existingByKey;
-    } catch (batchReadError) {
-      this.logger.error?.('CRM batch read failed, falling back to search IN:', batchReadError);
-    }
-
-    existingByKey.clear();
-    await runInWaves(
-      chunkArray(values, HUBSPOT_BATCH_INPUT_LIMIT),
-      SEARCH_FALLBACK_CONCURRENCY,
-      async (valueChunk) => {
-        const token = await getToken();
-        const results = await this.retry(() =>
-          this.crmBatchClient.searchObjectsByPropertyIn(token, objectType, findProperty, valueChunk, propertyNames)
-        );
-        collect(results);
-      }
+    const token = await getToken();
+    const records = await this.retry(() =>
+      this.crmBatchClient.listAllObjects(token, objectType, properties)
     );
-    return existingByKey;
+
+    this.logger.info?.(`CRM index built for ${objectType}: ${records.length} records`);
+
+    return new CrmObjectIndex({
+      records,
+      identityProperty: this.identityProperty,
+      fallbackProperty,
+    });
   }
 
   async handleAssociations({ objectType, processed, clientConfig, tenantModels, getToken, syncLogId, stats }) {
