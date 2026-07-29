@@ -75,6 +75,7 @@ export class SendMappedItemsToHubspot {
     sapHubspotIdUpdater,
     handlers,
     validationFailureWriter,
+    crmBatchProcessor = null,
     mainDataInUpdateConfigRepository = null,
     bypassEmailConfigRepository = null,
     syncWarningRepository = null,
@@ -88,6 +89,7 @@ export class SendMappedItemsToHubspot {
     this.sapHubspotIdUpdater = sapHubspotIdUpdater;
     this.handlers = handlers;
     this.validationFailureWriter = validationFailureWriter;
+    this.crmBatchProcessor = crmBatchProcessor;
     this.mainDataInUpdateConfigRepository = mainDataInUpdateConfigRepository;
     this.bypassEmailConfigRepository = bypassEmailConfigRepository;
     this.syncWarningRepository = syncWarningRepository;
@@ -125,6 +127,45 @@ export class SendMappedItemsToHubspot {
         tenantModels,
         handler,
         getToken,
+      });
+    }
+
+    // Batched company/contact flow. Only engaged when the tenant opted into
+    // batching (hubspotBatchSize > 1) and the processor was injected, so every
+    // wiring without it keeps the sequential behavior unchanged.
+    if (
+      (objectType === 'company' || objectType === 'contact')
+      && Number(clientConfig?.hubspotBatchSize) > 1
+      && this.crmBatchProcessor
+    ) {
+      const mainDataInUpdate = await this.getMainDataInUpdate(tenantModels);
+      const bypassEmail = await this.getBypassEmail({ objectType, tenantModels });
+      const preprocessContext = handler?.buildPreprocessContext
+        ? await handler.buildPreprocessContext({ clientConfig, tenantModels })
+        : null;
+
+      return this.crmBatchProcessor.execute({
+        mappedItems,
+        objectType,
+        clientConfig,
+        tenantModels,
+        handler,
+        getToken,
+        mainDataInUpdate,
+        bypassEmail,
+        preprocessContext,
+        syncLogId,
+        sequentialFallback: (items) => this.processItemsSequentially(items, {
+          objectType,
+          clientConfig,
+          tenantModels,
+          handler,
+          getToken,
+          mainDataInUpdate,
+          bypassEmail,
+          syncLogId,
+          preprocessContext,
+        }),
       });
     }
 

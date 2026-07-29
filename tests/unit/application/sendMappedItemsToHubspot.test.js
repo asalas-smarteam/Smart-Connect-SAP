@@ -457,3 +457,168 @@ describe('SendMappedItemsToHubspot product batch sync via batch read', () => {
     expect(result).toEqual(expect.objectContaining({ sent: 60, created: 60 }));
   });
 });
+
+describe('SendMappedItemsToHubspot contact error reporting', () => {
+  const contactError = {
+    errorType: 'contactEmployee',
+    sapContactId: '100000',
+    sapCompanyId: '110521',
+    hubspotCompanyId: 'hs-company-1',
+    status: 409,
+  };
+
+  function buildCompanyDeps({
+    handleAssociations,
+    syncWarningRepository = null,
+    bypassEmail = false,
+  } = {}) {
+    const handler = {
+      find: jest.fn().mockResolvedValue({ id: 'hs-company-1', properties: {} }),
+      update: jest.fn().mockResolvedValue(null),
+      create: jest.fn(),
+    };
+    const useCase = buildUseCase({
+      handlers: { company: handler },
+      associationHandler: { handleAssociations },
+      syncWarningRepository,
+      bypassEmailConfigRepository: {
+        isBypassEmailEnabled: jest.fn().mockResolvedValue(bypassEmail),
+      },
+      mainDataInUpdateConfigRepository: {
+        getMainDataInUpdate: jest.fn().mockResolvedValue('HUBSPOT'),
+      },
+    });
+
+    return { useCase, handler };
+  }
+
+  it('surfaces contactEmployee failures as sync errors while the company still counts as sent', async () => {
+    const handleAssociations = jest.fn().mockResolvedValue({ contactErrors: [contactError] });
+    const { useCase } = buildCompanyDeps({ handleAssociations });
+
+    const result = await useCase.execute({
+      mappedItems: [{ properties: { email: 'acme@example.com', idsap: '110521' } }],
+      clientConfig: { hubspotCredentialId: 'cred-1' },
+      objectType: 'company',
+      tenantModels: {},
+      credentials: { _id: 'cred-1' },
+      syncLogId: 'sync-log-1',
+    });
+
+    expect(handleAssociations).toHaveBeenCalledWith(expect.objectContaining({
+      syncLogId: 'sync-log-1',
+    }));
+    expect(result).toEqual(expect.objectContaining({
+      sent: 1,
+      failed: 0,
+      errors: [contactError],
+    }));
+  });
+
+  it('leaves the errors untouched when the association handler returns nothing', async () => {
+    const handleAssociations = jest.fn().mockResolvedValue(undefined);
+    const { useCase } = buildCompanyDeps({ handleAssociations });
+
+    const result = await useCase.execute({
+      mappedItems: [{ properties: { email: 'acme@example.com', idsap: '110521' } }],
+      clientConfig: { hubspotCredentialId: 'cred-1' },
+      objectType: 'company',
+      tenantModels: {},
+      credentials: { _id: 'cred-1' },
+    });
+
+    expect(result).toEqual(expect.objectContaining({ sent: 1, failed: 0, errors: [] }));
+  });
+
+  it('records a warning when the main record email is bypassed', async () => {
+    const syncWarningRepository = { record: jest.fn().mockResolvedValue(null) };
+    const { useCase } = buildCompanyDeps({
+      handleAssociations: jest.fn().mockResolvedValue(undefined),
+      syncWarningRepository,
+      bypassEmail: true,
+    });
+
+    await useCase.execute({
+      mappedItems: [{ properties: { email: '', idsap: '110521' } }],
+      clientConfig: { _id: 'config-1', hubspotCredentialId: 'cred-1' },
+      objectType: 'company',
+      tenantModels: {},
+      credentials: { _id: 'cred-1' },
+      syncLogId: 'sync-log-1',
+    });
+
+    expect(syncWarningRepository.record).toHaveBeenCalledWith(expect.objectContaining({
+      clientConfigId: 'config-1',
+      syncLogId: 'sync-log-1',
+      objectType: 'company',
+      sapId: '110521',
+      code: 'missingEmailBypassed',
+      details: expect.objectContaining({ source: 'mainRecord' }),
+    }));
+  });
+});
+
+describe('CRM batch gate', () => {
+  it('routes company runs to the crmBatchProcessor when hubspotBatchSize > 1', async () => {
+    const crmBatchProcessor = {
+      execute: jest.fn().mockResolvedValue({ ok: true, sent: 2, failed: 0, created: 2, updated: 0, skipped: 0, errors: [] }),
+    };
+    const handler = { find: jest.fn(), create: jest.fn(), update: jest.fn() };
+    const useCase = buildUseCase({ handlers: { company: handler }, crmBatchProcessor });
+
+    const result = await useCase.execute({
+      mappedItems: [{ properties: { email: 'a@x.com' } }, { properties: { email: 'b@x.com' } }],
+      clientConfig: { hubspotCredentialId: 'cred-1', hubspotBatchSize: 100 },
+      objectType: 'company',
+      tenantModels: {},
+      credentials: { _id: 'cred-1' },
+    });
+
+    expect(crmBatchProcessor.execute).toHaveBeenCalledTimes(1);
+    expect(handler.find).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: true, sent: 2, created: 2 });
+    const callArgs = crmBatchProcessor.execute.mock.calls[0][0];
+    expect(typeof callArgs.sequentialFallback).toBe('function');
+    expect(callArgs.objectType).toBe('company');
+  });
+
+  it('keeps the sequential path when hubspotBatchSize is not set', async () => {
+    const crmBatchProcessor = { execute: jest.fn() };
+    const handler = {
+      find: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({ id: 'hs-1' }),
+      update: jest.fn(),
+    };
+    const useCase = buildUseCase({ handlers: { company: handler }, crmBatchProcessor });
+
+    await useCase.execute({
+      mappedItems: [{ properties: { email: 'a@x.com', idsap: 'C1' } }],
+      clientConfig: { hubspotCredentialId: 'cred-1' },
+      objectType: 'company',
+      tenantModels: {},
+      credentials: { _id: 'cred-1' },
+    });
+
+    expect(crmBatchProcessor.execute).not.toHaveBeenCalled();
+    expect(handler.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the sequential path when no crmBatchProcessor is injected', async () => {
+    const handler = {
+      find: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({ id: 'hs-1' }),
+      update: jest.fn(),
+    };
+    const useCase = buildUseCase({ handlers: { contact: handler } });
+
+    await useCase.execute({
+      mappedItems: [{ properties: { email: 'a@x.com', idsap: 'P1' } }],
+      clientConfig: { hubspotCredentialId: 'cred-1', hubspotBatchSize: 100 },
+      objectType: 'contact',
+      tenantModels: {},
+      credentials: { _id: 'cred-1' },
+    });
+
+    expect(handler.create).toHaveBeenCalledTimes(1);
+  });
+});
