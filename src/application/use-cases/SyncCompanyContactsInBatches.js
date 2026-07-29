@@ -115,10 +115,12 @@ export class SyncCompanyContactsInBatches {
       return { contactErrors };
     }
 
-    const fallbackProperty = await this.findPropertyResolver({ tenantModels });
-
     let index;
+    let fallbackProperty = null;
     try {
+      // Inside the try: a rejecting resolver must not break execute's "never
+      // rejects" contract either.
+      fallbackProperty = await this.findPropertyResolver({ tenantModels });
       index = await this.buildIndex({ fallbackProperty, clientConfig, tenantModels, getToken });
     } catch (readError) {
       // Without the index we cannot tell creates from updates; creating blindly
@@ -167,8 +169,17 @@ export class SyncCompanyContactsInBatches {
         // with a namespaced claim key.
         key = `#hs:${existing.id}`;
       } else {
-        const claimed = claimKeys.find((claimKey) => claimedBy.has(claimKey));
-        key = claimed ? claimedBy.get(claimed) : (claimKeys[0] ?? null);
+        // Only the row's OWN primary tier can absorb it. A row carrying a
+        // distinct, unclaimed internalcode is a DIFFERENT contact even when it
+        // shares an email with an earlier row: absorbing it there would drop
+        // its write and register its SAP id against somebody else's record. It
+        // is created instead, and a duplicate-email 409 surfaces as an honest
+        // contactError. A row with no identity of its own has the fallback key
+        // as its primary tier, so it still collapses onto the earlier row.
+        const primaryKey = claimKeys[0] ?? null;
+        key = primaryKey && claimedBy.has(primaryKey)
+          ? claimedBy.get(primaryKey)
+          : primaryKey;
       }
       entry.key = key;
 
@@ -451,8 +462,10 @@ export class SyncCompanyContactsInBatches {
               continue;
             }
 
-            // Keeps the index truthful for anything that looks a contact up
-            // after this wave.
+            // Forward-looking insurance only: chunks are fixed before the wave
+            // and nothing calls find() afterwards, so this does not protect a
+            // later chunk today. It keeps the index truthful for any future
+            // caller that does look something up after the create wave.
             index.add(created);
 
             if (entry.key) {
@@ -476,6 +489,15 @@ export class SyncCompanyContactsInBatches {
               mappings,
               tenantModels
             );
+          }
+
+          // Unconditional: an unmatched entry with failed === 0 means HubSpot
+          // created the contact but echoed nothing to match it back on (e.g.
+          // the identity property is not writable in this portal, so
+          // sanitizeProperties stripped it). Those contacts silently lose their
+          // registry rows and association pairs, so it must never go unlogged.
+          if (unmatched.length > 0) {
+            this.logger.warn?.(`Batch create: ${unmatched.length} contact(s) could not be matched back by ${this.identityProperty}`);
           }
 
           // A shortfall means HubSpot rejected those inputs: surface them as

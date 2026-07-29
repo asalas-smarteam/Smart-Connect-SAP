@@ -333,6 +333,101 @@ describe('SyncCompanyContactsInBatches', () => {
     expect(mappings).toHaveLength(2);
   });
 
+  it('creates a row carrying its own distinct internalcode even when an earlier row claimed its email', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.listAllObjects.mockResolvedValue([
+      { id: 'hs-R1', properties: { internalcode: 'IC-1', email: 'y@x.com' } },
+    ]);
+    useCase.fieldMappingService.mapRecords.mockResolvedValue([
+      { properties: { internalcode: 'IC-1' } },
+      { properties: { internalcode: 'IC-2' } },
+    ]);
+
+    const companies = [{
+      hubspotId: 'hs-co-1',
+      item: {
+        properties: {},
+        rawSapData: {
+          CardCode: 'C1',
+          ContactEmployees: [
+            { InternalCode: 1, E_Mail: 'x@x.com' },
+            { InternalCode: 2, E_Mail: 'x@x.com' },
+          ],
+        },
+      },
+    }];
+
+    await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
+
+    // IC-1 resolves hs-R1 by identity; IC-2 matches nothing and must NOT be
+    // absorbed into hs-R1's group just because IC-1 claimed the shared email.
+    const inputs = useCase.crmBatchClient.batchCreateObjects.mock.calls[0][2].inputs;
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0].properties.internalcode).toBe('IC-2');
+    const mappings = useCase.associationRegistry.registerBaseObjectMappings.mock.calls
+      .flatMap((call) => call[2]);
+    expect(mappings).not.toContainEqual({ sapId: 2, hubspotId: 'hs-R1' });
+    expect(mappings).toContainEqual({ sapId: 2, hubspotId: 'hs-c-0' });
+  });
+
+  it('keeps two already-existing contacts distinct when they share the fallback email', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.listAllObjects.mockResolvedValue([
+      { id: 'hs-R1', properties: { internalcode: 'IC-1', email: 'shared@x.com' } },
+      { id: 'hs-R2', properties: { internalcode: 'IC-2', email: 'shared@x.com' } },
+    ]);
+    useCase.fieldMappingService.mapRecords.mockResolvedValue([
+      { properties: { internalcode: 'IC-1' } },
+      { properties: { internalcode: 'IC-2' } },
+    ]);
+
+    const companies = [{
+      hubspotId: 'hs-co-1',
+      item: {
+        properties: {},
+        rawSapData: {
+          CardCode: 'C1',
+          ContactEmployees: [
+            { InternalCode: 1, E_Mail: 'shared@x.com' },
+            { InternalCode: 2, E_Mail: 'shared@x.com' },
+          ],
+        },
+      },
+    }];
+
+    await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
+
+    expect(useCase.crmBatchClient.batchCreateObjects).not.toHaveBeenCalled();
+    const pairs = useCase.crmBatchClient.batchAssociateDefault.mock.calls[0][3];
+    expect(pairs).toEqual(expect.arrayContaining([
+      { fromId: 'hs-co-1', toId: 'hs-R1' },
+      { fromId: 'hs-co-1', toId: 'hs-R2' },
+    ]));
+    expect(pairs).toHaveLength(2);
+  });
+
+  it('warns when a clean create batch echoes back no internalcode to match on', async () => {
+    const useCase = buildUseCase();
+    useCase.fieldMappingService.mapRecords.mockResolvedValue([
+      { properties: { firstname: 'Ana', internalcode: 'IC-1' } },
+    ]);
+    // internalcode is not writable in this portal, so HubSpot creates the
+    // contact but echoes nothing to match it back on — and reports no failure.
+    useCase.crmBatchClient.batchCreateObjects.mockResolvedValue({
+      results: [{ id: 'hs-c-0', properties: { firstname: 'Ana' } }],
+    });
+
+    const companies = [{
+      hubspotId: 'hs-co-1',
+      item: { properties: {}, rawSapData: { CardCode: 'C1', ContactEmployees: [{ InternalCode: 1, E_Mail: 'ana@x.com' }] } },
+    }];
+
+    const { contactErrors } = await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
+
+    expect(contactErrors).toEqual([]);
+    expect(useCase.logger.warn).toHaveBeenCalledWith(expect.stringContaining('internalcode'));
+  });
+
   it('drops properties the portal cannot write from the create payload', async () => {
     const useCase = buildUseCase();
     useCase.crmBatchClient.listWritablePropertyNames.mockResolvedValue(new Set(['email', 'firstname', 'internalcode']));
