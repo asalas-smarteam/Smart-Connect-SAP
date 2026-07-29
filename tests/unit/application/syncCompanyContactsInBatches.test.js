@@ -204,6 +204,162 @@ describe('SyncCompanyContactsInBatches', () => {
     expect(useCase.crmBatchClient.batchCreateObjects).not.toHaveBeenCalled();
   });
 
+  it('sends the RAW find-property values to HubSpot, never the lowercased dedupe key', async () => {
+    const useCase = buildUseCase({
+      findPropertyResolver: jest.fn().mockResolvedValue('idsap'),
+      fieldMappingService: {
+        getMappingsByObjectType: jest.fn().mockResolvedValue([{ hubspotField: 'idsap' }]),
+        mapRecords: jest.fn().mockResolvedValue([{ properties: { idsap: 'C001', email: 'ana@x.com' } }]),
+      },
+    });
+    useCase.crmBatchClient.batchReadObjectsByProperty.mockResolvedValue({
+      results: [{ id: 'hs-existing', properties: { idsap: 'C001', email: 'ana@x.com' } }],
+    });
+
+    const companies = [{
+      hubspotId: 'hs-co-1',
+      item: { properties: {}, rawSapData: { CardCode: 'C001', ContactEmployees: [{ InternalCode: 1, E_Mail: 'ana@x.com' }] } },
+    }];
+
+    await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
+
+    const readArgs = useCase.crmBatchClient.batchReadObjectsByProperty.mock.calls[0][2];
+    expect(readArgs.idProperty).toBe('idsap');
+    expect(readArgs.values).toEqual(['C001']);
+    // The existing record was found, so nothing is created.
+    expect(useCase.crmBatchClient.batchCreateObjects).not.toHaveBeenCalled();
+    const pairs = useCase.crmBatchClient.batchAssociateDefault.mock.calls[0][3];
+    expect(pairs).toEqual([{ fromId: 'hs-co-1', toId: 'hs-existing' }]);
+  });
+
+  it('sends the RAW values through the search fallback too', async () => {
+    const useCase = buildUseCase({
+      findPropertyResolver: jest.fn().mockResolvedValue('idsap'),
+      fieldMappingService: {
+        getMappingsByObjectType: jest.fn().mockResolvedValue([{ hubspotField: 'idsap' }]),
+        mapRecords: jest.fn().mockResolvedValue([{ properties: { idsap: 'C001', email: 'ana@x.com' } }]),
+      },
+    });
+    useCase.crmBatchClient.batchReadObjectsByProperty.mockRejectedValue(new Error('not unique'));
+
+    const companies = [{
+      hubspotId: 'hs-co-1',
+      item: { properties: {}, rawSapData: { CardCode: 'C001', ContactEmployees: [{ InternalCode: 1, E_Mail: 'ana@x.com' }] } },
+    }];
+
+    await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
+
+    expect(useCase.crmBatchClient.searchObjectsByPropertyIn).toHaveBeenCalledWith(
+      'token-1', 'contact', 'idsap', ['C001'], expect.any(Array)
+    );
+  });
+
+  it('records a contactError for the entries a 207 create batch rejected', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.batchCreateObjects.mockResolvedValue({
+      results: [{ id: 'hs-c-0', properties: { email: 'ana@x.com' } }],
+      numErrors: 1,
+      errors: [{ status: 'error', message: 'Email address is invalid' }],
+    });
+
+    const companies = [{
+      hubspotId: 'hs-co-1',
+      item: {
+        properties: {},
+        rawSapData: {
+          CardCode: 'C1',
+          ContactEmployees: [
+            { InternalCode: 1, E_Mail: 'ana@x.com' },
+            { InternalCode: 2, E_Mail: 'bad@x.com' },
+          ],
+        },
+      },
+    }];
+
+    const { contactErrors } = await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
+
+    expect(contactErrors).toHaveLength(1);
+    expect(contactErrors[0]).toMatchObject({
+      errorType: 'contactEmployee',
+      sapContactId: 2,
+      sapCompanyId: 'C1',
+      hubspotCompanyId: 'hs-co-1',
+      message: 'Email address is invalid',
+    });
+    // Only the created contact is registered and associated.
+    const mappings = useCase.associationRegistry.registerBaseObjectMappings.mock.calls[0][2];
+    expect(mappings).toEqual([{ sapId: 1, hubspotId: 'hs-c-0' }]);
+    const pairs = useCase.crmBatchClient.batchAssociateDefault.mock.calls[0][3];
+    expect(pairs).toEqual([{ fromId: 'hs-co-1', toId: 'hs-c-0' }]);
+  });
+
+  it('creates nothing when the contactEmployee mappings produce no mapped contacts', async () => {
+    const useCase = buildUseCase({
+      fieldMappingService: {
+        getMappingsByObjectType: jest.fn().mockResolvedValue([]),
+        mapRecords: jest.fn().mockResolvedValue([]),
+      },
+    });
+
+    const companies = [{
+      hubspotId: 'hs-co-1',
+      item: { properties: {}, rawSapData: { CardCode: 'C1', ContactEmployees: [{ InternalCode: 1, E_Mail: 'a@x.com' }] } },
+    }];
+
+    const { contactErrors } = await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
+
+    expect(contactErrors).toEqual([]);
+    expect(useCase.crmBatchClient.batchCreateObjects).not.toHaveBeenCalled();
+    expect(useCase.crmBatchClient.batchReadObjectsByProperty).not.toHaveBeenCalled();
+    expect(useCase.crmBatchClient.batchAssociateDefault).not.toHaveBeenCalled();
+    expect(useCase.logger.warn).toHaveBeenCalled();
+  });
+
+  it('honors hubspotBatchSize for create batches and retries a 429 in the per-pair association fallback', async () => {
+    const useCase = buildUseCase();
+    // Unique ids per email so the two contacts do not collapse into one pair.
+    useCase.crmBatchClient.batchCreateObjects.mockImplementation(async (_t, _o, { inputs }) => ({
+      results: inputs.map((input) => ({ id: `hs-${input.properties.email}`, properties: { ...input.properties } })),
+    }));
+    useCase.crmBatchClient.batchAssociateDefault.mockRejectedValue(new Error('associate down'));
+    const rateLimited = Object.assign(new Error('rate limited'), { response: { status: 429 } });
+    useCase.crmBatchClient.associateObjects
+      .mockRejectedValueOnce(rateLimited)
+      .mockResolvedValueOnce({});
+
+    const companies = [{
+      hubspotId: 'hs-co-1',
+      item: {
+        properties: {},
+        rawSapData: {
+          CardCode: 'C1',
+          ContactEmployees: [
+            { InternalCode: 1, E_Mail: 'a@x.com' },
+            { InternalCode: 2, E_Mail: 'b@x.com' },
+          ],
+        },
+      },
+    }];
+
+    await useCase.execute({
+      companies,
+      clientConfig: { ...clientConfig, hubspotBatchSize: 1 },
+      tenantModels: {},
+      getToken,
+      syncLogId: null,
+    });
+
+    // 2 contacts, batch size 1 -> one create call and one associate call each.
+    expect(useCase.crmBatchClient.batchCreateObjects).toHaveBeenCalledTimes(2);
+    expect(useCase.crmBatchClient.batchCreateObjects.mock.calls[0][2].inputs).toHaveLength(1);
+    expect(useCase.crmBatchClient.batchAssociateDefault).toHaveBeenCalledTimes(2);
+    expect(useCase.crmBatchClient.batchAssociateDefault.mock.calls[0][3]).toHaveLength(1);
+    // Per-pair fallback goes through retry(): the 429 is retried, not reported.
+    // 2 pairs + 1 retry of the rate-limited one.
+    expect(useCase.sleeper).toHaveBeenCalled();
+    expect(useCase.crmBatchClient.associateObjects).toHaveBeenCalledTimes(3);
+  });
+
   it('registers a mapping for every SAP internal code sharing a deduped contact', async () => {
     const useCase = buildUseCase();
     const companies = [

@@ -10,6 +10,8 @@ import {
   chunkArray,
   retryRequest,
   runInWaves,
+  summarizeBatchResponse,
+  writeChunkSize,
 } from '#application/services/hubspotBatching.utils.js';
 import { buildContactErrorEntry } from '#application/use-cases/HandleHubspotAssociations.js';
 
@@ -115,12 +117,19 @@ export class SyncCompanyContactsInBatches {
     // inputs with the same unique value. Every company keeps its association.
     const findProperty = await this.findPropertyResolver({ tenantModels });
     const byKey = new Map();
+    // The normalized key is only a dedupe/lookup key. HubSpot must receive the
+    // value exactly as SAP wrote it: find properties like idsap/internalcode
+    // are case sensitive, so sending the lowercased key would miss every
+    // existing record and re-create the whole contact base.
+    const rawValueByKey = new Map();
     for (const entry of entries) {
-      const key = normalizeKey(entry.contactPayload?.properties?.[findProperty]);
+      const rawValue = entry.contactPayload?.properties?.[findProperty];
+      const key = normalizeKey(rawValue);
       entry.key = key;
 
       if (key && !byKey.has(key)) {
         byKey.set(key, entry);
+        rawValueByKey.set(key, String(rawValue));
       } else if (!key) {
         // No find value (e.g. bypassed email with findProperty=email): cannot
         // be matched to an existing record — always created, never deduped.
@@ -146,7 +155,7 @@ export class SyncCompanyContactsInBatches {
     let existingByKey;
     try {
       existingByKey = await this.readExistingContacts({
-        keys: [...byKey.keys()],
+        values: [...rawValueByKey.values()],
         findProperty,
         uniqueEntries,
         clientConfig,
@@ -184,7 +193,7 @@ export class SyncCompanyContactsInBatches {
 
     await this.createContactBatches({ createEntries, hubspotIdByKey, sapIdsByKey, findProperty, clientConfig, tenantModels, getToken, contactErrors });
     await this.updateContactBatches({ updateEntries, clientConfig, tenantModels, getToken, contactErrors });
-    await this.associateContactBatches({ entries, hubspotIdByKey, getToken, contactErrors });
+    await this.associateContactBatches({ entries, hubspotIdByKey, clientConfig, getToken, contactErrors });
 
     return { contactErrors };
   }
@@ -217,6 +226,13 @@ export class SyncCompanyContactsInBatches {
       tenantModels,
       'contactEmployee'
     );
+
+    // The sequential flow iterates mappedContacts, so no mapping output means
+    // no contacts at all. Building payloads from the raw SAP rows here would
+    // create bare contacts the sequential path never creates.
+    if (!Array.isArray(mappedContacts) || mappedContacts.length === 0) {
+      return [];
+    }
 
     const bypassEmail = await resolveBypassEmail({
       objectType: 'contact',
@@ -291,10 +307,13 @@ export class SyncCompanyContactsInBatches {
     return entries;
   }
 
-  async readExistingContacts({ keys, findProperty, uniqueEntries, clientConfig, tenantModels, getToken }) {
+  // `values` are the RAW find-property values (not the normalized keys): they
+  // travel to HubSpot as batch-read ids / Search IN values. Results are keyed
+  // by the normalized value on the way back.
+  async readExistingContacts({ values, findProperty, uniqueEntries, clientConfig, tenantModels, getToken }) {
     const existingByKey = new Map();
 
-    if (keys.length === 0) {
+    if (values.length === 0) {
       return existingByKey;
     }
 
@@ -303,7 +322,7 @@ export class SyncCompanyContactsInBatches {
       findProperty,
       ...searchProperties,
       ...uniqueEntries.flatMap((entry) => Object.keys(entry.contactPayload?.properties ?? {})),
-    ])].filter((name) => name !== 'hs_object_id');
+    ])].filter((name) => name !== 'hs_object_id' && name !== 'associations');
 
     const collect = (results) => {
       for (const result of results ?? []) {
@@ -316,14 +335,14 @@ export class SyncCompanyContactsInBatches {
 
     try {
       await runInWaves(
-        chunkArray(keys, HUBSPOT_BATCH_INPUT_LIMIT),
+        chunkArray(values, HUBSPOT_BATCH_INPUT_LIMIT),
         BATCH_CONCURRENCY,
-        async (keyChunk) => {
+        async (valueChunk) => {
           const token = await getToken();
           const response = await this.retry(() =>
             this.crmBatchClient.batchReadObjectsByProperty(token, 'contact', {
               idProperty: findProperty,
-              values: keyChunk,
+              values: valueChunk,
               properties: propertyNames,
             })
           );
@@ -336,12 +355,12 @@ export class SyncCompanyContactsInBatches {
       this.logger.error?.('Contact batch read failed, falling back to search:', error);
       existingByKey.clear();
       await runInWaves(
-        chunkArray(keys, HUBSPOT_BATCH_INPUT_LIMIT),
+        chunkArray(values, HUBSPOT_BATCH_INPUT_LIMIT),
         SEARCH_FALLBACK_CONCURRENCY,
-        async (keyChunk) => {
+        async (valueChunk) => {
           const token = await getToken();
           const results = await this.retry(() =>
-            this.crmBatchClient.searchObjectsByPropertyIn(token, 'contact', findProperty, keyChunk, propertyNames)
+            this.crmBatchClient.searchObjectsByPropertyIn(token, 'contact', findProperty, valueChunk, propertyNames)
           );
           collect(results);
         }
@@ -353,7 +372,7 @@ export class SyncCompanyContactsInBatches {
 
   async createContactBatches({ createEntries, hubspotIdByKey, sapIdsByKey, findProperty, clientConfig, tenantModels, getToken, contactErrors }) {
     await runInWaves(
-      chunkArray(createEntries, HUBSPOT_BATCH_INPUT_LIMIT),
+      chunkArray(createEntries, writeChunkSize(clientConfig)),
       BATCH_CONCURRENCY,
       async (entryChunk) => {
         try {
@@ -364,34 +383,47 @@ export class SyncCompanyContactsInBatches {
             })
           );
 
+          // 207 partial failure: only `results` reached HubSpot, the rest are
+          // described by `errors` and must not be reported as synced.
+          const { results, errors, failed } = summarizeBatchResponse(response, entryChunk.length);
+
           // Batch create results are not guaranteed to preserve input order:
           // match by the find property (fall back to positional index).
           const resultByKey = new Map();
-          for (const result of response?.results ?? []) {
+          for (const result of results) {
             const key = normalizeKey(result?.properties?.[findProperty]);
             if (key) {
               resultByKey.set(key, result);
             }
           }
 
+          // Positional matching is only sound when every input came back: on a
+          // partial response the results are shifted and index i would hand an
+          // entry somebody else's HubSpot id.
+          const positionalSafe = failed === 0 && results.length === entryChunk.length;
+
           const mappings = [];
           const seenMappings = new Set();
+          const unmatched = [];
           for (const [index, entry] of entryChunk.entries()) {
             const created = resultByKey.get(entry.key)
-              ?? response?.results?.[index];
+              ?? (positionalSafe ? results[index] : null);
 
-            if (created?.id) {
-              if (entry.key) {
-                hubspotIdByKey.set(entry.key, created.id);
-              } else {
-                entry.hubspotId = created.id;
-              }
-              for (const sapId of SyncCompanyContactsInBatches.sapIdsForEntry(entry, sapIdsByKey)) {
-                const mappingKey = `${sapId}::${created.id}`;
-                if (!seenMappings.has(mappingKey)) {
-                  seenMappings.add(mappingKey);
-                  mappings.push({ sapId, hubspotId: created.id });
-                }
+            if (!created?.id) {
+              unmatched.push(entry);
+              continue;
+            }
+
+            if (entry.key) {
+              hubspotIdByKey.set(entry.key, created.id);
+            } else {
+              entry.hubspotId = created.id;
+            }
+            for (const sapId of SyncCompanyContactsInBatches.sapIdsForEntry(entry, sapIdsByKey)) {
+              const mappingKey = `${sapId}::${created.id}`;
+              if (!seenMappings.has(mappingKey)) {
+                seenMappings.add(mappingKey);
+                mappings.push({ sapId, hubspotId: created.id });
               }
             }
           }
@@ -404,6 +436,26 @@ export class SyncCompanyContactsInBatches {
               tenantModels
             );
           }
+
+          // A shortfall means HubSpot rejected those inputs: surface them as
+          // contact errors instead of silently dropping them.
+          if (failed > 0) {
+            for (const [index, entry] of unmatched.entries()) {
+              const batchError = errors[index] ?? null;
+              const error = Object.assign(
+                new Error(batchError?.message ?? 'HubSpot batch create partially failed'),
+                { details: { status: batchError?.status ?? null, hubspotResponse: batchError } }
+              );
+              this.logger.error?.('Company contact sync error:', error);
+              contactErrors.push(buildContactErrorEntry({
+                error,
+                sapContactId: entry.sapInternalCode ?? null,
+                sapCompanyId: entry.company.sapCompanyId,
+                companyHubspotId: entry.company.hubspotId,
+                contactPayload: entry.contactPayload,
+              }));
+            }
+          }
         } catch (error) {
           this.logger.error?.('Contact batch create failed, falling back per contact:', error);
           await this.sequentialContactFallback({ entryChunk, hubspotIdByKey, sapIdsByKey, clientConfig, tenantModels, getToken, contactErrors });
@@ -414,7 +466,7 @@ export class SyncCompanyContactsInBatches {
 
   async updateContactBatches({ updateEntries, clientConfig, tenantModels, getToken, contactErrors }) {
     await runInWaves(
-      chunkArray(updateEntries, HUBSPOT_BATCH_INPUT_LIMIT),
+      chunkArray(updateEntries, writeChunkSize(clientConfig)),
       BATCH_CONCURRENCY,
       async (chunk) => {
         try {
@@ -510,7 +562,7 @@ export class SyncCompanyContactsInBatches {
     }
   }
 
-  async associateContactBatches({ entries, hubspotIdByKey, getToken, contactErrors }) {
+  async associateContactBatches({ entries, hubspotIdByKey, clientConfig, getToken, contactErrors }) {
     const pairs = [];
     const seen = new Set();
 
@@ -530,12 +582,12 @@ export class SyncCompanyContactsInBatches {
     }
 
     await runInWaves(
-      chunkArray(pairs, HUBSPOT_BATCH_INPUT_LIMIT),
+      chunkArray(pairs, writeChunkSize(clientConfig)),
       BATCH_CONCURRENCY,
       async (pairChunk) => {
         try {
           const token = await getToken();
-          await this.retry(() =>
+          const response = await this.retry(() =>
             this.crmBatchClient.batchAssociateDefault(
               token,
               'company',
@@ -543,12 +595,25 @@ export class SyncCompanyContactsInBatches {
               pairChunk.map(({ fromId, toId }) => ({ fromId, toId }))
             )
           );
+
+          // Associations stay non-fatal (parity with the sequential per-pair
+          // behavior): a 207 is logged, never counted as a contact error.
+          const { errors } = summarizeBatchResponse(response, pairChunk.length);
+          for (const batchError of errors) {
+            this.logger.error?.('Batch association partial failure', {
+              fromObjectType: 'company',
+              toObjectType: 'contact',
+              error: batchError,
+            });
+          }
         } catch (error) {
           this.logger.error?.('Batch association failed, falling back per pair:', error);
           for (const { fromId, toId, entry } of pairChunk) {
             try {
               const token = await getToken();
-              await this.crmBatchClient.associateObjects(token, 'company', fromId, 'contact', toId);
+              await this.retry(() =>
+                this.crmBatchClient.associateObjects(token, 'company', fromId, 'contact', toId)
+              );
             } catch (associationError) {
               this.logger.error?.('Company contact sync error:', associationError);
               contactErrors.push(buildContactErrorEntry({

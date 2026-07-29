@@ -11,6 +11,8 @@ import {
   chunkArray,
   retryRequest,
   runInWaves,
+  summarizeBatchResponse,
+  writeChunkSize,
 } from '#application/services/hubspotBatching.utils.js';
 
 function normalizeKey(value) {
@@ -262,7 +264,8 @@ export class ProcessCrmObjectBatches {
             })
           );
 
-          const results = Array.isArray(response?.results) ? response.results : [];
+          // 207 partial failure: only `results` actually made it into HubSpot.
+          const { results, errors, succeeded, failed } = summarizeBatchResponse(response, chunkItems.length);
           const resultByKey = new Map();
           for (const result of results) {
             const key = normalizeKey(result?.properties?.[findProperty]);
@@ -294,7 +297,15 @@ export class ProcessCrmObjectBatches {
             );
           }
 
-          return { sent: chunkItems.length, created: chunkItems.length };
+          return {
+            sent: succeeded,
+            created: succeeded,
+            failed,
+            errors: errors.map((batchError) => ({
+              payloadHubspot: null,
+              responseHubspot: batchError,
+            })),
+          };
         } catch (error) {
           this.logger.error?.('ProcessCrmObjectBatches create error:', error);
           return sequentialFallback(chunkItems);
@@ -308,16 +319,37 @@ export class ProcessCrmObjectBatches {
       async (entryChunk) => {
         try {
           const token = await getToken();
-          await this.retry(() =>
+          const response = await this.retry(() =>
             this.crmBatchClient.batchUpdateObjects(token, objectType, {
               inputs: entryChunk.map(({ updateInput }) => updateInput),
             })
           );
 
-          return { sent: entryChunk.length, updated: entryChunk.length };
+          const { errors, succeeded, failed } = summarizeBatchResponse(response, entryChunk.length);
+
+          return {
+            sent: succeeded,
+            updated: succeeded,
+            failed,
+            errors: errors.map((batchError) => ({
+              payloadHubspot: null,
+              responseHubspot: batchError,
+            })),
+          };
         } catch (error) {
           this.logger.error?.('ProcessCrmObjectBatches update error:', error);
-          return sequentialFallback(entryChunk.map(({ item }) => item));
+          // These items were already pushed to `processed` when their existing
+          // record was read. The sequential fallback re-runs the whole per-item
+          // flow (associations included), so drop them here to avoid doing the
+          // association work twice.
+          const chunkItems = entryChunk.map(({ item }) => item);
+          const chunkItemSet = new Set(chunkItems);
+          for (let index = processed.length - 1; index >= 0; index -= 1) {
+            if (chunkItemSet.has(processed[index].item)) {
+              processed.splice(index, 1);
+            }
+          }
+          return sequentialFallback(chunkItems);
         }
       }
     );
@@ -340,10 +372,7 @@ export class ProcessCrmObjectBatches {
   }
 
   writeChunkSize(clientConfig) {
-    return Math.min(
-      Number(clientConfig?.hubspotBatchSize) || HUBSPOT_BATCH_INPUT_LIMIT,
-      HUBSPOT_BATCH_INPUT_LIMIT
-    );
+    return writeChunkSize(clientConfig);
   }
 
   // Batch read keyed by the tenant's configured find property; falls back to
@@ -479,12 +508,16 @@ export class ProcessCrmObjectBatches {
       if ((!Array.isArray(targets) || targets.length === 0) && clientConfig.associationFetchEnabled) {
         // The per-item flow refetches this for every empty item; the batch
         // flow fetches once per run and reuses it (same resulting targets).
-        if (!fallbackFetched && this.fetchFallbackAssociations) {
-          const aggregated = await this.fetchFallbackAssociations({
-            clientConfig,
-            objectType: fromObjectType,
-          });
-          fallbackTargets = aggregated?.[`${targetObjectType === 'company' ? 'companies' : 'contacts'}`] ?? null;
+        if (!fallbackFetched) {
+          if (this.fetchFallbackAssociations) {
+            const aggregated = await this.fetchFallbackAssociations({
+              clientConfig,
+              objectType: fromObjectType,
+            });
+            fallbackTargets = aggregated?.[`${targetObjectType === 'company' ? 'companies' : 'contacts'}`] ?? null;
+          }
+          // Marked even without a fetcher: the answer is the same for every
+          // item of the run, so re-evaluating it per item buys nothing.
           fallbackFetched = true;
         }
         targets = fallbackTargets ?? [];
@@ -528,9 +561,20 @@ export class ProcessCrmObjectBatches {
       async (pairChunk) => {
         try {
           const token = await getToken();
-          await this.retry(() =>
+          const response = await this.retry(() =>
             this.crmBatchClient.batchAssociateDefault(token, fromObjectType, toObjectType, pairChunk)
           );
+
+          // Associations are non-fatal (parity with associationService's
+          // per-pair behavior): a 207 is logged, never counted as failed.
+          const { errors } = summarizeBatchResponse(response, pairChunk.length);
+          for (const batchError of errors) {
+            this.logger.error?.('Batch association partial failure', {
+              fromObjectType,
+              toObjectType,
+              error: batchError,
+            });
+          }
         } catch (error) {
           this.logger.error?.('Batch association failed, falling back per pair:', error);
           for (const { fromId, toId } of pairChunk) {

@@ -244,6 +244,53 @@ describe('ProcessCrmObjectBatches', () => {
     expect(result).toMatchObject({ sent: 1, updated: 1, skipped: 0, failed: 0 });
   });
 
+  it('counts a 207 partial create batch as partly failed and records its errors', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.batchCreateObjects.mockResolvedValue({
+      results: [{ id: 'hs-0', properties: { email: 'a@x.com', idsap: 'C001' } }],
+      numErrors: 1,
+      errors: [{ status: 'error', message: 'Property values were not valid', category: 'VALIDATION_ERROR' }],
+    });
+    const params = baseParams();
+    const mappedItems = [
+      { properties: { email: 'a@x.com', idsap: 'C001' }, rawSapData: {} },
+      { properties: { email: 'b@x.com', idsap: 'C002' }, rawSapData: {} },
+    ];
+
+    const result = await useCase.execute({ mappedItems, ...params });
+
+    expect(result).toMatchObject({ sent: 1, created: 1, failed: 1 });
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toEqual({
+      payloadHubspot: null,
+      responseHubspot: expect.objectContaining({ message: 'Property values were not valid' }),
+    });
+    // Only the created record gets registered / associated.
+    const mappings = useCase.associationRegistry.registerBaseObjectMappings.mock.calls[0][2];
+    expect(mappings).toEqual([{ sapId: 'C001', hubspotId: 'hs-0' }]);
+  });
+
+  it('drops an update chunk from processed before its sequential fallback runs', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.batchReadObjectsByProperty.mockResolvedValue({
+      results: [{ id: 'hs-1', properties: { email: 'a@x.com', name: 'Old' } }],
+    });
+    useCase.crmBatchClient.batchUpdateObjects.mockRejectedValue(new Error('update down'));
+    const params = baseParams();
+    params.handler.buildBatchUpdateEntry.mockReturnValue({ id: 'hs-1', properties: { idsap: 'C001' } });
+    params.sequentialFallback.mockResolvedValue({ sent: 1, failed: 0, created: 0, updated: 1, errors: [] });
+
+    const mappedItems = [{ properties: { email: 'a@x.com', idsap: 'C001' }, rawSapData: {} }];
+
+    await useCase.execute({ mappedItems, ...params });
+
+    expect(params.sequentialFallback).toHaveBeenCalledWith([mappedItems[0]]);
+    // The sequential fallback already does the association work for this item,
+    // so the batch association phase must not see it again.
+    expect(useCase.syncCompanyContactsInBatches.execute).not.toHaveBeenCalled();
+    expect(useCase.crmBatchClient.batchAssociateDefault).not.toHaveBeenCalled();
+  });
+
   it('merges contactErrors from the child-contact sync into errors', async () => {
     const useCase = buildUseCase({
       syncCompanyContactsInBatches: {
