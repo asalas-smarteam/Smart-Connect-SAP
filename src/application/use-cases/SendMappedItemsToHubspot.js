@@ -6,6 +6,13 @@ import {
   applyBypassEmail,
   resolveBypassEmail,
 } from '#application/services/bypassEmail.service.js';
+import {
+  BATCH_CONCURRENCY,
+  HUBSPOT_BATCH_INPUT_LIMIT,
+  chunkArray,
+  runInWaves,
+  retryRequest as retryHubspotRequest,
+} from '#application/services/hubspotBatching.utils.js';
 
 function getHandler(handlers, objectType) {
   return handlers[objectType] ?? null;
@@ -25,27 +32,6 @@ function getValidationFailureIdentifier(objectType, item) {
   }
 
   return item?.properties?.idsap ?? '';
-}
-
-// HubSpot batch endpoints (read/create/update) accept at most 100 inputs per call.
-const HUBSPOT_BATCH_INPUT_LIMIT = 100;
-// Concurrent batch calls per wave. 4 keeps us well under HubSpot's ~190 requests/10s limit.
-const BATCH_CONCURRENCY = 4;
-
-function chunkArray(array, size) {
-  const chunks = [];
-  for (let index = 0; index < array.length; index += size) {
-    chunks.push(array.slice(index, index + size));
-  }
-  return chunks;
-}
-
-async function runInWaves(chunks, concurrency, worker) {
-  const results = [];
-  for (const wave of chunkArray(chunks, concurrency)) {
-    results.push(...await Promise.all(wave.map(worker)));
-  }
-  return results;
 }
 
 function normalizePropertyValue(value) {
@@ -91,6 +77,7 @@ export class SendMappedItemsToHubspot {
     validationFailureWriter,
     mainDataInUpdateConfigRepository = null,
     bypassEmailConfigRepository = null,
+    syncWarningRepository = null,
     logger = console,
     sleeper = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   }) {
@@ -103,11 +90,12 @@ export class SendMappedItemsToHubspot {
     this.validationFailureWriter = validationFailureWriter;
     this.mainDataInUpdateConfigRepository = mainDataInUpdateConfigRepository;
     this.bypassEmailConfigRepository = bypassEmailConfigRepository;
+    this.syncWarningRepository = syncWarningRepository;
     this.logger = logger;
     this.sleeper = sleeper;
   }
 
-  async execute({ mappedItems, clientConfig, objectType, tenantModels, credentials }) {
+  async execute({ mappedItems, clientConfig, objectType, tenantModels, credentials, syncLogId = null }) {
     const handler = getHandler(this.handlers, objectType);
 
     if (!handler) {
@@ -150,6 +138,7 @@ export class SendMappedItemsToHubspot {
       getToken,
       mainDataInUpdate,
       bypassEmail,
+      syncLogId,
     });
 
     return { ok: true, ...result };
@@ -164,13 +153,29 @@ export class SendMappedItemsToHubspot {
     });
   }
 
-  applyBypassEmail({ objectType, item, bypassEmail }) {
+  applyBypassEmail({ objectType, item, bypassEmail, onWarning = null }) {
     return applyBypassEmail({
       objectType,
       item,
       bypassEmail,
       logger: this.logger,
+      onWarning,
     });
+  }
+
+  // Persists a data-quality warning (missing/invalid email) so it can be
+  // reported back to the client. Never throws: a warning must not break a sync.
+  async recordWarning(payload) {
+    if (!this.syncWarningRepository?.record) {
+      return null;
+    }
+
+    try {
+      return await this.syncWarningRepository.record(payload);
+    } catch (error) {
+      this.logger.error?.('Sync warning record error:', error);
+      return null;
+    }
   }
 
   async getMainDataInUpdate(tenantModels) {
@@ -186,19 +191,7 @@ export class SendMappedItemsToHubspot {
   }
 
   async retryRequest(fn, retries = 5) {
-    try {
-      return await fn();
-    } catch (err) {
-      const status = err?.response?.status ?? err?.details?.status ?? err?.cause?.response?.status;
-
-      if (status === 429 && retries > 0) {
-        const delay = 1000 * (6 - retries);
-        await this.sleeper(delay);
-        return this.retryRequest(fn, retries - 1);
-      }
-
-      throw err;
-    }
+    return retryHubspotRequest(fn, { retries, sleeper: this.sleeper });
   }
 
   async registerBaseMapping(clientConfig, objectType, sapId, hubspotId, tenantModels) {
@@ -239,13 +232,36 @@ export class SendMappedItemsToHubspot {
     mainDataInUpdate = DEFAULT_MAIN_DATA_IN_UPDATE,
     bypassEmail = false,
     preprocessContext = null,
+    syncLogId = null,
   }) {
     try {
       if (handler.preprocess) {
         await handler.preprocess({ item, clientConfig, tenantModels, preprocessContext });
       }
 
-      const emailWasBypassed = this.applyBypassEmail({ objectType, item, bypassEmail });
+      const bypassWarnings = [];
+      const emailWasBypassed = this.applyBypassEmail({
+        objectType,
+        item,
+        bypassEmail,
+        onWarning: (warning) => bypassWarnings.push(warning),
+      });
+
+      for (const warning of bypassWarnings) {
+        await this.recordWarning({
+          tenantModels,
+          clientConfigId: clientConfig?.id ?? clientConfig?._id ?? null,
+          syncLogId,
+          objectType,
+          sapId: warning.sapId ?? item?.properties?.idsap ?? null,
+          code: warning.code,
+          message: warning.message,
+          details: {
+            source: 'mainRecord',
+            email: warning.email ?? null,
+          },
+        });
+      }
 
       const token = await getToken();
 
@@ -310,16 +326,24 @@ export class SendMappedItemsToHubspot {
         resultMetrics = { created: 1, updated: 0 };
       }
 
-      await this.associationHandler.handleAssociations({
+      const associationResult = await this.associationHandler.handleAssociations({
         objectType,
         token,
         item,
         clientConfig,
         tenantModels,
         hubspotId: existing?.id ?? created?.id,
+        syncLogId,
       });
 
-      return { ok: true, ...resultMetrics };
+      // Company syncs return the failures of their contactEmployee children so
+      // they can be surfaced in the SyncLog (the company itself still counts as
+      // sent).
+      return {
+        ok: true,
+        ...resultMetrics,
+        contactErrors: associationResult?.contactErrors ?? [],
+      };
     } catch (error) {
       console.error('processSingleItem error:', error);
       return {
@@ -356,6 +380,10 @@ export class SendMappedItemsToHubspot {
         sent += 1;
         created += result.created ?? 0;
         updated += result.updated ?? 0;
+
+        if (Array.isArray(result.contactErrors) && result.contactErrors.length > 0) {
+          errors.push(...result.contactErrors);
+        }
       } else {
         failed += 1;
         if (result.error) {
