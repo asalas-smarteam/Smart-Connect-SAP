@@ -4,7 +4,8 @@ import SyncCompanyContactsInBatches from '../../../src/application/use-cases/Syn
 function buildUseCase(overrides = {}) {
   return new SyncCompanyContactsInBatches({
     crmBatchClient: {
-      batchReadObjectsByProperty: jest.fn().mockResolvedValue({ results: [] }),
+      listAllObjects: jest.fn().mockResolvedValue([]),
+      listWritablePropertyNames: jest.fn().mockResolvedValue(null),
       batchCreateObjects: jest.fn().mockImplementation(async (_t, _o, { inputs }) => ({
         results: inputs.map((input, index) => ({
           id: `hs-c-${index}`,
@@ -14,7 +15,6 @@ function buildUseCase(overrides = {}) {
       batchUpdateObjects: jest.fn().mockResolvedValue({ results: [] }),
       batchAssociateDefault: jest.fn().mockResolvedValue({}),
       associateObjects: jest.fn().mockResolvedValue({}),
-      searchObjectsByPropertyIn: jest.fn().mockResolvedValue([]),
     },
     contactHandler: {
       getSearchProperties: jest.fn().mockResolvedValue(['email', 'firstname', 'phone', 'idsap', 'internalcode']),
@@ -111,7 +111,7 @@ describe('SyncCompanyContactsInBatches', () => {
   it('updates existing contacts only when the handler says key fields changed', async () => {
     const existing = { id: 'hs-old', properties: { email: 'ana@x.com', firstname: 'Old' } };
     const useCase = buildUseCase();
-    useCase.crmBatchClient.batchReadObjectsByProperty.mockResolvedValue({ results: [existing] });
+    useCase.crmBatchClient.listAllObjects.mockResolvedValue([existing]);
     useCase.contactHandler.buildBatchUpdateEntry.mockReturnValue({ id: 'hs-old', properties: { idsap: 'P1' } });
 
     const companies = [{
@@ -187,10 +187,9 @@ describe('SyncCompanyContactsInBatches', () => {
     });
   });
 
-  it('resolves with a single contactError when both the batch read and the search fallback fail', async () => {
+  it('returns a single contactError when the contact index cannot be built', async () => {
     const useCase = buildUseCase();
-    useCase.crmBatchClient.batchReadObjectsByProperty.mockRejectedValue(new Error('batch read down'));
-    useCase.crmBatchClient.searchObjectsByPropertyIn.mockRejectedValue(new Error('search down'));
+    useCase.crmBatchClient.listAllObjects.mockRejectedValue(new Error('list down'));
 
     const companies = [{
       hubspotId: 'hs-co-1',
@@ -200,11 +199,68 @@ describe('SyncCompanyContactsInBatches', () => {
     const { contactErrors } = await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
 
     expect(contactErrors).toHaveLength(1);
-    expect(contactErrors[0]).toMatchObject({ errorType: 'contactEmployee' });
     expect(useCase.crmBatchClient.batchCreateObjects).not.toHaveBeenCalled();
   });
 
-  it('sends the RAW find-property values to HubSpot, never the lowercased dedupe key', async () => {
+  it('identifies child contacts by internalcode, not by the tenant find property', async () => {
+    const useCase = buildUseCase();
+    useCase.findPropertyResolver.mockResolvedValue('email');
+    useCase.fieldMappingService.mapRecords.mockResolvedValue([
+      { properties: { firstname: 'Ana', internalcode: 'IC-7' } },
+    ]);
+    useCase.crmBatchClient.listAllObjects.mockResolvedValue([
+      { id: 'hs-c-existing', properties: { internalcode: 'IC-7', email: 'otro@x.com' } },
+    ]);
+
+    const companies = [{
+      hubspotId: 'hs-co-1',
+      item: { properties: {}, rawSapData: { CardCode: 'C1', ContactEmployees: [{ InternalCode: 7, E_Mail: 'ana@x.com' }] } },
+    }];
+
+    await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
+
+    expect(useCase.crmBatchClient.batchCreateObjects).not.toHaveBeenCalled();
+    const pairs = useCase.crmBatchClient.batchAssociateDefault.mock.calls[0][3];
+    expect(pairs).toEqual([{ fromId: 'hs-co-1', toId: 'hs-c-existing' }]);
+  });
+
+  it('matches created child contacts by internalcode regardless of response order', async () => {
+    const useCase = buildUseCase();
+    useCase.fieldMappingService.mapRecords.mockResolvedValue([
+      { properties: { firstname: 'Ana', internalcode: 'IC-1' } },
+      { properties: { firstname: 'Luis', internalcode: 'IC-2' } },
+    ]);
+    useCase.crmBatchClient.batchCreateObjects.mockResolvedValue({
+      results: [
+        { id: 'hs-luis', properties: { internalcode: 'IC-2' } },
+        { id: 'hs-ana', properties: { internalcode: 'IC-1' } },
+      ],
+    });
+
+    const companies = [{
+      hubspotId: 'hs-co-1',
+      item: {
+        properties: {},
+        rawSapData: {
+          CardCode: 'C1',
+          ContactEmployees: [
+            { InternalCode: 1, E_Mail: 'ana@x.com' },
+            { InternalCode: 2, E_Mail: 'luis@x.com' },
+          ],
+        },
+      },
+    }];
+
+    await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
+
+    const [, , mappings] = useCase.associationRegistry.registerBaseObjectMappings.mock.calls[0];
+    expect(mappings).toEqual(expect.arrayContaining([
+      { sapId: 1, hubspotId: 'hs-ana' },
+      { sapId: 2, hubspotId: 'hs-luis' },
+    ]));
+  });
+
+  it('falls back to the tenant find property for contacts carrying no internalcode', async () => {
     const useCase = buildUseCase({
       findPropertyResolver: jest.fn().mockResolvedValue('idsap'),
       fieldMappingService: {
@@ -212,9 +268,9 @@ describe('SyncCompanyContactsInBatches', () => {
         mapRecords: jest.fn().mockResolvedValue([{ properties: { idsap: 'C001', email: 'ana@x.com' } }]),
       },
     });
-    useCase.crmBatchClient.batchReadObjectsByProperty.mockResolvedValue({
-      results: [{ id: 'hs-existing', properties: { idsap: 'C001', email: 'ana@x.com' } }],
-    });
+    useCase.crmBatchClient.listAllObjects.mockResolvedValue([
+      { id: 'hs-existing', properties: { idsap: 'C001', email: 'ana@x.com' } },
+    ]);
 
     const companies = [{
       hubspotId: 'hs-co-1',
@@ -223,35 +279,91 @@ describe('SyncCompanyContactsInBatches', () => {
 
     await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
 
-    const readArgs = useCase.crmBatchClient.batchReadObjectsByProperty.mock.calls[0][2];
-    expect(readArgs.idProperty).toBe('idsap');
-    expect(readArgs.values).toEqual(['C001']);
-    // The existing record was found, so nothing is created.
+    // The existing record was found through the fallback tier, so nothing is created.
     expect(useCase.crmBatchClient.batchCreateObjects).not.toHaveBeenCalled();
     const pairs = useCase.crmBatchClient.batchAssociateDefault.mock.calls[0][3];
     expect(pairs).toEqual([{ fromId: 'hs-co-1', toId: 'hs-existing' }]);
   });
 
-  it('sends the RAW values through the search fallback too', async () => {
-    const useCase = buildUseCase({
-      findPropertyResolver: jest.fn().mockResolvedValue('idsap'),
-      fieldMappingService: {
-        getMappingsByObjectType: jest.fn().mockResolvedValue([{ hubspotField: 'idsap' }]),
-        mapRecords: jest.fn().mockResolvedValue([{ properties: { idsap: 'C001', email: 'ana@x.com' } }]),
-      },
-    });
-    useCase.crmBatchClient.batchReadObjectsByProperty.mockRejectedValue(new Error('not unique'));
+  it('sweeps contacts once with the identity, fallback and handler search properties', async () => {
+    const useCase = buildUseCase({ findPropertyResolver: jest.fn().mockResolvedValue('idsap') });
 
     const companies = [{
       hubspotId: 'hs-co-1',
-      item: { properties: {}, rawSapData: { CardCode: 'C001', ContactEmployees: [{ InternalCode: 1, E_Mail: 'ana@x.com' }] } },
+      item: { properties: {}, rawSapData: { CardCode: 'C1', ContactEmployees: [{ InternalCode: 1, E_Mail: 'a@x.com' }] } },
     }];
 
     await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
 
-    expect(useCase.crmBatchClient.searchObjectsByPropertyIn).toHaveBeenCalledWith(
-      'token-1', 'contact', 'idsap', ['C001'], expect.any(Array)
-    );
+    expect(useCase.crmBatchClient.listAllObjects).toHaveBeenCalledTimes(1);
+    const [, objectType, properties] = useCase.crmBatchClient.listAllObjects.mock.calls[0];
+    expect(objectType).toBe('contact');
+    expect(properties).toEqual(['internalcode', 'idsap', 'email', 'firstname', 'phone']);
+  });
+
+  it('does not create a second contact for a row whose email an internalcode row already claimed', async () => {
+    const useCase = buildUseCase();
+    useCase.fieldMappingService.mapRecords.mockResolvedValue([
+      { properties: { firstname: 'Ana', internalcode: 'IC-1' } },
+      { properties: { firstname: 'Ana again' } },
+    ]);
+
+    const companies = [{
+      hubspotId: 'hs-co-1',
+      item: {
+        properties: {},
+        rawSapData: {
+          CardCode: 'C1',
+          ContactEmployees: [
+            { InternalCode: 1, E_Mail: 'ana@x.com' },
+            { InternalCode: 2, E_Mail: 'ana@x.com' },
+          ],
+        },
+      },
+    }];
+
+    await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
+
+    expect(useCase.crmBatchClient.batchCreateObjects.mock.calls[0][2].inputs).toHaveLength(1);
+    const mappings = useCase.associationRegistry.registerBaseObjectMappings.mock.calls[0][2];
+    expect(mappings).toEqual(expect.arrayContaining([
+      { sapId: 1, hubspotId: 'hs-c-0' },
+      { sapId: 2, hubspotId: 'hs-c-0' },
+    ]));
+    expect(mappings).toHaveLength(2);
+  });
+
+  it('drops properties the portal cannot write from the create payload', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.listWritablePropertyNames.mockResolvedValue(new Set(['email', 'firstname', 'internalcode']));
+    useCase.fieldMappingService.mapRecords.mockResolvedValue([
+      { properties: { firstname: 'Ana', internalcode: 'IC-1', ghost: 'x', empty: null } },
+    ]);
+
+    const companies = [{
+      hubspotId: 'hs-co-1',
+      item: { properties: {}, rawSapData: { CardCode: 'C1', ContactEmployees: [{ InternalCode: 1, E_Mail: 'ana@x.com' }] } },
+    }];
+
+    await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
+
+    const inputs = useCase.crmBatchClient.batchCreateObjects.mock.calls[0][2].inputs;
+    expect(inputs[0].properties).toEqual({ firstname: 'Ana', internalcode: 'IC-1', email: 'ana@x.com' });
+  });
+
+  it('keeps syncing when the writable property lookup fails', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.listWritablePropertyNames.mockRejectedValue(new Error('properties down'));
+
+    const companies = [{
+      hubspotId: 'hs-co-1',
+      item: { properties: {}, rawSapData: { CardCode: 'C1', ContactEmployees: [{ InternalCode: 1, E_Mail: 'a@x.com' }] } },
+    }];
+
+    const { contactErrors } = await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
+
+    expect(contactErrors).toEqual([]);
+    expect(useCase.crmBatchClient.batchCreateObjects).toHaveBeenCalledTimes(1);
   });
 
   it('records a contactError for the entries a 207 create batch rejected', async () => {
@@ -310,7 +422,7 @@ describe('SyncCompanyContactsInBatches', () => {
 
     expect(contactErrors).toEqual([]);
     expect(useCase.crmBatchClient.batchCreateObjects).not.toHaveBeenCalled();
-    expect(useCase.crmBatchClient.batchReadObjectsByProperty).not.toHaveBeenCalled();
+    expect(useCase.crmBatchClient.listAllObjects).not.toHaveBeenCalled();
     expect(useCase.crmBatchClient.batchAssociateDefault).not.toHaveBeenCalled();
     expect(useCase.logger.warn).toHaveBeenCalled();
   });

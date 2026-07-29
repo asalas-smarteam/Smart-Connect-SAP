@@ -3,10 +3,10 @@ import {
   resolveBypassEmail,
 } from '#application/services/bypassEmail.service.js';
 import { buildCompanyContactPayload } from '#application/services/companyContactPayload.service.js';
+import { CrmObjectIndex, normalizeIndexKey } from '#application/services/crmObjectIndex.service.js';
+import { sanitizeProperties } from '#application/services/hubspotPropertyPayload.service.js';
 import {
   BATCH_CONCURRENCY,
-  HUBSPOT_BATCH_INPUT_LIMIT,
-  SEARCH_FALLBACK_CONCURRENCY,
   chunkArray,
   retryRequest,
   runInWaves,
@@ -14,10 +14,6 @@ import {
   writeChunkSize,
 } from '#application/services/hubspotBatching.utils.js';
 import { buildContactErrorEntry } from '#application/use-cases/HandleHubspotAssociations.js';
-
-function normalizeKey(value) {
-  return String(value ?? '').trim().toLowerCase();
-}
 
 function getCompanySapId(item) {
   return item?.rawSapData?.BusinessPartner
@@ -37,6 +33,7 @@ export class SyncCompanyContactsInBatches {
     fieldMappingService,
     fallbackEmailGenerator,
     findPropertyResolver,
+    identityProperty = 'internalcode',
     bypassEmailConfigRepository = null,
     syncWarningRepository = null,
     logger = console,
@@ -47,7 +44,12 @@ export class SyncCompanyContactsInBatches {
     this.associationRegistry = associationRegistry;
     this.fieldMappingService = fieldMappingService;
     this.fallbackEmailGenerator = fallbackEmailGenerator;
+    // Fallback resolver: the tenant's configured defaultFindHubspot property,
+    // only consulted when the identity property finds nothing.
     this.findPropertyResolver = findPropertyResolver;
+    // Child contacts carry their SAP InternalCode / person BusinessPartner in
+    // this HubSpot property: it is the identity, not the tenant-wide find one.
+    this.identityProperty = identityProperty;
     this.bypassEmailConfigRepository = bypassEmailConfigRepository;
     this.syncWarningRepository = syncWarningRepository;
     this.logger = logger;
@@ -113,65 +115,97 @@ export class SyncCompanyContactsInBatches {
       return { contactErrors };
     }
 
-    // Dedupe by find-property value: HubSpot rejects a batch containing two
-    // inputs with the same unique value. Every company keeps its association.
-    const findProperty = await this.findPropertyResolver({ tenantModels });
-    const byKey = new Map();
-    // The normalized key is only a dedupe/lookup key. HubSpot must receive the
-    // value exactly as SAP wrote it: find properties like idsap/internalcode
-    // are case sensitive, so sending the lowercased key would miss every
-    // existing record and re-create the whole contact base.
-    const rawValueByKey = new Map();
-    for (const entry of entries) {
-      const rawValue = entry.contactPayload?.properties?.[findProperty];
-      const key = normalizeKey(rawValue);
-      entry.key = key;
+    const fallbackProperty = await this.findPropertyResolver({ tenantModels });
 
-      if (key && !byKey.has(key)) {
-        byKey.set(key, entry);
-        // Trimmed but NOT lowercased: whitespace is noise SAP often carries,
-        // case is significant for idsap/internalcode lookups.
-        rawValueByKey.set(key, String(rawValue).trim());
-      } else if (!key) {
-        // No find value (e.g. bypassed email with findProperty=email): cannot
-        // be matched to an existing record — always created, never deduped.
-        entry.alwaysCreate = true;
-      }
-    }
-    const uniqueEntries = [...byKey.values(), ...entries.filter((entry) => entry.alwaysCreate)];
-
-    // Deduping collapses twins that share a find value, but every twin's SAP id
-    // still needs its own registry row — otherwise the next run cannot resolve
-    // the dropped code and would create a duplicate contact.
-    const sapIdsByKey = new Map();
-    for (const entry of entries) {
-      if (!entry.key || !entry.sapInternalCode) {
-        continue;
-      }
-      if (!sapIdsByKey.has(entry.key)) {
-        sapIdsByKey.set(entry.key, new Set());
-      }
-      sapIdsByKey.get(entry.key).add(entry.sapInternalCode);
-    }
-
-    let existingByKey;
+    let index;
     try {
-      existingByKey = await this.readExistingContacts({
-        values: [...rawValueByKey.values()],
-        findProperty,
-        uniqueEntries,
-        clientConfig,
-        tenantModels,
-        getToken,
-      });
+      index = await this.buildIndex({ fallbackProperty, clientConfig, tenantModels, getToken });
     } catch (readError) {
-      // Batch read AND its search fallback both failed: we cannot tell creates
-      // from updates, so abort child-contact sync with a single error entry
-      // rather than rejecting and breaking the caller's { contactErrors }.
+      // Without the index we cannot tell creates from updates; creating blindly
+      // would duplicate the contact base. A throwing sweep means "index
+      // unavailable", never "no contact exists", so we abort with a single
+      // error entry rather than rejecting the caller's { contactErrors }.
       this.logger.error?.('Company contact batch sync error:', readError);
       contactErrors.push(buildContactErrorEntry({ error: readError }));
       return { contactErrors };
     }
+
+    // Fails soft, unlike the index: a null allow-list still strips nulls, and
+    // if an unknown property then triggers a batch-wide 400 the per-chunk catch
+    // degrades only that chunk. Throwing away a good sweep costs far more.
+    let writableProperties = null;
+    try {
+      const token = await getToken();
+      writableProperties = await this.retry(() =>
+        this.crmBatchClient.listWritablePropertyNames(token, 'contact')
+      );
+    } catch (propertyError) {
+      this.logger.warn?.('Contact writable property lookup failed, sending unfiltered payloads:', propertyError);
+    }
+
+    // Entries resolving to the same contact collapse into one write; every
+    // company still gets its association pair and every twin SAP id is still
+    // registered. `entry.key` is the group id shared by the collapsed twins.
+    const byKey = new Map();
+    const existingByKey = new Map();
+    const sapIdsByKey = new Map();
+    // Namespaced tier key -> group id, so a row carrying only the fallback
+    // value cannot create a duplicate of a row that also carried an identity.
+    const claimedBy = new Map();
+
+    for (const entry of entries) {
+      const properties = entry.contactPayload?.properties;
+      const existing = index.find(properties);
+      const claimKeys = this.dedupeKeys(properties, fallbackProperty);
+
+      // A resolved record wins over the claims: two rows with distinct
+      // identities that already exist as distinct HubSpot records must stay
+      // distinct even when they share the fallback value.
+      let key = null;
+      if (existing) {
+        // `#` cannot start a HubSpot property name, so this can never collide
+        // with a namespaced claim key.
+        key = `#hs:${existing.id}`;
+      } else {
+        const claimed = claimKeys.find((claimKey) => claimedBy.has(claimKey));
+        key = claimed ? claimedBy.get(claimed) : (claimKeys[0] ?? null);
+      }
+      entry.key = key;
+
+      if (!key) {
+        // No identity and no fallback value (e.g. bypassed email with
+        // fallbackProperty=email): nothing can ever match it, so it is always
+        // created and never deduped.
+        entry.alwaysCreate = true;
+        continue;
+      }
+
+      // ALL tiers are claimed, not just the winning one.
+      for (const claimKey of claimKeys) {
+        if (!claimedBy.has(claimKey)) {
+          claimedBy.set(claimKey, key);
+        }
+      }
+
+      if (!byKey.has(key)) {
+        byKey.set(key, entry);
+        if (existing) {
+          existingByKey.set(key, existing);
+        }
+      }
+
+      // Deduping collapses twins, but every twin's SAP id still needs its own
+      // registry row — otherwise the next run cannot resolve the dropped code
+      // and would create a duplicate contact.
+      if (entry.sapInternalCode) {
+        if (!sapIdsByKey.has(key)) {
+          sapIdsByKey.set(key, new Set());
+        }
+        sapIdsByKey.get(key).add(entry.sapInternalCode);
+      }
+    }
+
+    const uniqueEntries = [...byKey.values(), ...entries.filter((entry) => entry.alwaysCreate)];
 
     const createEntries = [];
     const updateEntries = [];
@@ -193,8 +227,8 @@ export class SyncCompanyContactsInBatches {
       }
     }
 
-    await this.createContactBatches({ createEntries, hubspotIdByKey, sapIdsByKey, findProperty, clientConfig, tenantModels, getToken, contactErrors });
-    await this.updateContactBatches({ updateEntries, clientConfig, tenantModels, getToken, contactErrors });
+    await this.createContactBatches({ createEntries, hubspotIdByKey, sapIdsByKey, index, fallbackProperty, writableProperties, clientConfig, tenantModels, getToken, contactErrors });
+    await this.updateContactBatches({ updateEntries, writableProperties, clientConfig, tenantModels, getToken, contactErrors });
     await this.associateContactBatches({ entries, hubspotIdByKey, clientConfig, getToken, contactErrors });
 
     return { contactErrors };
@@ -309,70 +343,55 @@ export class SyncCompanyContactsInBatches {
     return entries;
   }
 
-  // `values` are the RAW find-property values (not the normalized keys): they
-  // travel to HubSpot as batch-read ids / Search IN values. Results are keyed
-  // by the normalized value on the way back.
-  async readExistingContacts({ values, findProperty, uniqueEntries, clientConfig, tenantModels, getToken }) {
-    const existingByKey = new Map();
+  // Every value index.find() could match this row on, namespaced by property so
+  // an internalcode of `x` cannot claim the same slot as an email of `x`. BOTH
+  // tiers are returned, not just the winning one: a row carrying only the
+  // fallback value would otherwise duplicate a row that also carried an
+  // identity. An empty array means nothing can ever match this row.
+  dedupeKeys(properties, fallbackProperty) {
+    const keys = [];
 
-    if (values.length === 0) {
-      return existingByKey;
+    const identity = normalizeIndexKey(properties?.[this.identityProperty]);
+    if (identity) {
+      keys.push(`${this.identityProperty}:${identity}`);
     }
 
-    const searchProperties = await this.contactHandler.getSearchProperties({ clientConfig, tenantModels });
-    const propertyNames = [...new Set([
-      findProperty,
-      ...searchProperties,
-      ...uniqueEntries.flatMap((entry) => Object.keys(entry.contactPayload?.properties ?? {})),
-    ])].filter((name) => name !== 'hs_object_id' && name !== 'associations');
-
-    const collect = (results) => {
-      for (const result of results ?? []) {
-        const key = normalizeKey(result?.properties?.[findProperty]);
-        if (key && !existingByKey.has(key)) {
-          existingByKey.set(key, result);
-        }
+    if (fallbackProperty && fallbackProperty !== this.identityProperty) {
+      const fallback = normalizeIndexKey(properties?.[fallbackProperty]);
+      if (fallback) {
+        keys.push(`${fallbackProperty}:${fallback}`);
       }
-    };
-
-    try {
-      await runInWaves(
-        chunkArray(values, HUBSPOT_BATCH_INPUT_LIMIT),
-        BATCH_CONCURRENCY,
-        async (valueChunk) => {
-          const token = await getToken();
-          const response = await this.retry(() =>
-            this.crmBatchClient.batchReadObjectsByProperty(token, 'contact', {
-              idProperty: findProperty,
-              values: valueChunk,
-              properties: propertyNames,
-            })
-          );
-          collect(response?.results);
-        }
-      );
-    } catch (error) {
-      // idProperty not unique in this portal (or batch read unavailable):
-      // fall back to the Search API with IN filters.
-      this.logger.error?.('Contact batch read failed, falling back to search:', error);
-      existingByKey.clear();
-      await runInWaves(
-        chunkArray(values, HUBSPOT_BATCH_INPUT_LIMIT),
-        SEARCH_FALLBACK_CONCURRENCY,
-        async (valueChunk) => {
-          const token = await getToken();
-          const results = await this.retry(() =>
-            this.crmBatchClient.searchObjectsByPropertyIn(token, 'contact', findProperty, valueChunk, propertyNames)
-          );
-          collect(results);
-        }
-      );
     }
 
-    return existingByKey;
+    return keys;
   }
 
-  async createContactBatches({ createEntries, hubspotIdByKey, sapIdsByKey, findProperty, clientConfig, tenantModels, getToken, contactErrors }) {
+  // One sweep of every contact of the portal, indexed in memory: existence
+  // checks become Map lookups instead of per-value API calls. See the plan's
+  // evidence section for why batch/read and Search cannot do this job.
+  async buildIndex({ fallbackProperty, clientConfig, tenantModels, getToken }) {
+    const searchProperties = await this.contactHandler.getSearchProperties({ clientConfig, tenantModels });
+    const properties = [...new Set([
+      this.identityProperty,
+      fallbackProperty,
+      ...searchProperties,
+    ].filter(Boolean))].filter((name) => name !== 'hs_object_id' && name !== 'associations');
+
+    const token = await getToken();
+    // No retry wrapper here: listAllObjects retries each page internally, so
+    // retrying at this level would re-issue the entire sweep.
+    const records = await this.crmBatchClient.listAllObjects(token, 'contact', properties);
+
+    this.logger.info?.(`Contact index built for company child contacts: ${records.length} records`);
+
+    return new CrmObjectIndex({
+      records,
+      identityProperty: this.identityProperty,
+      fallbackProperty,
+    });
+  }
+
+  async createContactBatches({ createEntries, hubspotIdByKey, sapIdsByKey, index, fallbackProperty, writableProperties, clientConfig, tenantModels, getToken, contactErrors }) {
     await runInWaves(
       chunkArray(createEntries, writeChunkSize(clientConfig)),
       BATCH_CONCURRENCY,
@@ -381,7 +400,9 @@ export class SyncCompanyContactsInBatches {
           const token = await getToken();
           const response = await this.retry(() =>
             this.crmBatchClient.batchCreateObjects(token, 'contact', {
-              inputs: entryChunk.map(({ contactPayload }) => ({ properties: contactPayload.properties })),
+              inputs: entryChunk.map(({ contactPayload }) => ({
+                properties: sanitizeProperties(contactPayload.properties, writableProperties),
+              })),
             })
           );
 
@@ -389,32 +410,50 @@ export class SyncCompanyContactsInBatches {
           // described by `errors` and must not be reported as synced.
           const { results, errors, failed } = summarizeBatchResponse(response, entryChunk.length);
 
-          // Batch create results are not guaranteed to preserve input order:
-          // match by the find property (fall back to positional index).
-          const resultByKey = new Map();
+          // HubSpot does not preserve input order in batch/create responses, so
+          // a property echoed back is the only sound match — never positional.
+          // Two maps for the two tiers index.find() matches on.
+          const resultByIdentity = new Map();
+          const resultByFallback = new Map();
+          const useFallbackTier = Boolean(fallbackProperty) && fallbackProperty !== this.identityProperty;
+
           for (const result of results) {
-            const key = normalizeKey(result?.properties?.[findProperty]);
-            if (key) {
-              resultByKey.set(key, result);
+            const identityKey = normalizeIndexKey(result?.properties?.[this.identityProperty]);
+            if (identityKey && !resultByIdentity.has(identityKey)) {
+              resultByIdentity.set(identityKey, result);
+            }
+
+            if (useFallbackTier) {
+              const fallbackKey = normalizeIndexKey(result?.properties?.[fallbackProperty]);
+              if (fallbackKey && !resultByFallback.has(fallbackKey)) {
+                resultByFallback.set(fallbackKey, result);
+              }
             }
           }
-
-          // Positional matching is only sound when every input came back: on a
-          // partial response the results are shifted and index i would hand an
-          // entry somebody else's HubSpot id.
-          const positionalSafe = failed === 0 && results.length === entryChunk.length;
 
           const mappings = [];
           const seenMappings = new Set();
           const unmatched = [];
-          for (const [index, entry] of entryChunk.entries()) {
-            const created = resultByKey.get(entry.key)
-              ?? (positionalSafe ? results[index] : null);
+          for (const entry of entryChunk) {
+            const properties = entry.contactPayload?.properties;
+            const identityKey = normalizeIndexKey(properties?.[this.identityProperty]);
+            // Fallback tier only for rows with no identity value: it is the
+            // same key index.find() would match them on, so it is exactly as
+            // safe, and without it these rows lose their associations too.
+            const created = identityKey
+              ? resultByIdentity.get(identityKey)
+              : (useFallbackTier
+                ? resultByFallback.get(normalizeIndexKey(properties?.[fallbackProperty]))
+                : undefined);
 
             if (!created?.id) {
               unmatched.push(entry);
               continue;
             }
+
+            // Keeps the index truthful for anything that looks a contact up
+            // after this wave.
+            index.add(created);
 
             if (entry.key) {
               hubspotIdByKey.set(entry.key, created.id);
@@ -442,8 +481,8 @@ export class SyncCompanyContactsInBatches {
           // A shortfall means HubSpot rejected those inputs: surface them as
           // contact errors instead of silently dropping them.
           if (failed > 0) {
-            for (const [index, entry] of unmatched.entries()) {
-              const batchError = errors[index] ?? null;
+            for (const [position, entry] of unmatched.entries()) {
+              const batchError = errors[position] ?? null;
               const error = Object.assign(
                 new Error(batchError?.message ?? 'HubSpot batch create partially failed'),
                 { details: { status: batchError?.status ?? null, hubspotResponse: batchError } }
@@ -466,7 +505,7 @@ export class SyncCompanyContactsInBatches {
     );
   }
 
-  async updateContactBatches({ updateEntries, clientConfig, tenantModels, getToken, contactErrors }) {
+  async updateContactBatches({ updateEntries, writableProperties, clientConfig, tenantModels, getToken, contactErrors }) {
     await runInWaves(
       chunkArray(updateEntries, writeChunkSize(clientConfig)),
       BATCH_CONCURRENCY,
@@ -475,7 +514,10 @@ export class SyncCompanyContactsInBatches {
           const token = await getToken();
           await this.retry(() =>
             this.crmBatchClient.batchUpdateObjects(token, 'contact', {
-              inputs: chunk.map(({ updateInput }) => updateInput),
+              inputs: chunk.map(({ updateInput }) => ({
+                id: updateInput.id,
+                properties: sanitizeProperties(updateInput.properties, writableProperties),
+              })),
             })
           );
         } catch (error) {
