@@ -2,6 +2,7 @@ import {
   applyBypassEmail,
   resolveBypassEmail,
 } from '#application/services/bypassEmail.service.js';
+import { buildCompanyContactPayload } from '#application/services/companyContactPayload.service.js';
 
 export const ASSOCIATION_MAP = Object.freeze({
   deal: ['contact', 'company', 'product'],
@@ -36,8 +37,28 @@ function normalizeAssociationValues(rawResult, associationType) {
   return [];
 }
 
-function getSapContactEmail(sapContact) {
-  return String(sapContact?.E_Mail ?? sapContact?.EmailAddress ?? '').trim();
+// Keeps the canonical { payloadHubspot, responseHubspot } shape used by the
+// other SyncLog error entries and adds the ids needed to report the failure
+// back to the client. hubspotClient wraps failures with `details`, so a 409
+// carries HubSpot's "Contact already exists. Existing ID: X" body.
+export function buildContactErrorEntry({
+  error,
+  sapContactId = null,
+  sapCompanyId = null,
+  companyHubspotId = null,
+  contactPayload = null,
+}) {
+  return {
+    errorType: 'contactEmployee',
+    sapContactId,
+    sapCompanyId,
+    hubspotCompanyId: companyHubspotId ?? null,
+    message: error?.message ?? null,
+    endpoint: error?.details?.endpoint ?? null,
+    status: error?.details?.status ?? null,
+    payloadHubspot: contactPayload?.properties ?? null,
+    responseHubspot: error?.details?.hubspotResponse ?? null,
+  };
 }
 
 export class HandleHubspotAssociations {
@@ -49,6 +70,7 @@ export class HandleHubspotAssociations {
     contactHandler,
     fallbackEmailGenerator,
     bypassEmailConfigRepository = null,
+    syncWarningRepository = null,
     logger = console,
   }) {
     this.associationFetcher = associationFetcher;
@@ -58,7 +80,23 @@ export class HandleHubspotAssociations {
     this.contactHandler = contactHandler;
     this.fallbackEmailGenerator = fallbackEmailGenerator;
     this.bypassEmailConfigRepository = bypassEmailConfigRepository;
+    this.syncWarningRepository = syncWarningRepository;
     this.logger = logger;
+  }
+
+  // Persists a data-quality warning (missing/invalid email) so it can be
+  // reported back to the client. Never throws: a warning must not break a sync.
+  async recordWarning(payload) {
+    if (!this.syncWarningRepository?.record) {
+      return null;
+    }
+
+    try {
+      return await this.syncWarningRepository.record(payload);
+    } catch (error) {
+      this.logger.error?.('Sync warning record error:', error);
+      return null;
+    }
   }
 
   async getBypassEmail({ tenantModels }) {
@@ -70,7 +108,7 @@ export class HandleHubspotAssociations {
     });
   }
 
-  async execute({ objectType, token, item, clientConfig, tenantModels, hubspotId }) {
+  async execute({ objectType, token, item, clientConfig, tenantModels, hubspotId, syncLogId = null }) {
     if (!hubspotId || !ASSOCIATION_MAP[objectType]) {
       return;
     }
@@ -81,8 +119,15 @@ export class HandleHubspotAssociations {
     }
 
     if (objectType === 'company') {
-      await this.handleCompanyAssociations({ token, item, clientConfig, tenantModels, hubspotId });
-      return;
+      // Returns { contactErrors } so contactEmployee failures reach the SyncLog.
+      return this.handleCompanyAssociations({
+        token,
+        item,
+        clientConfig,
+        tenantModels,
+        hubspotId,
+        syncLogId,
+      });
     }
 
     if (objectType === 'deal') {
@@ -166,12 +211,35 @@ export class HandleHubspotAssociations {
     return resolved;
   }
 
-  async syncCompanyContacts({ token, item, clientConfig, tenantModels, companyHubspotId }) {
+  async syncCompanyContacts({
+    token,
+    item,
+    clientConfig,
+    tenantModels,
+    companyHubspotId,
+    syncLogId = null,
+  }) {
+    const contactErrors = [];
+    // S/4 identifies the company BP with BusinessPartner; B1 with CardCode.
+    const sapCompanyId = item?.rawSapData?.BusinessPartner
+      ?? item?.rawSapData?.CardCode
+      ?? item?.properties?.idsap
+      ?? null;
+    const clientConfigId = clientConfig?.id ?? clientConfig?._id ?? null;
+    let sapContacts;
+    let mappedContacts;
+    let bypassEmail;
+
     try {
-      const sapContacts = item?.rawSapData?.ContactEmployees || [];
+      // B1 embeds ContactEmployees in the company record; S/4 attaches the
+      // resolved contact person-BPs under _s4Contacts (see
+      // S4ContactEnrichmentAdapter). Both feed the same contact mappings.
+      sapContacts = item?.rawSapData?._s4Contacts
+        ?? item?.rawSapData?.ContactEmployees
+        ?? [];
 
       if (!Array.isArray(sapContacts) || sapContacts.length === 0) {
-        return;
+        return { contactErrors };
       }
 
       const contactMappings = await this.fieldMappingService.getMappingsByObjectType(
@@ -185,54 +253,91 @@ export class HandleHubspotAssociations {
         this.logger.warn?.('No contactEmployee mappings found for company contact sync');
       }
 
-      const mappedContacts = await this.fieldMappingService.mapRecords(
+      mappedContacts = await this.fieldMappingService.mapRecords(
         sapContacts,
         clientConfig.hubspotCredentialId,
         'contact',
         tenantModels,
         'contactEmployee'
       );
-      const bypassEmail = await this.getBypassEmail({ tenantModels });
+      bypassEmail = await this.getBypassEmail({ tenantModels });
+    } catch (setupError) {
+      this.logger.error?.('Company contact sync error:', setupError);
+      contactErrors.push(buildContactErrorEntry({
+        error: setupError,
+        sapContactId: null,
+        sapCompanyId,
+        companyHubspotId,
+        contactPayload: null,
+      }));
+      return { contactErrors };
+    }
 
-      for (const [index, mappedContact] of mappedContacts.entries()) {
-        const sapContact = sapContacts[index] || {};
-        const sapInternalCode = sapContact?.InternalCode;
-        const sapContactEmail = getSapContactEmail(sapContact);
-        const contactPayload = {
-          ...mappedContact,
-          properties: {
-            ...(mappedContact?.properties || {}),
-          },
-        };
+    for (const [index, mappedContact] of mappedContacts.entries()) {
+      const sapContact = sapContacts[index] || {};
+      // B1 identifies a contact by InternalCode; S/4 person-BPs use their
+      // BusinessPartner id (drives fallback email + SAP->HubSpot registry).
+      const { contactPayload: builtPayload, sapInternalCode } = buildCompanyContactPayload({
+        mappedContact,
+        sapContact,
+        companyFallbackSourceEmail: item?.rawSapData?.EmailAddress,
+        fallbackEmailGenerator: this.fallbackEmailGenerator,
+      });
+      // Declared outside the try so the catch below can still report it.
+      let contactPayload = null;
 
-        if (sapContactEmail) {
-          contactPayload.properties.email = sapContactEmail;
-        }
+      contactPayload = builtPayload;
 
-        if (!contactPayload.properties.email) {
-          const fallbackEmail = this.fallbackEmailGenerator(
-            item?.rawSapData?.EmailAddress,
-            sapInternalCode
-          );
-
-          if (fallbackEmail) {
-            contactPayload.properties.email = fallbackEmail;
-          }
-        }
-
+      // Each contact is isolated: a failure on one (e.g. a HubSpot 409) must
+      // not abort the remaining contacts of the same company.
+      try {
+        const bypassWarnings = [];
         const emailWasBypassed = applyBypassEmail({
           objectType: 'contact',
           item: contactPayload,
           bypassEmail,
           logger: this.logger,
           sapId: sapInternalCode ?? null,
+          onWarning: (warning) => bypassWarnings.push(warning),
         });
+
+        for (const warning of bypassWarnings) {
+          await this.recordWarning({
+            tenantModels,
+            clientConfigId,
+            syncLogId,
+            objectType: 'contact',
+            sapId: warning.sapId ?? sapInternalCode ?? null,
+            code: warning.code,
+            message: warning.message,
+            details: {
+              source: 'companyContact',
+              sapCompanyId,
+              hubspotCompanyId: companyHubspotId ?? null,
+              email: warning.email ?? null,
+            },
+          });
+        }
 
         if (!contactPayload.properties.email && !emailWasBypassed) {
           this.logger.error?.(
             'Company contact sync error:',
             new Error('Company contact email is required before HubSpot sync')
           );
+          await this.recordWarning({
+            tenantModels,
+            clientConfigId,
+            syncLogId,
+            objectType: 'contact',
+            sapId: sapInternalCode ?? null,
+            code: 'contactEmailMissingSkipped',
+            message: 'Company contact skipped: email is required before HubSpot sync',
+            details: {
+              source: 'companyContact',
+              sapCompanyId,
+              hubspotCompanyId: companyHubspotId ?? null,
+            },
+          });
           continue;
         }
 
@@ -283,10 +388,19 @@ export class HandleHubspotAssociations {
             tenantModels
           );
         }
+      } catch (contactSyncError) {
+        this.logger.error?.('Company contact sync error:', contactSyncError);
+        contactErrors.push(buildContactErrorEntry({
+          error: contactSyncError,
+          sapContactId: sapInternalCode ?? null,
+          sapCompanyId,
+          companyHubspotId,
+          contactPayload,
+        }));
       }
-    } catch (contactSyncError) {
-      this.logger.error?.('Company contact sync error:', contactSyncError);
     }
+
+    return { contactErrors };
   }
 
   async handleContactAssociations({ token, item, clientConfig, tenantModels, hubspotId }) {
@@ -317,7 +431,7 @@ export class HandleHubspotAssociations {
     );
   }
 
-  async handleCompanyAssociations({ token, item, clientConfig, tenantModels, hubspotId }) {
+  async handleCompanyAssociations({ token, item, clientConfig, tenantModels, hubspotId, syncLogId = null }) {
     const associationsRoot = item?.properties?.associations || {};
     let associatedContacts = associationsRoot.contacts || [];
 
@@ -344,12 +458,13 @@ export class HandleHubspotAssociations {
       tenantModels
     );
 
-    await this.syncCompanyContacts({
+    return this.syncCompanyContacts({
       token,
       item,
       clientConfig,
       tenantModels,
       companyHubspotId: hubspotId,
+      syncLogId,
     });
   }
 
