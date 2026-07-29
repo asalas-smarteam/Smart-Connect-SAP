@@ -175,7 +175,6 @@ export class ProcessCrmObjectBatches {
     const fallbackProperty = await this.findPropertyResolver({ tenantModels });
 
     let index;
-    let writableProperties = null;
     try {
       index = await this.buildIndex({
         objectType,
@@ -185,11 +184,6 @@ export class ProcessCrmObjectBatches {
         handler,
         getToken,
       });
-
-      const token = await getToken();
-      writableProperties = await this.retry(() =>
-        this.crmBatchClient.listWritablePropertyNames(token, objectType)
-      );
     } catch (error) {
       // Without the index we cannot tell creates from updates, and guessing
       // would duplicate the whole base: fall back to the per-item path.
@@ -197,6 +191,19 @@ export class ProcessCrmObjectBatches {
       const fallbackResult = await sequentialFallback(syncable);
       this.mergeStats(stats, fallbackResult);
       return { ok: true, ...stats };
+    }
+
+    // Fails soft, unlike the index: a null allow-list still strips nulls, and
+    // if an unknown property then triggers a batch-wide 400 the per-chunk catch
+    // degrades only that chunk. Throwing away a good sweep costs far more.
+    let writableProperties = null;
+    try {
+      const token = await getToken();
+      writableProperties = await this.retry(() =>
+        this.crmBatchClient.listWritablePropertyNames(token, objectType)
+      );
+    } catch (error) {
+      this.logger.warn?.('ProcessCrmObjectBatches writable property lookup failed, sending unfiltered payloads:', error);
     }
 
     const createEntries = [];
@@ -212,15 +219,17 @@ export class ProcessCrmObjectBatches {
       const existing = index.find(item?.properties);
 
       if (!existing) {
-        const claimKey = this.dedupeKey(item?.properties, fallbackProperty);
+        const claimKeys = this.dedupeKeys(item?.properties, fallbackProperty);
 
-        if (claimKey && claimedKeys.has(claimKey)) {
+        // Rejected if ANY tier is already claimed; otherwise every tier is
+        // claimed, so a later row cannot slip through on the other one.
+        if (claimKeys.some((key) => claimedKeys.has(key))) {
           stats.sent += 1;
           stats.skipped += 1;
           continue;
         }
-        if (claimKey) {
-          claimedKeys.add(claimKey);
+        for (const key of claimKeys) {
+          claimedKeys.add(key);
         }
 
         createEntries.push({ item });
@@ -289,12 +298,23 @@ export class ProcessCrmObjectBatches {
           const results = Array.isArray(response?.results) ? response.results : [];
           const batchErrors = Array.isArray(response?.errors) ? response.errors : [];
           // HubSpot does not preserve input order in batch/create responses,
-          // so the identity property echoed back is the only sound match.
+          // so a property echoed back is the only sound match. Two maps for the
+          // two tiers index.find() matches on -- never a positional guess.
           const resultByIdentity = new Map();
+          const resultByFallback = new Map();
+          const useFallbackTier = Boolean(fallbackProperty) && fallbackProperty !== this.identityProperty;
+
           for (const result of results) {
             const key = normalizeIndexKey(result?.properties?.[this.identityProperty]);
             if (key && !resultByIdentity.has(key)) {
               resultByIdentity.set(key, result);
+            }
+
+            if (useFallbackTier) {
+              const fallbackKey = normalizeIndexKey(result?.properties?.[fallbackProperty]);
+              if (fallbackKey && !resultByFallback.has(fallbackKey)) {
+                resultByFallback.set(fallbackKey, result);
+              }
             }
           }
 
@@ -302,15 +322,25 @@ export class ProcessCrmObjectBatches {
           let unmatched = 0;
 
           for (const item of chunkItems) {
-            const created = resultByIdentity.get(
-              normalizeIndexKey(item?.properties?.[this.identityProperty])
-            );
+            const identity = normalizeIndexKey(item?.properties?.[this.identityProperty]);
+            // Fallback tier only for rows with no identity value: it is the
+            // same key index.find() would match them on, so it is exactly as
+            // safe, and without it these rows lose their associations too.
+            const created = identity
+              ? resultByIdentity.get(identity)
+              : (useFallbackTier
+                ? resultByFallback.get(normalizeIndexKey(item?.properties?.[fallbackProperty]))
+                : undefined);
 
             if (!created?.id) {
               unmatched += 1;
               continue;
             }
 
+            // Forward-looking insurance only: chunks are fixed before the wave
+            // and nothing calls find() afterwards, so this does not protect a
+            // later chunk today. It keeps the index truthful for any future
+            // caller that does look something up after the create wave.
             index.add(created);
             processed.push({ item, hubspotId: created.id });
             const sapId = getSapId(item);
@@ -382,9 +412,9 @@ export class ProcessCrmObjectBatches {
           // association work twice.
           const chunkItems = entryChunk.map(({ item }) => item);
           const chunkItemSet = new Set(chunkItems);
-          for (let index = processed.length - 1; index >= 0; index -= 1) {
-            if (chunkItemSet.has(processed[index].item)) {
-              processed.splice(index, 1);
+          for (let position = processed.length - 1; position >= 0; position -= 1) {
+            if (chunkItemSet.has(processed[position].item)) {
+              processed.splice(position, 1);
             }
           }
           return sequentialFallback(chunkItems);
@@ -413,21 +443,28 @@ export class ProcessCrmObjectBatches {
     return writeChunkSize(clientConfig);
   }
 
-  // Dedupe on the same value index.find() matches on, otherwise two rows that
-  // resolve to the same record through the fallback tier would both be created.
-  // Null means nothing can ever match this row, so it is always created.
-  dedupeKey(properties, fallbackProperty) {
+  // Every value index.find() could match this row on, namespaced by property
+  // so an idsap of `x` cannot claim the same slot as an email of `x`. BOTH
+  // tiers are returned, not just the winning one: row A {idsap, email} and row
+  // B {email} claim different tiers, yet once A is created B matches it from
+  // the next run onward -- so B has to be rejected on the shared email too.
+  // An empty array means nothing can ever match this row, so it is created.
+  dedupeKeys(properties, fallbackProperty) {
+    const keys = [];
+
     const identity = normalizeIndexKey(properties?.[this.identityProperty]);
     if (identity) {
-      return `${this.identityProperty}:${identity}`;
+      keys.push(`${this.identityProperty}:${identity}`);
     }
+
     if (fallbackProperty && fallbackProperty !== this.identityProperty) {
       const fallback = normalizeIndexKey(properties?.[fallbackProperty]);
       if (fallback) {
-        return `${fallbackProperty}:${fallback}`;
+        keys.push(`${fallbackProperty}:${fallback}`);
       }
     }
-    return null;
+
+    return keys;
   }
 
   // One sweep of the whole object type, indexed in memory. This is what makes
@@ -443,9 +480,9 @@ export class ProcessCrmObjectBatches {
     ].filter(Boolean))].filter((name) => name !== 'hs_object_id' && name !== 'associations');
 
     const token = await getToken();
-    const records = await this.retry(() =>
-      this.crmBatchClient.listAllObjects(token, objectType, properties)
-    );
+    // No retry wrapper here: listAllObjects retries each page internally, so
+    // retrying at this level would re-issue the entire sweep.
+    const records = await this.crmBatchClient.listAllObjects(token, objectType, properties);
 
     this.logger.info?.(`CRM index built for ${objectType}: ${records.length} records`);
 

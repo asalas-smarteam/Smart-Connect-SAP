@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { retryRequest } from '#application/services/hubspotBatching.utils.js';
 import logger from '../logger/logger.js';
 
 const HUBSPOT_BASE_URL = 'https://api.hubapi.com';
@@ -248,19 +249,23 @@ function crmCollection(objectType) {
 // This is the authoritative read: unlike the Search API it hits the CRM
 // directly, so records created moments earlier are already visible, and
 // unlike batch/read with idProperty it works with non-unique properties.
-export async function listAllObjects(token, objectType, properties = [], { pageLimit = 100, maxPages = 2000 } = {}) {
+export async function listAllObjects(token, objectType, properties = [], { pageLimit = 100, maxPages = 2000, sleeper } = {}) {
   const collection = crmCollection(objectType);
   const records = [];
   let after;
   let pages = 0;
 
   do {
+    // Retry the PAGE, not the sweep: a 429 on page 50 of 57 must not discard
+    // the 50 pages already fetched and re-issue them, which would both add
+    // rate pressure and, after enough restarts, degrade the run to the
+    // per-item path the index exists to avoid.
     // eslint-disable-next-line no-await-in-loop
-    const response = await hubspotGet(token, `/crm/v3/objects/${collection}`, {
+    const response = await retryRequest(() => hubspotGet(token, `/crm/v3/objects/${collection}`, {
       limit: pageLimit,
       ...(Array.isArray(properties) && properties.length > 0 ? { properties: properties.join(',') } : {}),
       ...(after ? { after } : {}),
-    });
+    }), { sleeper });
 
     records.push(...(response?.results ?? []));
     after = response?.paging?.next?.after;

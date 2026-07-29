@@ -237,6 +237,60 @@ describe('ProcessCrmObjectBatches', () => {
     expect(result).toMatchObject({ sent: 2, skipped: 1 });
   });
 
+  it('creates one record when one row carries the identity and another only the fallback', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.batchCreateObjects.mockResolvedValue({
+      results: [{ id: 'hs-1', properties: { idsap: 'C001', email: 'x@y.com' } }],
+    });
+    const params = baseParams();
+
+    // Row A claims the identity tier, row B the fallback tier. The keys do not
+    // collide, but once A exists B would match it from the next run onward.
+    const result = await useCase.execute({
+      mappedItems: [
+        { properties: { idsap: 'C001', email: 'x@y.com' }, rawSapData: {} },
+        { properties: { email: 'x@y.com' }, rawSapData: {} },
+      ],
+      ...params,
+    });
+
+    const inputs = useCase.crmBatchClient.batchCreateObjects.mock.calls[0][2].inputs;
+    expect(inputs).toHaveLength(1);
+    expect(result).toMatchObject({ sent: 2, skipped: 1 });
+  });
+
+  it('still batches when the writable-property lookup fails', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.listWritablePropertyNames.mockRejectedValue(new Error('properties down'));
+    const params = baseParams();
+
+    await useCase.execute({
+      mappedItems: [{ properties: { idsap: 'C001', email: 'a@x.com' }, rawSapData: {} }],
+      ...params,
+    });
+
+    // A property-catalog blip must not throw away a good index sweep.
+    expect(params.sequentialFallback).not.toHaveBeenCalled();
+    expect(useCase.crmBatchClient.batchCreateObjects).toHaveBeenCalledTimes(1);
+  });
+
+  it('associates a created record matched back through the fallback property', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.batchCreateObjects.mockResolvedValue({
+      results: [{ id: 'hs-1', properties: { email: 'solo@x.com' } }],
+    });
+    const params = baseParams();
+
+    await useCase.execute({
+      mappedItems: [{ properties: { email: 'solo@x.com', name: 'Solo' }, rawSapData: {} }],
+      ...params,
+    });
+
+    expect(useCase.syncCompanyContactsInBatches.execute).toHaveBeenCalledTimes(1);
+    const { companies } = useCase.syncCompanyContactsInBatches.execute.mock.calls[0][0];
+    expect(companies).toEqual([expect.objectContaining({ hubspotId: 'hs-1' })]);
+  });
+
   it('strips properties the portal does not accept before sending', async () => {
     const useCase = buildUseCase();
     useCase.crmBatchClient.listWritablePropertyNames.mockResolvedValue(new Set(['idsap', 'email', 'name']));

@@ -6,6 +6,10 @@ jest.unstable_mockModule('axios', () => ({
   default: mockAxios,
 }));
 
+jest.unstable_mockModule('../../../src/infrastructure/logger/logger.js', () => ({
+  default: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+}));
+
 const { listAllObjects } = await import('../../../src/infrastructure/hubspot/hubspotClient.js');
 
 // Builds one HubSpot list-page response. `after` present => more pages pending.
@@ -68,6 +72,29 @@ describe('hubspotClient.listAllObjects', () => {
       .rejects.toThrow(/refusing to return a partial index/);
 
     expect(mockAxios).toHaveBeenCalledTimes(3);
+  });
+
+  it('retries only the rate-limited page, never restarting the sweep', async () => {
+    const rateLimited = Object.assign(new Error('rate limited'), {
+      response: { status: 429, statusText: 'Too Many Requests' },
+    });
+    const sleeper = jest.fn().mockResolvedValue(undefined);
+
+    mockAxios
+      .mockResolvedValueOnce(page([record('1')], 'cursor-1'))
+      .mockRejectedValueOnce(rateLimited)
+      .mockResolvedValueOnce(page([record('2')]));
+
+    const records = await listAllObjects('token-1', 'company', [], { sleeper });
+
+    // The sweep completes with both pages...
+    expect(records.map((item) => item.id)).toEqual(['1', '2']);
+    expect(sleeper).toHaveBeenCalledTimes(1);
+    expect(mockAxios).toHaveBeenCalledTimes(3);
+
+    // ...and page 1 was never re-requested: every retry carried the cursor.
+    const cursors = mockAxios.mock.calls.map(([config]) => config.params.after);
+    expect(cursors).toEqual([undefined, 'cursor-1', 'cursor-1']);
   });
 
   it('does not throw when pagination exhausts exactly at the cap', async () => {
