@@ -10,6 +10,7 @@ import { createIntegrationModeModel } from './IntegrationMode.js';
 import { createLineItemPriceWebhookEventModel } from './LineItemPriceWebhookEvent.js';
 import { createLogEntryModel } from './LogEntry.js';
 import { createSyncLogModel } from './SyncLog.js';
+import { createSyncWarningModel } from './SyncWarning.js';
 import { createWebhookConfigModel } from './WebhookConfig.js';
 import { createWebhookEventModel } from './WebhookEvent.js';
 import { createSapCredentialsModel } from './SapCredentials.js';
@@ -37,6 +38,7 @@ export function registerTenantModels(connection) {
     SapDocumentLink: createSapDocumentLinkModel(connection),
     SapFilter: createSapFilterModel(connection),
     SyncLog: createSyncLogModel(connection),
+    SyncWarning: createSyncWarningModel(connection),
     WebhookConfig: createWebhookConfigModel(connection),
     WebhookEvent: createWebhookEventModel(connection),
   };

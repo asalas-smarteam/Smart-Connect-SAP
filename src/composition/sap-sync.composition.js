@@ -20,6 +20,7 @@ import logger from '#infrastructure/logger/logger.adapter.js';
 import TenantSapSyncLockAdapter from '#infrastructure/locks/TenantSapSyncLockAdapter.js';
 import MappingSyncRepository from '#infrastructure/repositories/MappingSyncRepository.js';
 import SapSyncDataAdapter from '#infrastructure/sap/SapSyncDataAdapter.js';
+import S4ContactEnrichmentAdapter from '#infrastructure/sap/customers/S4ContactEnrichmentAdapter.js';
 import sapSyncAdminAdapter from '#infrastructure/scheduler/SapSyncAdminAdapter.js';
 import SapDiscountClient from '#infrastructure/external-services/SapDiscountClient.js';
 import TenantLineItemPriceConfigRepository from '#infrastructure/repositories/TenantLineItemPriceConfigRepository.js';
@@ -70,6 +71,7 @@ export function buildSyncSapConfigToHubspot() {
     productSyncStrategyFactory,
     sapDiscountClient: new SapDiscountClient(),
     discountConfigRepository: new TenantLineItemPriceConfigRepository(),
+    s4ContactEnricher: new S4ContactEnrichmentAdapter({ logger }),
   });
 }
 
