@@ -267,6 +267,13 @@ export async function listAllObjects(token, objectType, properties = [], { pageL
     pages += 1;
   } while (after && pages < maxPages);
 
+  if (after) {
+    throw new Error(
+      `listAllObjects(${objectType}) stopped at the ${maxPages}-page guard with more pages pending; `
+      + 'refusing to return a partial index because missing records would be re-created as duplicates'
+    );
+  }
+
   return records;
 }
 
