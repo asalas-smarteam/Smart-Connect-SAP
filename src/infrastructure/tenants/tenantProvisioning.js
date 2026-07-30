@@ -19,6 +19,10 @@ import {
   normalizeSapFlavor,
 } from '#domain/sap/sap-flavor.constants.js';
 import { SAP_FLAVOR_CONFIG_KEY } from '#infrastructure/config/SapFlavorConfigRepository.js';
+import {
+  DYNAMIC_DESCRIPTION_CONFIG_KEY,
+  DEFAULT_DYNAMIC_DESCRIPTION_CONFIG,
+} from '#domain/sync/dynamic-description.constants.js';
 import { replicateDefaultSapFilters } from './replicateDefaultSapFilters.js';
 
 function slugifyCompanyName(companyName) {
@@ -106,6 +110,19 @@ async function ensureTenantConfigurations({ Configuration }, { sapFlavor = DEFAU
         key: DEFAULT_FIND_HUBSPOT_CONFIG_KEY,
         userUpdated: 'admin',
         value: 'idsap',
+      },
+    },
+    { upsert: true }
+  );
+  // Seeded disabled so the document is discoverable in the admin UI; a tenant
+  // turns it on by setting isRequired and filling in the template.
+  await Configuration.updateOne(
+    { key: DYNAMIC_DESCRIPTION_CONFIG_KEY },
+    {
+      $setOnInsert: {
+        key: DYNAMIC_DESCRIPTION_CONFIG_KEY,
+        userUpdated: 'admin',
+        value: { ...DEFAULT_DYNAMIC_DESCRIPTION_CONFIG },
       },
     },
     { upsert: true }

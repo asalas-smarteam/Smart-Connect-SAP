@@ -1,3 +1,5 @@
+import { applyDynamicDescription } from '#domain/sync/dynamic-description.service.js';
+
 function resolveSourceContext(objectType, sourceContext) {
   if (objectType === 'product') {
     return 'product';
@@ -52,7 +54,7 @@ function resolveValueByPath(inputData, sourceField) {
   return currentValue ?? null;
 }
 
-function mapFields(inputData, mappings, objectType) {
+function mapFields(inputData, mappings, objectType, dynamicDescriptionConfig = null, sourceContext = null) {
   const result = {};
   const resolvedInput = inputData ?? {};
 
@@ -61,6 +63,17 @@ function mapFields(inputData, mappings, objectType) {
     .forEach((mapping) => {
       result[mapping.targetField] = resolveValueByPath(resolvedInput, mapping.sourceField);
     });
+
+  // Runs after the 1:1 pass so a composed value deliberately overwrites the
+  // plain mapping that targets the same HubSpot property.
+  applyDynamicDescription({
+    properties: result,
+    record: resolvedInput,
+    objectType,
+    sourceContext,
+    config: dynamicDescriptionConfig,
+    resolveField: resolveValueByPath,
+  });
 
   const mappedFields = { properties: result };
 
@@ -76,9 +89,24 @@ function mapFields(inputData, mappings, objectType) {
 }
 
 export class FieldMappingService {
-  constructor({ fieldMappingRepository, logger = console }) {
+  constructor({ fieldMappingRepository, dynamicDescriptionConfigRepository = null, logger = console }) {
     this.fieldMappingRepository = fieldMappingRepository;
+    this.dynamicDescriptionConfigRepository = dynamicDescriptionConfigRepository;
     this.logger = logger;
+  }
+
+  // Returns null (composition disabled) when no repository was injected.
+  async getDynamicDescriptionConfig(tenantModels) {
+    if (typeof this.dynamicDescriptionConfigRepository?.getDynamicDescriptionConfig !== 'function') {
+      return null;
+    }
+
+    try {
+      return await this.dynamicDescriptionConfigRepository.getDynamicDescriptionConfig({ tenantModels });
+    } catch (error) {
+      this.logger.error?.('Failed to fetch dynamic description config:', error);
+      return null;
+    }
   }
 
   async getMappings(hubspotCredentialId, objectType, tenantModels, sourceContext) {
@@ -136,7 +164,12 @@ export class FieldMappingService {
         return [];
       }
 
-      return records.map((record) => mapFields(record, mappings, objectType));
+      // Read once per batch, not per record.
+      const dynamicDescriptionConfig = await this.getDynamicDescriptionConfig(tenantModels);
+
+      return records.map(
+        (record) => mapFields(record, mappings, objectType, dynamicDescriptionConfig, resolvedSourceContext)
+      );
     } catch (error) {
       this.logger.error?.('Failed to apply mappings:', error);
       return [];
@@ -197,14 +230,18 @@ export class FieldMappingService {
 
   async applyMapping(inputData, hubspotCredentialId, objectType, tenantModels, sourceContext) {
     try {
-      const mappings = await this.getMappings(
-        hubspotCredentialId,
-        objectType,
-        tenantModels,
-        sourceContext
-      );
+      const [mappings, dynamicDescriptionConfig] = await Promise.all([
+        this.getMappings(hubspotCredentialId, objectType, tenantModels, sourceContext),
+        this.getDynamicDescriptionConfig(tenantModels),
+      ]);
 
-      return mapFields(inputData, mappings, objectType);
+      return mapFields(
+        inputData,
+        mappings,
+        objectType,
+        dynamicDescriptionConfig,
+        resolveSourceContext(objectType, sourceContext)
+      );
     } catch (error) {
       this.logger.error?.('Failed to apply mappings:', error);
       return {};
@@ -213,11 +250,18 @@ export class FieldMappingService {
 
   async applyDealWebhookMapping(payload, hubspotCredentialId, tenantModels) {
     try {
-      const [dealMappings, contactMappings, companyMappings, productMappings] = await Promise.all([
+      const [
+        dealMappings,
+        contactMappings,
+        companyMappings,
+        productMappings,
+        dynamicConfig,
+      ] = await Promise.all([
         this.getMappings(hubspotCredentialId, 'deal', tenantModels),
         this.getMappings(hubspotCredentialId, 'contact', tenantModels),
         this.getMappings(hubspotCredentialId, 'company', tenantModels),
         this.getMappings(hubspotCredentialId, 'product', tenantModels),
+        this.getDynamicDescriptionConfig(tenantModels),
       ]);
 
       const dealPayload = payload?.deal ?? null;
@@ -225,15 +269,15 @@ export class FieldMappingService {
       const companyPayload = payload?.company ?? null;
       const lineItemsPayload = normalizeAssociations(payload?.line_items ?? []);
 
-      const dealMapped = mapFields(dealPayload, dealMappings, 'deal');
+      const dealMapped = mapFields(dealPayload, dealMappings, 'deal', dynamicConfig, 'businessPartner');
       const contactMapped = contactPayload
-        ? mapFields(contactPayload, contactMappings, 'contact').properties
+        ? mapFields(contactPayload, contactMappings, 'contact', dynamicConfig, 'businessPartner').properties
         : null;
       const companyMapped = companyPayload
-        ? mapFields(companyPayload, companyMappings, 'company').properties
+        ? mapFields(companyPayload, companyMappings, 'company', dynamicConfig, 'businessPartner').properties
         : null;
       const productMapped = lineItemsPayload.map(
-        (item) => mapFields(item, productMappings, 'product').properties
+        (item) => mapFields(item, productMappings, 'product', dynamicConfig, 'product').properties
       );
 
       return {

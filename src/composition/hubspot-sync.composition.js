@@ -8,6 +8,7 @@ import hubspotCrmBatchAdapter from '#infrastructure/hubspot/hubspot-crm-batch.ad
 import { getConfiguredFindProperty } from '#infrastructure/hubspot/handlers/utils/searchCriteria.utils.js';
 import { generateFallbackEmail } from '#infrastructure/hubspot/utils/email.utils.js';
 import TenantFieldMappingRepository from '#infrastructure/database/repositories/TenantFieldMappingRepository.js';
+import DynamicDescriptionConfigRepository from '#infrastructure/config/DynamicDescriptionConfigRepository.js';
 import BypassEmailConfigRepository from '#infrastructure/config/BypassEmailConfigRepository.js';
 import MongooseSyncWarningRepository from '#infrastructure/database/repositories/MongooseSyncWarningRepository.js';
 import MainDataInUpdateConfigRepository from '#infrastructure/config/MainDataInUpdateConfigRepository.js';
@@ -53,6 +54,7 @@ export function buildSendMappedItemsToHubspot() {
     associationRegistry: associationRegistryService,
     fieldMappingService: new FieldMappingService({
       fieldMappingRepository: new TenantFieldMappingRepository(),
+      dynamicDescriptionConfigRepository: new DynamicDescriptionConfigRepository(),
     }),
     fallbackEmailGenerator: generateFallbackEmail,
     // Company child contacts are keyed by their own SAP internal code; the

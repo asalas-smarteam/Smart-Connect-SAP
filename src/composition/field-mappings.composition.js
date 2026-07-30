@@ -2,11 +2,13 @@ import ManageFieldMappings from '#application/use-cases/ManageFieldMappings.js';
 import FieldMappingService from '#application/services/field-mapping.service.js';
 import TenantFieldMappingRepository from '#infrastructure/database/repositories/TenantFieldMappingRepository.js';
 import TenantMappingManagementRepository from '#infrastructure/database/repositories/TenantMappingManagementRepository.js';
+import DynamicDescriptionConfigRepository from '#infrastructure/config/DynamicDescriptionConfigRepository.js';
 
 export function buildManageFieldMappings() {
   const fieldMappingRepository = new TenantFieldMappingRepository();
   const fieldMappingService = new FieldMappingService({
     fieldMappingRepository,
+    dynamicDescriptionConfigRepository: new DynamicDescriptionConfigRepository(),
   });
   const mappingManagementRepository = new TenantMappingManagementRepository();
 

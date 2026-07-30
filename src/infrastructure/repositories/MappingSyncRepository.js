@@ -1,4 +1,6 @@
 import TenantFieldMappingRepository from '#infrastructure/database/repositories/TenantFieldMappingRepository.js';
+import DynamicDescriptionConfigRepository from '#infrastructure/config/DynamicDescriptionConfigRepository.js';
+import { applyDynamicDescription } from '#domain/sync/dynamic-description.service.js';
 import { DEFAULT_INVOICE_MAPPINGS } from '#application/services/defaultClientConfigMappings.service.js';
 
 const DEFAULT_PRODUCT_MAPPINGS = Object.freeze([
@@ -89,7 +91,7 @@ function resolveValueByPath(inputData, sourceField) {
   return currentValue ?? null;
 }
 
-function mapFields(inputData, mappings, objectType) {
+function mapFields(inputData, mappings, objectType, dynamicDescriptionConfig = null, sourceContext = null) {
   const properties = {};
 
   mappings
@@ -97,6 +99,17 @@ function mapFields(inputData, mappings, objectType) {
     .forEach((mapping) => {
       properties[mapping.targetField] = resolveValueByPath(inputData, mapping.sourceField);
     });
+
+  // Runs after the 1:1 pass so a composed value deliberately overwrites the
+  // plain mapping that targets the same HubSpot property.
+  applyDynamicDescription({
+    properties,
+    record: inputData,
+    objectType,
+    sourceContext,
+    config: dynamicDescriptionConfig,
+    resolveField: resolveValueByPath,
+  });
 
   const mappedFields = { properties };
 
@@ -112,8 +125,12 @@ function mapFields(inputData, mappings, objectType) {
 }
 
 export class MappingSyncRepository {
-  constructor({ fieldMappingRepository = new TenantFieldMappingRepository() } = {}) {
+  constructor({
+    fieldMappingRepository = new TenantFieldMappingRepository(),
+    dynamicDescriptionConfigRepository = new DynamicDescriptionConfigRepository(),
+  } = {}) {
     this.fieldMappingRepository = fieldMappingRepository;
+    this.dynamicDescriptionConfigRepository = dynamicDescriptionConfigRepository;
   }
 
   async mapRecords({ sapRecords, hubspotCredentialId, objectType, tenantContext, sourceContext }) {
@@ -121,18 +138,32 @@ export class MappingSyncRepository {
       throw new Error('sapRecords must be an array');
     }
 
+    const resolvedSourceContext = resolveSourceContext(objectType, sourceContext);
     const mappings = await this.findMappings({
       tenantContext,
       hubspotCredentialId,
       objectType,
-      sourceContext: resolveSourceContext(objectType, sourceContext),
+      sourceContext: resolvedSourceContext,
     });
 
     if (mappings.length === 0) {
       return [];
     }
 
-    return sapRecords.map((record) => mapFields(record, mappings, objectType));
+    // Read once per run, not per record.
+    const dynamicDescriptionConfig = await this.getDynamicDescriptionConfig({ tenantContext });
+
+    return sapRecords.map(
+      (record) => mapFields(record, mappings, objectType, dynamicDescriptionConfig, resolvedSourceContext)
+    );
+  }
+
+  async getDynamicDescriptionConfig({ tenantContext }) {
+    if (typeof this.dynamicDescriptionConfigRepository?.getDynamicDescriptionConfig !== 'function') {
+      return null;
+    }
+
+    return this.dynamicDescriptionConfigRepository.getDynamicDescriptionConfig({ tenantContext });
   }
 
   async ensureDefaultMappings({

@@ -1,5 +1,6 @@
 import { buildSapFetchOptions } from '../services/sap-sync-options.service.js';
 import { resolveDiscount } from '#domain/products/discount-resolver.service.js';
+import { withDynamicDescriptionSelectFields } from '#domain/sync/dynamic-description.service.js';
 
 export class SyncSapConfigToHubspot {
   constructor({
@@ -75,9 +76,19 @@ export class SyncSapConfigToHubspot {
         sourceContext,
       });
 
+      // A composed-description template may reference a SAP field that has no
+      // mapping row of its own; without this the field would never reach the
+      // $select and the template would silently render empty.
+      const dynamicDescriptionConfig = typeof this.mappingRepository.getDynamicDescriptionConfig === 'function'
+        ? await this.mappingRepository.getDynamicDescriptionConfig({ tenantContext })
+        : null;
+
       const fetchOptions = {
         ...buildSapFetchOptions(activeConfig, this.dateProvider),
-        mappings: sapMappings,
+        mappings: withDynamicDescriptionSelectFields(sapMappings, dynamicDescriptionConfig, {
+          objectType: activeConfig.objectType,
+          sourceContext,
+        }),
       };
       const rawData = await this.sapDataSource.fetchData({
         clientConfigId,

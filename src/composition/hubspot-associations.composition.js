@@ -5,6 +5,7 @@ import HandleHubspotAssociations from '#application/use-cases/HandleHubspotAssoc
 import BypassEmailConfigRepository from '#infrastructure/config/BypassEmailConfigRepository.js';
 import MongooseSyncWarningRepository from '#infrastructure/database/repositories/MongooseSyncWarningRepository.js';
 import TenantFieldMappingRepository from '#infrastructure/database/repositories/TenantFieldMappingRepository.js';
+import DynamicDescriptionConfigRepository from '#infrastructure/config/DynamicDescriptionConfigRepository.js';
 import HubspotAssociationFetchAdapter from '#infrastructure/hubspot/HubspotAssociationFetchAdapter.js';
 import associationRegistryService from '#infrastructure/hubspot/associationRegistryService.js';
 import associationService from '#infrastructure/hubspot/associationService.js';
@@ -19,6 +20,7 @@ export function buildHandleHubspotAssociations() {
     associationService,
     fieldMappingService: new FieldMappingService({
       fieldMappingRepository: new TenantFieldMappingRepository(),
+      dynamicDescriptionConfigRepository: new DynamicDescriptionConfigRepository(),
     }),
     contactHandler,
     fallbackEmailGenerator: generateFallbackEmail,
