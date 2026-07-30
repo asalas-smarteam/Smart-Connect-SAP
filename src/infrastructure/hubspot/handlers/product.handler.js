@@ -1,6 +1,7 @@
 import * as hubspotClient from '../hubspotClient.js';
 import tenantConfigurationService from '#infrastructure/config/tenantConfiguration.service.js';
 import { KEEP_MAPPED_PRICE_FLAG } from '#domain/products/product-sync-strategy.constants.js';
+import { buildExclusiveDiscountProperties } from '#domain/products/discount-properties.service.js';
 import {
   buildHubspotWarehouseStockProperties,
   getHubspotWarehouseStockPropertiesForTenant,
@@ -65,7 +66,12 @@ export async function preprocess({ item, tenantModels, preprocessContext }) {
   const resolvedDiscount = item?.rawSapData?._resolvedDiscount;
   const discountHsProperty = item?.rawSapData?._discountHsProperty;
   if (resolvedDiscount !== null && resolvedDiscount !== undefined && discountHsProperty) {
-    item.properties[discountHsProperty] = resolvedDiscount;
+    // Blanks the mutually exclusive discount property so a value left over from
+    // an earlier sync cannot make HubSpot reject the record.
+    Object.assign(
+      item.properties,
+      buildExclusiveDiscountProperties(discountHsProperty, resolvedDiscount)
+    );
   }
 
   if (item?.rawSapData?.selectedPrice || item?.rawSapData?.[KEEP_MAPPED_PRICE_FLAG]) {

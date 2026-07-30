@@ -199,4 +199,57 @@ describe('product.handler preprocess', () => {
       price: 120,
     });
   });
+
+  describe('mutually exclusive discount properties', () => {
+    const preprocessContext = { warehouseFields: [], priceFields: [] };
+
+    beforeEach(() => {
+      mockBuildHubspotWarehouseStockProperties.mockReturnValue({});
+    });
+
+    function buildItem(discountHsProperty, resolvedDiscount) {
+      return {
+        properties: {},
+        rawSapData: {
+          ItemWarehouseInfoCollection: [],
+          selectedPrice: { Price: 1 },
+          _resolvedDiscount: resolvedDiscount,
+          _discountHsProperty: discountHsProperty,
+        },
+      };
+    }
+
+    it('blanks discount when syncing hs_discount_percentage', async () => {
+      const item = buildItem('hs_discount_percentage', 10);
+
+      await preprocess({ item, tenantModels: {}, preprocessContext });
+
+      expect(item.properties).toEqual({ hs_discount_percentage: 10, discount: '' });
+    });
+
+    it('blanks hs_discount_percentage when syncing discount', async () => {
+      const item = buildItem('discount', 10);
+
+      await preprocess({ item, tenantModels: {}, preprocessContext });
+
+      expect(item.properties).toEqual({ discount: 10, hs_discount_percentage: '' });
+    });
+
+    it('writes no discount property when the tenant has discounts disabled', async () => {
+      // enrichRecordsWithDiscounts leaves both flags unset when isRequired is false.
+      const item = buildItem(undefined, undefined);
+
+      await preprocess({ item, tenantModels: {}, preprocessContext });
+
+      expect(item.properties).toEqual({});
+    });
+
+    it('writes nothing when no discount group matched the product', async () => {
+      const item = buildItem('hs_discount_percentage', null);
+
+      await preprocess({ item, tenantModels: {}, preprocessContext });
+
+      expect(item.properties).toEqual({});
+    });
+  });
 });

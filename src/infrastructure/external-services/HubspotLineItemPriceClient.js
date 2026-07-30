@@ -2,6 +2,7 @@ import logger from '../logger/logger.js';
 import hubspotAuthService from '../hubspot/hubspotAuthService.js';
 import * as hubspotClient from '../hubspot/hubspotClient.js';
 import { runWithRetry } from '#shared/utils/retry.js';
+import { buildExclusiveDiscountProperties } from '#domain/products/discount-properties.service.js';
 
 function toNonEmptyString(value) {
   const normalized = String(value ?? '').trim();
@@ -31,10 +32,12 @@ function buildDiscountProperties(lineItem, taxRateGroupId) {
   }
 
   if (toNonEmptyString(lineItem._discountHsProperty)) {
-    return {
-      discount: '',
-      [lineItem._discountHsProperty]: String(normalizeNumber(lineItem.Discount ?? lineItem.discount, 0)),
-    };
+    // Blanks whichever of discount / hs_discount_percentage is not the
+    // configured one; HubSpot refuses a line item carrying both.
+    return buildExclusiveDiscountProperties(
+      lineItem._discountHsProperty,
+      String(normalizeNumber(lineItem.Discount ?? lineItem.discount, 0))
+    );
   }
 
   return taxRateGroupId
