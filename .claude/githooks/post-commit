@@ -1,0 +1,12 @@
+#!/bin/sh
+# Records each manual commit so the next Claude Code session (via
+# .claude/hooks/check-pending-docs.cjs on UserPromptSubmit) can prompt a
+# review of the Smart-Connect-SAP Obsidian vault docs + memory.
+LOG=".claude/pending-doc-updates.log"
+
+{
+  echo "commit: $(git log -1 --format='%H %ad %s' --date=iso)"
+  echo "files:"
+  git diff-tree --no-commit-id --name-only -r HEAD | sed 's/^/  - /'
+  echo "---"
+} >> "$LOG"
