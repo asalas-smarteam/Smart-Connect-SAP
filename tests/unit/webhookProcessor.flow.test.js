@@ -183,7 +183,9 @@ function buildTenantModels({
   };
 }
 
-function setupMappings({ ordersQuotationsMappings = [] } = {}) {
+// The mocked values are positional: they must follow the same order as the Promise.all in
+// TenantWebhookRuntimeRepository.resolveRuntimeContext.
+function setupMappings({ ordersQuotationsMappings = [], lineMappings = [] } = {}) {
   mockGetMappingsByObjectType
     .mockResolvedValueOnce([
       { sourceField: 'CardName', targetField: 'name' },
@@ -210,6 +212,7 @@ function setupMappings({ ordersQuotationsMappings = [] } = {}) {
       { sourceField: 'Quantity', targetField: 'quantity' },
       { sourceField: 'UnitPrice', targetField: 'price' },
     ])
+    .mockResolvedValueOnce(lineMappings)
     .mockResolvedValueOnce([
       { sourceField: 'DocEntry', targetField: 'sap_docentry' },
       { sourceField: 'DocNum', targetField: 'sap_docnum' },
@@ -540,6 +543,66 @@ describe('webhookProcessor flow', () => {
         data: expect.objectContaining({
           CardCode: 'CL99999',
           PaymentGroupCode: 3,
+        }),
+      })
+    );
+  });
+
+  it('sends mapped line fields in the SAP order DocumentLines from the product orders-quotations mappings', async () => {
+    setupMappings({
+      lineMappings: [
+        { sourceField: 'U_TEXTO_LIBRE', targetField: 'u_texto_libre' },
+        { sourceField: 'U_MESES_GARANTIA', targetField: 'u_meses_garantia' },
+      ],
+    });
+    const tenantModels = buildTenantModels({
+      lineItems: [
+        {
+          hs_sku: 'SKU-1',
+          quantity: '2',
+          price: '30',
+          u_texto_libre: 'Texto de la linea',
+          u_meses_garantia: '12',
+        },
+      ],
+      contact: {
+        hs_object_id: 'contact-1',
+        firstname: 'Cliente Mostrador',
+        idsap: 'CL99999',
+      },
+    });
+
+    mockAxios
+      .mockResolvedValueOnce({
+        data: {
+          CardCode: 'CL99999',
+          CardName: 'Cliente Mostrador',
+          PriceListNum: 4,
+          ContactEmployees: [],
+        },
+      })
+      .mockResolvedValueOnce({ data: { DocEntry: 10, DocNum: 20 } });
+
+    const result = await webhookProcessor.processPendingEvents({
+      tenantModels,
+      tenantId: 'tenant-1',
+      tenantKey: 'tenant_1',
+      portalId: '12345',
+    });
+
+    expect(result.completed).toBe(1);
+    expect(mockAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'post',
+        url: 'https://sap.example.com:50000/b1s/v2/Orders',
+        data: expect.objectContaining({
+          DocumentLines: [
+            expect.objectContaining({
+              ItemCode: 'SKU-1',
+              U_TEXTO_LIBRE: 'Texto de la linea',
+              U_MESES_GARANTIA: '12',
+            }),
+          ],
         }),
       })
     );

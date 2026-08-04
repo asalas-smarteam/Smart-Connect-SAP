@@ -151,6 +151,109 @@ describe('order-builder.service mapDocumentLines', () => {
     expect(lines[0].UnitPrice).toBe(400);
   });
 
+  // The product/product mappings drive the SAP -> HubSpot product sync, so they must never
+  // leak into DocumentLines: Price / QuantityOnStock / ItemName do not exist on B1 lines.
+  it('never leaks product sync mappings into the line', () => {
+    const lines = mapDocumentLines({
+      productMappings: [
+        { sourceField: 'ItemCode', targetField: 'hs_sku' },
+        { sourceField: 'ItemName', targetField: 'name' },
+        { sourceField: 'QuantityOnStock', targetField: 'quantity' },
+        { sourceField: 'Price', targetField: 'price' },
+      ],
+      taxCodes: [],
+      lineItems: [
+        { hs_sku: 'FVP1201N', name: 'Impresora', quantity: '4', price: '14000', warehouses: 'EP07' },
+      ],
+    });
+
+    expect(lines[0]).toEqual({
+      ItemCode: 'FVP1201N',
+      Quantity: 4,
+      UnitPrice: 14000,
+      WarehouseCode: 'EP07',
+    });
+  });
+
+  it('sends mapped line fields from lineMappings and skips line items without a value', () => {
+    const lines = mapDocumentLines({
+      productMappings,
+      lineMappings: [
+        { sourceField: 'U_TEXTO_LIBRE', targetField: 'u_texto_libre' },
+        { sourceField: 'U_MESES_GARANTIA', targetField: 'u_meses_garantia' },
+      ],
+      taxCodes: [],
+      lineItems: [
+        {
+          hs_sku: 'A56010004',
+          quantity: '1',
+          price: '19.21',
+          u_texto_libre: 'Texto de la linea',
+          u_meses_garantia: '12',
+        },
+        { hs_sku: 'A56010005', quantity: '2', price: '10', u_texto_libre: '' },
+      ],
+    });
+
+    expect(lines[0].U_TEXTO_LIBRE).toBe('Texto de la linea');
+    expect(lines[0].U_MESES_GARANTIA).toBe('12');
+    expect(lines[1]).not.toHaveProperty('U_TEXTO_LIBRE');
+    expect(lines[1]).not.toHaveProperty('U_MESES_GARANTIA');
+  });
+
+  it('does not let lineMappings clobber the line fields owned by the builder', () => {
+    const lines = mapDocumentLines({
+      productMappings,
+      lineMappings: [
+        { sourceField: 'WarehouseCode', targetField: 'wrong_warehouse' },
+        { sourceField: 'TaxCode', targetField: 'wrong_tax_code' },
+        { sourceField: 'Quantity', targetField: 'wrong_quantity' },
+      ],
+      taxCodes: [{ Rate: 13, Code: 'IVA13' }],
+      lineItems: [
+        {
+          hs_sku: 'A56010004',
+          quantity: '1',
+          price: '19.21',
+          warehouses: 'EP07',
+          hs_tax_rate: '13',
+          wrong_warehouse: 'ZZZ',
+          wrong_tax_code: 'ZZZ',
+          wrong_quantity: '999',
+        },
+      ],
+    });
+
+    expect(lines[0].WarehouseCode).toBe('EP07');
+    expect(lines[0].TaxCode).toBe('IVA13');
+    expect(lines[0].Quantity).toBe(1);
+  });
+
+  // B1 takes either the net price or the VAT-inclusive price, never both.
+  it('omits UnitPrice when PriceAfterVAT is mapped', () => {
+    const lines = mapDocumentLines({
+      productMappings,
+      lineMappings: [{ sourceField: 'PriceAfterVAT', targetField: 'price' }],
+      taxCodes: [],
+      lineItems: [{ hs_sku: 'A56010004', quantity: '1', price: '19.21' }],
+    });
+
+    expect(lines[0].PriceAfterVAT).toBe('19.21');
+    expect(lines[0]).not.toHaveProperty('UnitPrice');
+  });
+
+  it('keeps UnitPrice when the line item has no value for the mapped PriceAfterVAT', () => {
+    const lines = mapDocumentLines({
+      productMappings,
+      lineMappings: [{ sourceField: 'PriceAfterVAT', targetField: 'precio_con_iva' }],
+      taxCodes: [],
+      lineItems: [{ hs_sku: 'A56010004', quantity: '1', price: '19.21', precio_con_iva: '' }],
+    });
+
+    expect(lines[0]).not.toHaveProperty('PriceAfterVAT');
+    expect(lines[0].UnitPrice).toBe(19.21);
+  });
+
   it('does not add DiscountPercent when requireDiscounts is not configured', () => {
     const lines = mapDocumentLines({
       productMappings,

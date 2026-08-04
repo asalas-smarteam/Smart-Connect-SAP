@@ -22,6 +22,13 @@ export const webhookEventSchema = new Schema(
         'sap_created_hubspot_error',
         'completed',
         'errored',
+        // Terminal and inert: this collection also stores sync data-quality
+        // reports, which are records rather than work. `claimWaiting` selects on
+        // `{ status: 'waiting' }` with no eventType filter, so a report queued as
+        // `waiting` -- or as any status the state machine can revive -- would be
+        // picked up and processed as a deal webhook. `report` is claimed by
+        // nothing, which is the point.
+        'report',
       ],
       default: 'waiting',
       index: true,

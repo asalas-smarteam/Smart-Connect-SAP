@@ -156,6 +156,7 @@ export class ProcessHubspotWebhookEvent {
       const documentLines = mapDocumentLines({
         lineItems,
         productMappings: mappings.productMappings,
+        lineMappings: mappings.productOrdersQuotationsMappings,
         taxCodes,
         miscPriceCalculationConfig,
         discountConfig,
@@ -308,7 +309,7 @@ export class ProcessHubspotWebhookEvent {
   }
 
   async resolveOrderSlpCode({ tenantModels, deal, hubspotCredentials }) {
-    const hubspotOwnerId = toNonEmptyString(deal?.hubspot_owner_id || deal?.hubspotOwnerId);
+    const hubspotOwnerId = toNonEmptyString(deal?.hubspot_owner_id);
     const dealId = toNonEmptyString(deal?.hs_object_id);
 
     if (!hubspotOwnerId) {

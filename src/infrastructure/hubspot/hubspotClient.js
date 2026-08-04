@@ -1,8 +1,17 @@
 import axios from 'axios';
-import { retryRequest } from '#application/services/hubspotBatching.utils.js';
+import { sendWithRateLimit } from './hubspotTransport.js';
 import logger from '../logger/logger.js';
 
 const HUBSPOT_BASE_URL = 'https://api.hubapi.com';
+
+// 15s was too tight for a 100-input batch: the timeouts it produced left the
+// outcome unknown, and the old code answered by replaying the create.
+const DEFAULT_TIMEOUT_MS = Number(process.env.HUBSPOT_REQUEST_TIMEOUT_MS) || 30000;
+const BATCH_TIMEOUT_MS = Number(process.env.HUBSPOT_BATCH_TIMEOUT_MS) || 60000;
+
+function timeoutFor(endpoint) {
+  return /\/batch\//.test(String(endpoint ?? '')) ? BATCH_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+}
 
 function buildErrorDetails(error, endpoint, method) {
   return {
@@ -15,26 +24,39 @@ function buildErrorDetails(error, endpoint, method) {
   };
 }
 
-async function hubspotRequest(method, endpoint, token, data) {
+// `expectedStatuses` are statuses the caller drives a decision from rather than
+// treating as failures (a 409 while bisecting a conflicting chunk). They still
+// throw -- only the log level changes, so a healthy run does not report hundreds
+// of errors and bury the ones that need a human.
+async function hubspotRequest(method, endpoint, token, data, { expectedStatuses = [] } = {}) {
   try {
-    const response = await axios({
-      method,
-      url: `${HUBSPOT_BASE_URL}${endpoint}`,
-      data,
-      params: method.toLowerCase() === 'get' ? data : undefined,
-      timeout: 15000,
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+    // Every call is rate limited and retried here, so no call site can forget
+    // to. Logging stays outside: sendWithRateLimit only throws once its retries
+    // are spent, so a 429 that resolves on retry no longer logs as a failure.
+    return await sendWithRateLimit(async () => {
+      const response = await axios({
+        method,
+        url: `${HUBSPOT_BASE_URL}${endpoint}`,
+        data,
+        params: method.toLowerCase() === 'get' ? data : undefined,
+        timeout: timeoutFor(endpoint),
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
 
-    return response.data;
+      return response.data;
+    }, { method, endpoint });
   } catch (error) {
     const errorDetails = buildErrorDetails(error, endpoint, method);
+    const expected = expectedStatuses.includes(errorDetails.status);
 
-    logger.error({
+    // `errorDetails.message` carries axios' own text and wins the spread, so the
+    // level plus this flag are what distinguish the two cases in the log.
+    logger[expected ? 'warn' : 'error']({
       message: 'HubSpot API request failed',
       ...errorDetails,
+      ...(expected ? { expectedStatus: true } : {}),
     });
 
     const wrappedError = new Error(
@@ -44,6 +66,9 @@ async function hubspotRequest(method, endpoint, token, data) {
     );
     wrappedError.cause = error;
     wrappedError.details = errorDetails;
+    // Preserved across the wrap: callers decide between reconciling and
+    // replaying based on whether the write may already have landed.
+    wrappedError.outcomeUnknown = error?.outcomeUnknown === true;
     throw wrappedError;
   }
 }
@@ -249,23 +274,23 @@ function crmCollection(objectType) {
 // This is the authoritative read: unlike the Search API it hits the CRM
 // directly, so records created moments earlier are already visible, and
 // unlike batch/read with idProperty it works with non-unique properties.
-export async function listAllObjects(token, objectType, properties = [], { pageLimit = 100, maxPages = 2000, sleeper } = {}) {
+export async function listAllObjects(token, objectType, properties = [], { pageLimit = 100, maxPages = 2000 } = {}) {
   const collection = crmCollection(objectType);
   const records = [];
   let after;
   let pages = 0;
 
   do {
-    // Retry the PAGE, not the sweep: a 429 on page 50 of 57 must not discard
-    // the 50 pages already fetched and re-issue them, which would both add
-    // rate pressure and, after enough restarts, degrade the run to the
+    // Retried at the transport layer, per PAGE: a 429 on page 50 of 57 must not
+    // discard the 50 pages already fetched and re-issue them, which would both
+    // add rate pressure and, after enough restarts, degrade the run to the
     // per-item path the index exists to avoid.
     // eslint-disable-next-line no-await-in-loop
-    const response = await retryRequest(() => hubspotGet(token, `/crm/v3/objects/${collection}`, {
+    const response = await hubspotGet(token, `/crm/v3/objects/${collection}`, {
       limit: pageLimit,
       ...(Array.isArray(properties) && properties.length > 0 ? { properties: properties.join(',') } : {}),
       ...(after ? { after } : {}),
-    }), { sleeper });
+    });
 
     records.push(...(response?.results ?? []));
     after = response?.paging?.next?.after;
@@ -297,12 +322,13 @@ export async function listWritablePropertyNames(token, objectType) {
   );
 }
 
-export async function batchCreateObjects(token, objectType, data) {
+export async function batchCreateObjects(token, objectType, data, options = {}) {
   return hubspotRequest(
     'post',
     `/crm/v3/objects/${crmCollection(objectType)}/batch/create`,
     token,
     data,
+    options,
   );
 }
 
@@ -352,30 +378,20 @@ export async function batchUpdate(token, dataArray) {
   );
 }
 
+// Routed through hubspotRequest rather than raw axios so it is rate limited too:
+// this is the per-pair fallback of the association batch, so it runs in exactly
+// the tight loops that need throttling most.
 export async function associateObjects(token, fromType, fromId, toType, toId) {
-  const url = `https://api.hubapi.com/crm/v4/objects/${fromType}/${fromId}/associations/${toType}/${toId}`;
-  const response = await axios.put(url, [], {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-
-  return response.data;
+  return hubspotRequest(
+    'put',
+    `/crm/v4/objects/${fromType}/${fromId}/associations/${toType}/${toId}`,
+    token,
+    [],
+  );
 }
 
 export async function createLineItem(token, properties) {
-  const response = await axios.post(
-    'https://api.hubapi.com/crm/v3/objects/line_items',
-    properties,
-    {
-      timeout: 15000,
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    },
-  );
-
-  return response.data;
+  return hubspotRequest('post', '/crm/v3/objects/line_items', token, properties);
 }
 
 export async function batchUpdateLineItems(token, data) {

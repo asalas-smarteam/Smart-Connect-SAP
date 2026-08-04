@@ -10,7 +10,9 @@ import { generateFallbackEmail } from '#infrastructure/hubspot/utils/email.utils
 import TenantFieldMappingRepository from '#infrastructure/database/repositories/TenantFieldMappingRepository.js';
 import DynamicDescriptionConfigRepository from '#infrastructure/config/DynamicDescriptionConfigRepository.js';
 import BypassEmailConfigRepository from '#infrastructure/config/BypassEmailConfigRepository.js';
+import MappingFallbackConfigRepository from '#infrastructure/config/MappingFallbackConfigRepository.js';
 import MongooseSyncWarningRepository from '#infrastructure/database/repositories/MongooseSyncWarningRepository.js';
+import MongooseSyncReportRepository from '#infrastructure/database/repositories/MongooseSyncReportRepository.js';
 import MainDataInUpdateConfigRepository from '#infrastructure/config/MainDataInUpdateConfigRepository.js';
 import associationRegistryService from '#infrastructure/hubspot/associationRegistryService.js';
 import companyHandler from '#infrastructure/hubspot/handlers/company.handler.js';
@@ -55,6 +57,7 @@ export function buildSendMappedItemsToHubspot() {
     fieldMappingService: new FieldMappingService({
       fieldMappingRepository: new TenantFieldMappingRepository(),
       dynamicDescriptionConfigRepository: new DynamicDescriptionConfigRepository(),
+      mappingFallbackConfigRepository: new MappingFallbackConfigRepository(),
     }),
     fallbackEmailGenerator: generateFallbackEmail,
     // Company child contacts are keyed by their own SAP internal code; the
@@ -63,6 +66,7 @@ export function buildSendMappedItemsToHubspot() {
     findPropertyResolver,
     bypassEmailConfigRepository: new BypassEmailConfigRepository(),
     syncWarningRepository: new MongooseSyncWarningRepository(),
+    syncReportRepository: new MongooseSyncReportRepository(),
     logger,
   });
 

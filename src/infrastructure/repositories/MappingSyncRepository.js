@@ -1,7 +1,12 @@
 import TenantFieldMappingRepository from '#infrastructure/database/repositories/TenantFieldMappingRepository.js';
 import DynamicDescriptionConfigRepository from '#infrastructure/config/DynamicDescriptionConfigRepository.js';
+import MappingFallbackConfigRepository from '#infrastructure/config/MappingFallbackConfigRepository.js';
 import { applyDynamicDescription } from '#domain/sync/dynamic-description.service.js';
 import { DEFAULT_INVOICE_MAPPINGS } from '#application/services/defaultClientConfigMappings.service.js';
+import {
+  buildMappedProperties,
+  resolveValueByPath,
+} from '#application/services/mappingValueResolver.service.js';
 
 const DEFAULT_PRODUCT_MAPPINGS = Object.freeze([
   { sourceField: 'ItemCode', targetField: 'hs_sku', sourceContext: 'product' },
@@ -60,45 +65,19 @@ function toMappingDto(mapping) {
   };
 }
 
-function resolveValueByPath(inputData, sourceField) {
-  if (!sourceField) {
-    return null;
-  }
-
-  const pathParts = String(sourceField)
-    .split('.')
-    .map((segment) => segment.trim())
-    .filter(Boolean);
-
-  let currentValue = inputData ?? {};
-
-  for (const segment of pathParts) {
-    if (currentValue === null || typeof currentValue === 'undefined') {
-      return null;
-    }
-
-    if (Array.isArray(currentValue)) {
-      currentValue = currentValue[0];
-    }
-
-    currentValue = currentValue?.[segment];
-  }
-
-  if (Array.isArray(currentValue)) {
-    return currentValue[0] ?? null;
-  }
-
-  return currentValue ?? null;
-}
-
-function mapFields(inputData, mappings, objectType, dynamicDescriptionConfig = null, sourceContext = null) {
-  const properties = {};
-
-  mappings
-    .filter((mapping) => mapping.isActive ?? true)
-    .forEach((mapping) => {
-      properties[mapping.targetField] = resolveValueByPath(inputData, mapping.sourceField);
-    });
+function mapFields(
+  inputData,
+  mappings,
+  objectType,
+  dynamicDescriptionConfig = null,
+  sourceContext = null,
+  fallbackConfig = null
+) {
+  const properties = buildMappedProperties({
+    input: inputData ?? {},
+    mappings,
+    fallbackConfig,
+  });
 
   // Runs after the 1:1 pass so a composed value deliberately overwrites the
   // plain mapping that targets the same HubSpot property.
@@ -128,9 +107,11 @@ export class MappingSyncRepository {
   constructor({
     fieldMappingRepository = new TenantFieldMappingRepository(),
     dynamicDescriptionConfigRepository = new DynamicDescriptionConfigRepository(),
+    mappingFallbackConfigRepository = new MappingFallbackConfigRepository(),
   } = {}) {
     this.fieldMappingRepository = fieldMappingRepository;
     this.dynamicDescriptionConfigRepository = dynamicDescriptionConfigRepository;
+    this.mappingFallbackConfigRepository = mappingFallbackConfigRepository;
   }
 
   async mapRecords({ sapRecords, hubspotCredentialId, objectType, tenantContext, sourceContext }) {
@@ -151,11 +132,29 @@ export class MappingSyncRepository {
     }
 
     // Read once per run, not per record.
-    const dynamicDescriptionConfig = await this.getDynamicDescriptionConfig({ tenantContext });
+    const [dynamicDescriptionConfig, fallbackConfig] = await Promise.all([
+      this.getDynamicDescriptionConfig({ tenantContext }),
+      this.getMappingFallbackConfig({ tenantContext }),
+    ]);
 
     return sapRecords.map(
-      (record) => mapFields(record, mappings, objectType, dynamicDescriptionConfig, resolvedSourceContext)
+      (record) => mapFields(
+        record,
+        mappings,
+        objectType,
+        dynamicDescriptionConfig,
+        resolvedSourceContext,
+        fallbackConfig
+      )
     );
+  }
+
+  async getMappingFallbackConfig({ tenantContext }) {
+    if (typeof this.mappingFallbackConfigRepository?.getMappingFallbackConfig !== 'function') {
+      return null;
+    }
+
+    return this.mappingFallbackConfigRepository.getMappingFallbackConfig({ tenantContext });
   }
 
   async getDynamicDescriptionConfig({ tenantContext }) {

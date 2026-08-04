@@ -3,16 +3,19 @@ import {
   resolveBypassEmail,
 } from '#application/services/bypassEmail.service.js';
 import { buildCompanyContactPayload } from '#application/services/companyContactPayload.service.js';
-import { CrmObjectIndex, normalizeIndexKey } from '#application/services/crmObjectIndex.service.js';
+import { CrmObjectIndex, normalizeIndexKey, uniquePropertiesFor } from '#application/services/crmObjectIndex.service.js';
+import { buildDuplicateContactEmailReport } from '#application/services/duplicateContactEmail.report.js';
 import { sanitizeProperties } from '#application/services/hubspotPropertyPayload.service.js';
 import {
   BATCH_CONCURRENCY,
   chunkArray,
+  createWithConflictSplit,
   retryRequest,
   runInWaves,
   summarizeBatchResponse,
   writeChunkSize,
 } from '#application/services/hubspotBatching.utils.js';
+import { BATCH_FAILURE, classifyBatchFailure } from '#application/services/hubspotBatchFailure.service.js';
 import { buildContactErrorEntry } from '#application/use-cases/HandleHubspotAssociations.js';
 
 function getCompanySapId(item) {
@@ -36,6 +39,7 @@ export class SyncCompanyContactsInBatches {
     identityProperty = 'internalcode',
     bypassEmailConfigRepository = null,
     syncWarningRepository = null,
+    syncReportRepository = null,
     logger = console,
     sleeper = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   }) {
@@ -52,6 +56,7 @@ export class SyncCompanyContactsInBatches {
     this.identityProperty = identityProperty;
     this.bypassEmailConfigRepository = bypassEmailConfigRepository;
     this.syncWarningRepository = syncWarningRepository;
+    this.syncReportRepository = syncReportRepository;
     this.logger = logger;
     this.sleeper = sleeper;
   }
@@ -65,6 +70,32 @@ export class SyncCompanyContactsInBatches {
       return await this.syncWarningRepository.record(payload);
     } catch (error) {
       this.logger.error?.('Sync warning record error:', error);
+      return null;
+    }
+  }
+
+  // Same contract as recordWarning: a reporting failure must never break a run.
+  async recordDuplicateContactEmailReport({ collisions, tenantModels, clientConfigId, syncLogId }) {
+    const report = buildDuplicateContactEmailReport({ collisions, clientConfigId, syncLogId });
+
+    if (!report) {
+      return null;
+    }
+
+    const { duplicatedValues, affectedContacts } = report.payload.summary;
+    this.logger.warn?.(
+      `Duplicate contact emails in SAP: ${affectedContacts} contact(s) share ${duplicatedValues} value(s); `
+      + `HubSpot can keep only one of each. Report stored as ${report.eventType}.`
+    );
+
+    if (!this.syncReportRepository?.record) {
+      return null;
+    }
+
+    try {
+      return await this.syncReportRepository.record({ tenantModels, ...report });
+    } catch (error) {
+      this.logger.error?.('Sync report record error:', error);
       return null;
     }
   }
@@ -169,11 +200,15 @@ export class SyncCompanyContactsInBatches {
     // Namespaced tier key -> group id, so a row carrying only the fallback
     // value cannot create a duplicate of a row that also carried an identity.
     const claimedBy = new Map();
+    // Claim key -> the SAP contacts that carried the value, first one first.
+    // Feeds the duplicate report below.
+    const collisions = new Map();
 
     for (const entry of entries) {
       const properties = entry.contactPayload?.properties;
       const existing = index.find(properties);
-      const claimKeys = this.dedupeKeys(properties, fallbackProperty);
+      const claims = this.dedupeClaims(properties, fallbackProperty);
+      const claimKeys = claims.map(({ key }) => key);
 
       // A resolved record wins over the claims: two rows with distinct
       // identities that already exist as distinct HubSpot records must stay
@@ -207,10 +242,29 @@ export class SyncCompanyContactsInBatches {
       }
 
       // ALL tiers are claimed, not just the winning one.
-      for (const claimKey of claimKeys) {
-        if (!claimedBy.has(claimKey)) {
+      for (const [tier, { key: claimKey, property, value }] of claims.entries()) {
+        const owner = claimedBy.get(claimKey);
+
+        if (owner === undefined) {
           claimedBy.set(claimKey, key);
+          if (!collisions.has(claimKey)) {
+            collisions.set(claimKey, { property, value, entries: [entry] });
+          }
+          continue;
         }
+
+        if (owner === key || tier === 0) {
+          // Same group: the twin this row collapses into. A primary-tier clash
+          // always lands here -- `key` was resolved to the owner above -- so it
+          // is a dedupe, not a conflict, and there is nothing to report.
+          continue;
+        }
+
+        // A different contact already owns this value, and the clash is on a
+        // non-primary tier: this row keeps its own identity and will be sent to
+        // create, where HubSpot's uniqueness rule rejects it. That is a duplicate
+        // in SAP, not something the sync can resolve.
+        collisions.get(claimKey)?.entries.push(entry);
       }
 
       if (!byKey.has(key)) {
@@ -230,6 +284,15 @@ export class SyncCompanyContactsInBatches {
         sapIdsByKey.get(key).add(entry.sapInternalCode);
       }
     }
+
+    // Persisted before the writes, not after: the report describes the SAP data
+    // and stays true whether or not the HubSpot calls succeed.
+    await this.recordDuplicateContactEmailReport({
+      collisions,
+      tenantModels,
+      clientConfigId,
+      syncLogId,
+    });
 
     const uniqueEntries = [...byKey.values(), ...entries.filter((entry) => entry.alwaysCreate)];
 
@@ -375,21 +438,38 @@ export class SyncCompanyContactsInBatches {
   // fallback value would otherwise duplicate a row that also carried an
   // identity. An empty array means nothing can ever match this row.
   dedupeKeys(properties, fallbackProperty) {
-    const keys = [];
+    return this.dedupeClaims(properties, fallbackProperty).map(({ key }) => key);
+  }
 
-    const identity = normalizeIndexKey(properties?.[this.identityProperty]);
-    if (identity) {
-      keys.push(`${this.identityProperty}:${identity}`);
-    }
+  // Same list as dedupeKeys, with the property and value kept apart so a
+  // collision can name which property two contacts collided on. Order is
+  // significant: index 0 is the row's OWN primary tier.
+  dedupeClaims(properties, fallbackProperty) {
+    const claims = [];
+    const claim = (property) => {
+      const value = normalizeIndexKey(properties?.[property]);
+      if (value) {
+        claims.push({ property, value, key: `${property}:${value}` });
+      }
+    };
+
+    claim(this.identityProperty);
 
     if (fallbackProperty && fallbackProperty !== this.identityProperty) {
-      const fallback = normalizeIndexKey(properties?.[fallbackProperty]);
-      if (fallback) {
-        keys.push(`${fallbackProperty}:${fallback}`);
-      }
+      claim(fallbackProperty);
     }
 
-    return keys;
+    // Two child contacts sharing an email cannot both be created: HubSpot rejects
+    // the second. Claiming the email collapses them instead.
+    for (const name of uniquePropertiesFor('contact')) {
+      if (name === this.identityProperty || name === fallbackProperty) {
+        continue;
+      }
+
+      claim(name);
+    }
+
+    return claims;
   }
 
   // One sweep of every contact of the portal, indexed in memory: existence
@@ -397,9 +477,15 @@ export class SyncCompanyContactsInBatches {
   // evidence section for why batch/read and Search cannot do this job.
   async buildIndex({ fallbackProperty, clientConfig, tenantModels, getToken }) {
     const searchProperties = await this.contactHandler.getSearchProperties({ clientConfig, tenantModels });
+    // Child contacts are identified by internalcode, but HubSpot still enforces
+    // email uniqueness across every contact in the portal. Without this tier a
+    // child contact whose email already belongs to some other contact is sent
+    // down the create path to earn a guaranteed 409.
+    const uniqueProperties = uniquePropertiesFor('contact');
     const properties = [...new Set([
       this.identityProperty,
       fallbackProperty,
+      ...uniqueProperties,
       ...searchProperties,
     ].filter(Boolean))].filter((name) => name !== 'hs_object_id' && name !== 'associations');
 
@@ -414,6 +500,7 @@ export class SyncCompanyContactsInBatches {
       records,
       identityProperty: this.identityProperty,
       fallbackProperty,
+      uniqueProperties,
     });
   }
 
@@ -422,19 +509,36 @@ export class SyncCompanyContactsInBatches {
       chunkArray(createEntries, writeChunkSize(clientConfig)),
       BATCH_CONCURRENCY,
       async (entryChunk) => {
+        let outcome;
+
         try {
           const token = await getToken();
-          const response = await this.retry(() =>
-            this.crmBatchClient.batchCreateObjects(token, 'contact', {
-              inputs: entryChunk.map(({ contactPayload }) => ({
+          // Conflicts are isolated by halving rather than by dropping to one
+          // request per contact: this is the path that produced most of the
+          // Search-bucket 429s, and per contact it would also lose the other 99.
+          outcome = await createWithConflictSplit(entryChunk, {
+            send: (chunk) => this.crmBatchClient.batchCreateObjects(token, 'contact', {
+              inputs: chunk.map(({ contactPayload }) => ({
                 properties: sanitizeProperties(contactPayload.properties, writableProperties),
               })),
-            })
-          );
+            }, { expectedStatuses: [409] }),
+          });
+        } catch (error) {
+          // Only a failure outside the batch call itself (the token lookup).
+          this.recordContactChunkFailure({ entries: entryChunk, error, failure: 'fatal', contactErrors, phase: 'create' });
+          return;
+        }
 
+        {
           // 207 partial failure: only `results` reached HubSpot, the rest are
           // described by `errors` and must not be reported as synced.
-          const { results, errors, failed } = summarizeBatchResponse(response, entryChunk.length);
+          const results = outcome.responses.flatMap((response) => (
+            Array.isArray(response?.results) ? response.results : []
+          ));
+          const errors = outcome.responses.flatMap((response) => (
+            Array.isArray(response?.errors) ? response.errors : []
+          ));
+          const failed = errors.length;
 
           // HubSpot does not preserve input order in batch/create responses, so
           // a property echoed back is the only sound match — never positional.
@@ -457,10 +561,22 @@ export class SyncCompanyContactsInBatches {
             }
           }
 
+          // Bisection means only part of the chunk went through `responses`: the
+          // rest are conflicts (linked below) or failed sub-chunks (reported
+          // below). Walking the whole chunk here would file them as unmatched,
+          // and that warning is the only signal a genuine orphan has -- diluting
+          // it with entries that were handled correctly makes it worthless.
+          const handledElsewhere = new Set([
+            ...outcome.conflicts.map(({ entry }) => entry),
+            ...outcome.failed.flatMap(({ entries }) => entries),
+          ]);
+
           const mappings = [];
           const seenMappings = new Set();
           const unmatched = [];
           for (const entry of entryChunk) {
+            if (handledElsewhere.has(entry)) continue;
+
             const properties = entry.contactPayload?.properties;
             const identityKey = normalizeIndexKey(properties?.[this.identityProperty]);
             // Fallback tier only for rows with no identity value: it is the
@@ -518,8 +634,14 @@ export class SyncCompanyContactsInBatches {
           // A shortfall means HubSpot rejected those inputs: surface them as
           // contact errors instead of silently dropping them.
           if (failed > 0) {
+            // A batch error echoes nothing that identifies its input, so pairing
+            // by position is only defensible when the two lists describe the same
+            // set. Otherwise the entry is still reported -- it did not land -- but
+            // without pinning someone else's error to it.
+            const pairable = unmatched.length === errors.length;
+
             for (const [position, entry] of unmatched.entries()) {
-              const batchError = errors[position] ?? null;
+              const batchError = pairable ? (errors[position] ?? null) : null;
               const error = Object.assign(
                 new Error(batchError?.message ?? 'HubSpot batch create partially failed'),
                 { details: { status: batchError?.status ?? null, hubspotResponse: batchError } }
@@ -534,12 +656,79 @@ export class SyncCompanyContactsInBatches {
               }));
             }
           }
-        } catch (error) {
-          this.logger.error?.('Contact batch create failed, falling back per contact:', error);
-          await this.sequentialContactFallback({ entryChunk, hubspotIdByKey, sapIdsByKey, clientConfig, tenantModels, getToken, contactErrors });
+        }
+
+        // A conflict means the contact already existed and the index missed it.
+        // Linking it to the id HubSpot named is what repairs the identity, and it
+        // costs no extra request. No properties are written: a conflict response
+        // carries none to diff against.
+        for (const { entry, existingId } of outcome.conflicts) {
+          if (!existingId) {
+            this.recordContactChunkFailure({
+              entries: [entry],
+              error: Object.assign(new Error('Contact already exists but HubSpot named no id'), {
+                details: { status: 409, hubspotResponse: { category: 'CONFLICT' } },
+              }),
+              failure: BATCH_FAILURE.CONFLICT,
+              contactErrors,
+              phase: 'create',
+            });
+            continue;
+          }
+
+          this.logger.warn?.(`Contact already existed in HubSpot as ${existingId}; linking instead of creating`);
+
+          if (entry.key) {
+            hubspotIdByKey.set(entry.key, existingId);
+          } else {
+            entry.hubspotId = existingId;
+          }
+
+          const conflictMappings = SyncCompanyContactsInBatches
+            .sapIdsForEntry(entry, sapIdsByKey)
+            .map((sapId) => ({ sapId, hubspotId: existingId }));
+
+          if (conflictMappings.length > 0) {
+            await this.associationRegistry.registerBaseObjectMappings(
+              clientConfig.hubspotCredentialId,
+              'contact',
+              conflictMappings,
+              tenantModels
+            );
+          }
+        }
+
+        for (const { entries, failure, error } of outcome.failed) {
+          if (failure === BATCH_FAILURE.PAYLOAD) {
+            // The one case going per contact can isolate: a single bad property
+            // rejected every input in the chunk.
+            this.logger.error?.('Contact batch create rejected on payload, isolating per contact:', error);
+            await this.sequentialContactFallback({ entryChunk: entries, hubspotIdByKey, sapIdsByKey, clientConfig, tenantModels, getToken, contactErrors });
+            continue;
+          }
+
+          // Rate limits, unknown outcomes and fatals must not fan out: the
+          // per-contact path spends a Search call each, against the bucket that
+          // just rejected us.
+          this.recordContactChunkFailure({ entries, error, failure, contactErrors, phase: 'create' });
         }
       }
     );
+  }
+
+  // Reports every entry of a chunk as failed WITHOUT issuing a request per entry.
+  recordContactChunkFailure({ entries, error, failure, contactErrors, phase }) {
+    this.logger.error?.(`Contact batch ${phase} failed (${failure}), not degrading per contact:`, error);
+
+    for (const entry of entries) {
+      contactErrors.push(buildContactErrorEntry({
+        error,
+        sapContactId: entry.sapInternalCode ?? null,
+        sapCompanyId: entry.company.sapCompanyId,
+        companyHubspotId: entry.company.hubspotId,
+        contactPayload: entry.contactPayload,
+      }));
+    }
   }
 
   async updateContactBatches({ updateEntries, writableProperties, clientConfig, tenantModels, getToken, contactErrors }) {
@@ -558,7 +747,22 @@ export class SyncCompanyContactsInBatches {
             })
           );
         } catch (error) {
-          this.logger.error?.('Contact batch update failed, falling back per contact:', error);
+          const failure = classifyBatchFailure(error);
+
+          if (failure !== BATCH_FAILURE.PAYLOAD) {
+            // An update is replayable, so the transport already retried it. Only
+            // a payload rejection gains anything from going per contact.
+            this.recordContactChunkFailure({
+              entries: chunk.map(({ entry }) => entry),
+              error,
+              failure,
+              contactErrors,
+              phase: 'update',
+            });
+            return;
+          }
+
+          this.logger.error?.('Contact batch update rejected on payload, isolating per contact:', error);
           for (const { entry, updateInput } of chunk) {
             try {
               const token = await getToken();

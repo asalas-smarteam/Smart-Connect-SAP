@@ -1,4 +1,8 @@
 import { applyDynamicDescription } from '#domain/sync/dynamic-description.service.js';
+import {
+  buildMappedProperties,
+  resolveValueByPath,
+} from '#application/services/mappingValueResolver.service.js';
 
 function resolveSourceContext(objectType, sourceContext) {
   if (objectType === 'product') {
@@ -16,53 +20,20 @@ function normalizeAssociations(value) {
   return Array.isArray(value) ? value : [value];
 }
 
-function resolveValueByPath(inputData, sourceField) {
-  if (!sourceField) {
-    return null;
-  }
-
-  const pathParts = String(sourceField)
-    .split('.')
-    .map((segment) => segment.trim())
-    .filter(Boolean);
-
-  if (pathParts.length === 0) {
-    return null;
-  }
-
-  let currentValue = inputData;
-
-  for (const segment of pathParts) {
-    if (currentValue === null || typeof currentValue === 'undefined') {
-      return null;
-    }
-
-    if (Array.isArray(currentValue)) {
-      currentValue = currentValue[0];
-      if (currentValue === null || typeof currentValue === 'undefined') {
-        return null;
-      }
-    }
-
-    currentValue = currentValue?.[segment];
-  }
-
-  if (Array.isArray(currentValue)) {
-    return currentValue[0] ?? null;
-  }
-
-  return currentValue ?? null;
-}
-
-function mapFields(inputData, mappings, objectType, dynamicDescriptionConfig = null, sourceContext = null) {
-  const result = {};
+function mapFields(
+  inputData,
+  mappings,
+  objectType,
+  dynamicDescriptionConfig = null,
+  sourceContext = null,
+  fallbackConfig = null
+) {
   const resolvedInput = inputData ?? {};
-
-  mappings
-    .filter((mapping) => mapping.isActive ?? true)
-    .forEach((mapping) => {
-      result[mapping.targetField] = resolveValueByPath(resolvedInput, mapping.sourceField);
-    });
+  const result = buildMappedProperties({
+    input: resolvedInput,
+    mappings,
+    fallbackConfig,
+  });
 
   // Runs after the 1:1 pass so a composed value deliberately overwrites the
   // plain mapping that targets the same HubSpot property.
@@ -89,10 +60,30 @@ function mapFields(inputData, mappings, objectType, dynamicDescriptionConfig = n
 }
 
 export class FieldMappingService {
-  constructor({ fieldMappingRepository, dynamicDescriptionConfigRepository = null, logger = console }) {
+  constructor({
+    fieldMappingRepository,
+    dynamicDescriptionConfigRepository = null,
+    mappingFallbackConfigRepository = null,
+    logger = console,
+  }) {
     this.fieldMappingRepository = fieldMappingRepository;
     this.dynamicDescriptionConfigRepository = dynamicDescriptionConfigRepository;
+    this.mappingFallbackConfigRepository = mappingFallbackConfigRepository;
     this.logger = logger;
+  }
+
+  // Returns the legacy behaviour (chain off) when no repository was injected.
+  async getMappingFallbackConfig(tenantModels) {
+    if (typeof this.mappingFallbackConfigRepository?.getMappingFallbackConfig !== 'function') {
+      return null;
+    }
+
+    try {
+      return await this.mappingFallbackConfigRepository.getMappingFallbackConfig({ tenantModels });
+    } catch (error) {
+      this.logger.error?.('Failed to fetch mapping fallback config:', error);
+      return null;
+    }
   }
 
   // Returns null (composition disabled) when no repository was injected.
@@ -165,10 +156,20 @@ export class FieldMappingService {
       }
 
       // Read once per batch, not per record.
-      const dynamicDescriptionConfig = await this.getDynamicDescriptionConfig(tenantModels);
+      const [dynamicDescriptionConfig, fallbackConfig] = await Promise.all([
+        this.getDynamicDescriptionConfig(tenantModels),
+        this.getMappingFallbackConfig(tenantModels),
+      ]);
 
       return records.map(
-        (record) => mapFields(record, mappings, objectType, dynamicDescriptionConfig, resolvedSourceContext)
+        (record) => mapFields(
+          record,
+          mappings,
+          objectType,
+          dynamicDescriptionConfig,
+          resolvedSourceContext,
+          fallbackConfig
+        )
       );
     } catch (error) {
       this.logger.error?.('Failed to apply mappings:', error);

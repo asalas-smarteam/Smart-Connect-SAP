@@ -79,20 +79,20 @@ describe('hubspotClient.listAllObjects', () => {
 
   it('retries only the rate-limited page, never restarting the sweep', async () => {
     const rateLimited = Object.assign(new Error('rate limited'), {
-      response: { status: 429, statusText: 'Too Many Requests' },
+      response: { status: 429, statusText: 'Too Many Requests', headers: {} },
     });
-    const sleeper = jest.fn().mockResolvedValue(undefined);
 
     mockAxios
       .mockResolvedValueOnce(page([record('1')], 'cursor-1'))
       .mockRejectedValueOnce(rateLimited)
       .mockResolvedValueOnce(page([record('2')]));
 
-    const records = await listAllObjects('token-1', 'company', [], { sleeper });
+    // The retry itself now lives in the transport layer, so this exercises the
+    // real one rather than an injected sleeper.
+    const records = await listAllObjects('token-1', 'company', []);
 
     // The sweep completes with both pages...
     expect(records.map((item) => item.id)).toEqual(['1', '2']);
-    expect(sleeper).toHaveBeenCalledTimes(1);
     expect(mockAxios).toHaveBeenCalledTimes(3);
 
     // ...and page 1 was never re-requested: every retry carried the cursor.

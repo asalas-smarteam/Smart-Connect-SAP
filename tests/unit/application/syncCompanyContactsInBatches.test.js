@@ -44,6 +44,21 @@ function buildUseCase(overrides = {}) {
 const clientConfig = { hubspotCredentialId: 'cred-1' };
 const getToken = jest.fn().mockResolvedValue('token-1');
 
+// Tenants map InternalCode -> internalcode, so real payloads carry the identity
+// property. Without it a row's primary tier is its email and twins collapse
+// instead of both being created -- the opposite of the duplicate case.
+function mapRecordsWithIdentity() {
+  return {
+    getMappingsByObjectType: jest.fn().mockResolvedValue([{ hubspotField: 'internalcode' }]),
+    mapRecords: jest.fn().mockImplementation(async (records) => records.map((record) => ({
+      properties: {
+        internalcode: String(record.InternalCode ?? record.BusinessPartner ?? ''),
+        firstname: record.Name ?? record.FirstName ?? 'X',
+      },
+    }))),
+  };
+}
+
 describe('SyncCompanyContactsInBatches', () => {
   it('maps all contacts in one pass, batch-creates them, registers mappings and associates', async () => {
     const useCase = buildUseCase();
@@ -151,7 +166,11 @@ describe('SyncCompanyContactsInBatches', () => {
 
   it('falls back to per-contact sequential sync when a create chunk fails', async () => {
     const useCase = buildUseCase();
-    useCase.crmBatchClient.batchCreateObjects.mockRejectedValue(new Error('batch down'));
+    // A payload rejection is the case the per-contact path exists to isolate.
+    useCase.crmBatchClient.batchCreateObjects.mockRejectedValue(Object.assign(
+      new Error('batch down'),
+      { details: { status: 400, hubspotResponse: { category: 'VALIDATION_ERROR' } } }
+    ));
 
     const companies = [{
       hubspotId: 'hs-co-1',
@@ -164,9 +183,263 @@ describe('SyncCompanyContactsInBatches', () => {
     expect(contactErrors).toEqual([]);
   });
 
+  it('never degrades a rate-limited create chunk to one request per contact', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.batchCreateObjects.mockRejectedValue(Object.assign(
+      new Error('rate limited'),
+      { details: { status: 429, hubspotResponse: { errorType: 'RATE_LIMIT' } } }
+    ));
+
+    const companies = [{
+      hubspotId: 'hs-co-1',
+      item: { properties: {}, rawSapData: { CardCode: 'C1', ContactEmployees: [{ InternalCode: 1, E_Mail: 'a@x.com' }] } },
+    }];
+
+    const { contactErrors } = await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
+
+    // The per-contact path starts with a Search call each, against the very
+    // bucket that just rejected the batch.
+    expect(useCase.contactHandler.create).not.toHaveBeenCalled();
+    expect(useCase.contactHandler.find).not.toHaveBeenCalled();
+    expect(contactErrors).toHaveLength(1);
+  });
+
+  it('links a conflicting child contact to the id HubSpot named instead of duplicating it', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.batchCreateObjects.mockRejectedValue(Object.assign(
+      new Error('conflict'),
+      {
+        details: {
+          status: 409,
+          hubspotResponse: {
+            category: 'CONFLICT',
+            message: 'Contact already exists. Existing ID: 238524122552',
+          },
+        },
+      }
+    ));
+
+    const companies = [{
+      hubspotId: 'hs-co-1',
+      item: { properties: {}, rawSapData: { CardCode: 'C1', ContactEmployees: [{ InternalCode: 1, E_Mail: 'a@x.com' }] } },
+    }];
+
+    const { contactErrors } = await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
+
+    expect(useCase.contactHandler.create).not.toHaveBeenCalled();
+    expect(useCase.associationRegistry.registerBaseObjectMappings).toHaveBeenCalledWith(
+      expect.anything(),
+      'contact',
+      [{ sapId: 1, hubspotId: '238524122552' }],
+      expect.anything()
+    );
+    expect(contactErrors).toEqual([]);
+  });
+
+  it('reports two SAP contacts sharing an email as a duplicate report', async () => {
+    const record = jest.fn().mockResolvedValue(null);
+    const useCase = buildUseCase({
+      syncReportRepository: { record },
+      fieldMappingService: mapRecordsWithIdentity(),
+    });
+
+    // The real shape from production: the same person registered twice in SAP
+    // under different internal codes, so both keep their own identity and both
+    // are sent to create. HubSpot accepts only the first.
+    const companies = [
+      {
+        hubspotId: 'hs-co-1',
+        item: {
+          properties: {},
+          rawSapData: {
+            CardCode: '104188',
+            ContactEmployees: [{ InternalCode: 104149, FirstName: 'George', E_Mail: 'george@x.com' }],
+          },
+        },
+      },
+      {
+        hubspotId: 'hs-co-2',
+        item: {
+          properties: {},
+          rawSapData: {
+            CardCode: '103717',
+            ContactEmployees: [{ InternalCode: 103669, FirstName: 'George', E_Mail: 'george@x.com' }],
+          },
+        },
+      },
+    ];
+
+    await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: 'log-1' });
+
+    expect(record).toHaveBeenCalledTimes(1);
+    const { eventType, payload } = record.mock.calls[0][0];
+    expect(eventType).toBe('sapDuplicateContactEmailReport');
+    expect(payload.summary).toMatchObject({ duplicatedValues: 1, affectedContacts: 2, properties: ['email'] });
+    expect(payload.syncLogId).toBe('log-1');
+    expect(payload.duplicates[0]).toMatchObject({ property: 'email', value: 'george@x.com' });
+    // Both sides are listed: the data team needs to know which row won.
+    expect(payload.duplicates[0].contacts.map(({ sapContactId }) => sapContactId).sort())
+      .toEqual([103669, 104149]);
+  });
+
+  it('records no report when every contact email is unique', async () => {
+    const record = jest.fn().mockResolvedValue(null);
+    const useCase = buildUseCase({
+      syncReportRepository: { record },
+      fieldMappingService: mapRecordsWithIdentity(),
+    });
+
+    const companies = [{
+      hubspotId: 'hs-co-1',
+      item: {
+        properties: {},
+        rawSapData: {
+          CardCode: 'C1',
+          ContactEmployees: [
+            { InternalCode: 1, E_Mail: 'a@x.com' },
+            { InternalCode: 2, E_Mail: 'b@x.com' },
+          ],
+        },
+      },
+    }];
+
+    await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
+
+    expect(record).not.toHaveBeenCalled();
+  });
+
+  it('does not report twins that collapse into one contact as duplicates', async () => {
+    const record = jest.fn().mockResolvedValue(null);
+    const useCase = buildUseCase({
+      syncReportRepository: { record },
+      fieldMappingService: mapRecordsWithIdentity(),
+    });
+
+    // Same InternalCode in two companies: this is the dedupe path, both rows
+    // resolve to one contact and nothing is rejected. Reporting it would send
+    // the data team after a problem that does not exist.
+    const twin = { InternalCode: 9, E_Mail: 'shared@x.com' };
+    const companies = [
+      { hubspotId: 'hs-co-1', item: { properties: {}, rawSapData: { CardCode: 'C1', ContactEmployees: [twin] } } },
+      { hubspotId: 'hs-co-2', item: { properties: {}, rawSapData: { CardCode: 'C2', ContactEmployees: [twin] } } },
+    ];
+
+    await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
+
+    expect(record).not.toHaveBeenCalled();
+  });
+
+  it('completes the sync when recording the duplicate report throws', async () => {
+    const useCase = buildUseCase({
+      syncReportRepository: { record: jest.fn().mockRejectedValue(new Error('mongo down')) },
+      fieldMappingService: mapRecordsWithIdentity(),
+    });
+
+    const companies = [
+      { hubspotId: 'hs-co-1', item: { properties: {}, rawSapData: { CardCode: 'C1', ContactEmployees: [{ InternalCode: 1, E_Mail: 'dup@x.com' }] } } },
+      { hubspotId: 'hs-co-2', item: { properties: {}, rawSapData: { CardCode: 'C2', ContactEmployees: [{ InternalCode: 2, E_Mail: 'dup@x.com' }] } } },
+    ];
+
+    const { contactErrors } = await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
+
+    expect(contactErrors).toEqual([]);
+    expect(useCase.crmBatchClient.batchCreateObjects).toHaveBeenCalled();
+  });
+
+  it('does not report conflict-resolved contacts as unmatched', async () => {
+    const useCase = buildUseCase();
+    let call = 0;
+
+    // The bisection shape: the full chunk conflicts, one half creates cleanly
+    // and the other half is the single conflicting contact.
+    useCase.crmBatchClient.batchCreateObjects.mockImplementation(async (_t, _o, { inputs }) => {
+      call += 1;
+
+      if (call === 1) {
+        throw Object.assign(new Error('conflict'), {
+          details: { status: 409, hubspotResponse: { category: 'CONFLICT', message: 'Contact already exists' } },
+        });
+      }
+
+      if (call === 2) {
+        return { results: inputs.map((input, index) => ({ id: `hs-c-${index}`, properties: { ...input.properties } })) };
+      }
+
+      throw Object.assign(new Error('conflict'), {
+        details: {
+          status: 409,
+          hubspotResponse: { category: 'CONFLICT', message: 'Contact already exists. Existing ID: 999' },
+        },
+      });
+    });
+
+    const companies = [{
+      hubspotId: 'hs-co-1',
+      item: {
+        properties: {},
+        rawSapData: {
+          CardCode: 'C1',
+          ContactEmployees: [
+            { InternalCode: 1, E_Mail: 'a@x.com' },
+            { InternalCode: 2, E_Mail: 'b@x.com' },
+          ],
+        },
+      },
+    }];
+
+    const { contactErrors } = await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
+
+    // The conflicting contact was linked, so nothing lost its mapping. Warning
+    // about it as unmatched claims a duplicate that does not exist, and that
+    // warning is the only signal a real orphan has.
+    expect(useCase.logger.warn).not.toHaveBeenCalledWith(
+      expect.stringContaining('could not be matched back')
+    );
+    expect(contactErrors).toEqual([]);
+    const linked = useCase.associationRegistry.registerBaseObjectMappings.mock.calls
+      .flatMap(([, , mappings]) => mappings)
+      .map(({ hubspotId }) => hubspotId);
+    expect(linked).toContain('999');
+  });
+
+  it('does not attribute a 207 error to a contact it cannot be pinned to', async () => {
+    const useCase = buildUseCase();
+    // Two inputs, one result, one error: nothing in the response says which
+    // input the error belongs to, so neither entry may claim it.
+    useCase.crmBatchClient.batchCreateObjects.mockImplementation(async (_t, _o, { inputs }) => ({
+      results: [{ id: 'hs-c-0', properties: { ...inputs[0].properties } }],
+      errors: [{ status: 'error', message: 'nope', category: 'VALIDATION_ERROR' }],
+    }));
+
+    const companies = [{
+      hubspotId: 'hs-co-1',
+      item: {
+        properties: {},
+        rawSapData: {
+          CardCode: 'C1',
+          ContactEmployees: [
+            { InternalCode: 1, E_Mail: 'a@x.com' },
+            { InternalCode: 2, E_Mail: 'b@x.com' },
+          ],
+        },
+      },
+    }];
+
+    const { contactErrors } = await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
+
+    // Exactly the one input HubSpot rejected is reported, and it is reported
+    // once -- not once per unmatched entry.
+    expect(contactErrors).toHaveLength(1);
+    expect(contactErrors[0]).toMatchObject({ errorType: 'contactEmployee', sapCompanyId: 'C1' });
+  });
+
   it('collects contactErrors for contacts that fail even in the sequential fallback', async () => {
     const useCase = buildUseCase();
-    useCase.crmBatchClient.batchCreateObjects.mockRejectedValue(new Error('batch down'));
+    // A payload rejection is the case the per-contact path exists to isolate.
+    useCase.crmBatchClient.batchCreateObjects.mockRejectedValue(Object.assign(
+      new Error('batch down'),
+      { details: { status: 400, hubspotResponse: { category: 'VALIDATION_ERROR' } } }
+    ));
     useCase.contactHandler.create.mockRejectedValue(Object.assign(new Error('409'), {
       details: { status: 409, hubspotResponse: { message: 'exists' } },
     }));

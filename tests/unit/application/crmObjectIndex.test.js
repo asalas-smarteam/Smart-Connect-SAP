@@ -63,3 +63,60 @@ describe('CrmObjectIndex', () => {
     expect(buildIndex().size).toBe(2);
   });
 });
+
+// HubSpot enforces email uniqueness on contacts no matter what the tenant
+// configured as its identity property. When the index cannot match on email, a
+// contact whose email already exists is classified as "create", HubSpot answers
+// 409, and the old code degraded that chunk to one Search call per record --
+// which is what saturated the 5/s search limit and produced the 429 storm.
+describe('CrmObjectIndex unique-property tier', () => {
+  const contact = (id, properties) => ({ id, properties });
+
+  it('matches a record on a unique property when identity and fallback both miss', () => {
+    const index = new CrmObjectIndex({
+      records: [contact('hs-1', { idsap: 'OTHER', email: 'a@x.com' })],
+      identityProperty: 'idsap',
+      fallbackProperty: 'idsap',
+      uniqueProperties: ['email'],
+    });
+
+    expect(index.find({ idsap: 'C001', email: 'a@x.com' })).toMatchObject({ id: 'hs-1' });
+  });
+
+  it('still prefers the identity match over the unique property', () => {
+    const index = new CrmObjectIndex({
+      records: [
+        contact('hs-identity', { idsap: 'C001', email: 'shared@x.com' }),
+        contact('hs-email', { idsap: 'C002', email: 'shared@x.com' }),
+      ],
+      identityProperty: 'idsap',
+      uniqueProperties: ['email'],
+    });
+
+    expect(index.find({ idsap: 'C002', email: 'shared@x.com' })).toMatchObject({ id: 'hs-email' });
+    expect(index.find({ idsap: 'C001', email: 'shared@x.com' })).toMatchObject({ id: 'hs-identity' });
+  });
+
+  it('falls through to the unique property when the fallback tier misses', () => {
+    const index = new CrmObjectIndex({
+      records: [contact('hs-1', { idsap: 'OTHER', cedula: 'NOPE', email: 'a@x.com' })],
+      identityProperty: 'idsap',
+      fallbackProperty: 'cedula',
+      uniqueProperties: ['email'],
+    });
+
+    // The row carries a cedula that matches nothing; before, that returned null
+    // outright and the record was created into a 409.
+    expect(index.find({ idsap: 'C001', cedula: 'MISS', email: 'a@x.com' })).toMatchObject({ id: 'hs-1' });
+  });
+
+  it('does not match on a unique property that was not declared', () => {
+    const index = new CrmObjectIndex({
+      records: [contact('hs-1', { idsap: 'OTHER', email: 'a@x.com' })],
+      identityProperty: 'idsap',
+    });
+
+    // Companies have no HubSpot-enforced email uniqueness, so nothing is implied.
+    expect(index.find({ idsap: 'C001', email: 'a@x.com' })).toBeNull();
+  });
+});

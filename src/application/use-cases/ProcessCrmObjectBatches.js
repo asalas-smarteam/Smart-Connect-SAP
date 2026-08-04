@@ -4,17 +4,19 @@ import {
   shouldUpdateSapFromHubspot,
 } from '#domain/sync/main-data-in-update.constants.js';
 import { applyBypassEmail } from '#application/services/bypassEmail.service.js';
-import { CrmObjectIndex, normalizeIndexKey } from '#application/services/crmObjectIndex.service.js';
+import { CrmObjectIndex, normalizeIndexKey, uniquePropertiesFor } from '#application/services/crmObjectIndex.service.js';
 import { sanitizeProperties } from '#application/services/hubspotPropertyPayload.service.js';
 import {
   BATCH_CONCURRENCY,
   HUBSPOT_BATCH_INPUT_LIMIT,
   chunkArray,
+  createWithConflictSplit,
   retryRequest,
   runInWaves,
   summarizeBatchResponse,
   writeChunkSize,
 } from '#application/services/hubspotBatching.utils.js';
+import { BATCH_FAILURE, classifyBatchFailure } from '#application/services/hubspotBatchFailure.service.js';
 
 function getSapId(item) {
   return item?.properties?.idsap ?? null;
@@ -234,7 +236,7 @@ export class ProcessCrmObjectBatches {
       const existing = index.find(item?.properties);
 
       if (!existing) {
-        const claimKeys = this.dedupeKeys(item?.properties, fallbackProperty);
+        const claimKeys = this.dedupeKeys(item?.properties, fallbackProperty, objectType);
         // Only the row's OWN primary tier can absorb it. Two genuinely distinct
         // SAP customers of one corporate group share a contact email all the
         // time: rejecting on ANY claimed tier would drop the second one with no
@@ -308,99 +310,148 @@ export class ProcessCrmObjectBatches {
       BATCH_CONCURRENCY,
       async (entryChunk) => {
         const chunkItems = entryChunk.map(({ item }) => item);
+        const chunkStats = { sent: 0, failed: 0, created: 0, updated: 0, skipped: 0, errors: [] };
+        let outcome;
 
         try {
           const token = await getToken();
-          const response = await this.retry(() =>
-            this.crmBatchClient.batchCreateObjects(token, objectType, {
-              inputs: chunkItems.map((item) => ({
+          // Conflicts are isolated by halving the chunk rather than by falling
+          // back to one request per item: same answer, a fraction of the calls,
+          // and it never touches the Search bucket.
+          outcome = await createWithConflictSplit(entryChunk, {
+            send: (chunk) => this.crmBatchClient.batchCreateObjects(token, objectType, {
+              inputs: chunk.map(({ item }) => ({
                 properties: sanitizeProperties(item.properties, writableProperties),
               })),
-            })
-          );
-
-          // batch/create echoes every record it actually created, so `results`
-          // alone tells us what went through (a 207 leaves the rest out).
-          const results = Array.isArray(response?.results) ? response.results : [];
-          const batchErrors = Array.isArray(response?.errors) ? response.errors : [];
-          // HubSpot does not preserve input order in batch/create responses,
-          // so a property echoed back is the only sound match. Two maps for the
-          // two tiers index.find() matches on -- never a positional guess.
-          const resultByIdentity = new Map();
-          const resultByFallback = new Map();
-          const useFallbackTier = Boolean(fallbackProperty) && fallbackProperty !== this.identityProperty;
-
-          for (const result of results) {
-            const key = normalizeIndexKey(result?.properties?.[this.identityProperty]);
-            if (key && !resultByIdentity.has(key)) {
-              resultByIdentity.set(key, result);
-            }
-
-            if (useFallbackTier) {
-              const fallbackKey = normalizeIndexKey(result?.properties?.[fallbackProperty]);
-              if (fallbackKey && !resultByFallback.has(fallbackKey)) {
-                resultByFallback.set(fallbackKey, result);
-              }
-            }
-          }
-
-          const mappings = [];
-          let unmatched = 0;
-
-          for (const item of chunkItems) {
-            const identity = normalizeIndexKey(item?.properties?.[this.identityProperty]);
-            // Fallback tier only for rows with no identity value: it is the
-            // same key index.find() would match them on, so it is exactly as
-            // safe, and without it these rows lose their associations too.
-            const created = identity
-              ? resultByIdentity.get(identity)
-              : (useFallbackTier
-                ? resultByFallback.get(normalizeIndexKey(item?.properties?.[fallbackProperty]))
-                : undefined);
-
-            if (!created?.id) {
-              unmatched += 1;
-              continue;
-            }
-
-            // Forward-looking insurance only: chunks are fixed before the wave
-            // and nothing calls find() afterwards, so this does not protect a
-            // later chunk today. It keeps the index truthful for any future
-            // caller that does look something up after the create wave.
-            index.add(created);
-            processed.push({ item, hubspotId: created.id });
-            const sapId = getSapId(item);
-            if (sapId) {
-              mappings.push({ sapId, hubspotId: created.id });
-            }
-          }
-
-          if (mappings.length > 0) {
-            await this.associationRegistry.registerBaseObjectMappings(
-              clientConfig.hubspotCredentialId,
-              objectType,
-              mappings,
-              tenantModels
-            );
-          }
-
-          if (unmatched > 0) {
-            this.logger.warn?.(`Batch create: ${unmatched} record(s) could not be matched back by ${this.identityProperty}`);
-          }
-
+            }, { expectedStatuses: [409] }),
+          });
+        } catch (error) {
+          // Only reached when something outside the batch call fails (the token
+          // lookup); every send failure is reported inside `outcome`.
+          this.logger.error?.('ProcessCrmObjectBatches create error:', error);
           return {
-            sent: results.length,
-            created: results.length,
-            failed: chunkItems.length - results.length,
-            errors: batchErrors.map((batchError) => ({
-              payloadHubspot: null,
-              responseHubspot: batchError,
+            sent: 0,
+            created: 0,
+            updated: 0,
+            skipped: 0,
+            failed: chunkItems.length,
+            errors: chunkItems.map((item) => ({
+              payloadHubspot: item?.properties ?? null,
+              responseHubspot: error?.details?.hubspotResponse ?? null,
             })),
           };
-        } catch (error) {
-          this.logger.error?.('ProcessCrmObjectBatches create error:', error);
-          return sequentialFallback(chunkItems);
         }
+
+        // batch/create echoes every record it actually created, so the collected
+        // `results` tell us what went through (a 207 leaves the rest out).
+        const results = outcome.responses.flatMap((response) => (
+          Array.isArray(response?.results) ? response.results : []
+        ));
+        // A 207 answers 200-with-errors rather than throwing, so these never
+        // reach the classifier above: reading `results` alone would count a
+        // partial batch as a clean success.
+        const batchErrors = outcome.responses.flatMap((response) => (
+          Array.isArray(response?.errors) ? response.errors : []
+        ));
+        const { matched, unmatched } = this.matchCreatedRecords({
+          results,
+          chunkItems,
+          fallbackProperty,
+        });
+        const mappings = [];
+
+        for (const { item, record } of matched) {
+          // Forward-looking insurance only: chunks are fixed before the wave
+          // and nothing calls find() afterwards, so this does not protect a
+          // later chunk today. It keeps the index truthful for any future
+          // caller that does look something up after the create wave.
+          index.add(record);
+          processed.push({ item, hubspotId: record.id });
+          const sapId = getSapId(item);
+          if (sapId) {
+            mappings.push({ sapId, hubspotId: record.id });
+          }
+        }
+
+        // Counted from what HubSpot actually created, not from what we managed to
+        // attribute: an unattributable record still exists in the portal, and the
+        // `unmatched` warning below is what flags it as an orphan.
+        chunkStats.sent += results.length;
+        chunkStats.created += results.length;
+        chunkStats.failed += batchErrors.length;
+        chunkStats.errors.push(...batchErrors.map((batchError) => ({
+          payloadHubspot: null,
+          responseHubspot: batchError,
+        })));
+
+        // A conflict means the record already existed and the index missed it.
+        // Linking the SAP id to the id HubSpot named repairs that permanently:
+        // from the next run on the index finds it and takes the update path. No
+        // properties are written here, because a conflict response carries none
+        // to diff against -- inventing that decision is how records get clobbered.
+        for (const { entry, existingId } of outcome.conflicts) {
+          const item = entry.item;
+
+          if (!existingId) {
+            this.logger.error?.(
+              `ProcessCrmObjectBatches: ${objectType} conflict without an existing id; cannot link this SAP row`
+            );
+            chunkStats.failed += 1;
+            chunkStats.errors.push({
+              payloadHubspot: item?.properties ?? null,
+              responseHubspot: { category: 'CONFLICT', message: 'Record already exists but HubSpot named no id' },
+            });
+            continue;
+          }
+
+          this.logger.warn?.(
+            `ProcessCrmObjectBatches: ${objectType} already existed in HubSpot as ${existingId}; linking instead of creating`
+          );
+          processed.push({ item, hubspotId: existingId });
+          const sapId = getSapId(item);
+          if (sapId) {
+            mappings.push({ sapId, hubspotId: existingId });
+          }
+          chunkStats.sent += 1;
+          chunkStats.skipped += 1;
+        }
+
+        if (mappings.length > 0) {
+          await this.associationRegistry.registerBaseObjectMappings(
+            clientConfig.hubspotCredentialId,
+            objectType,
+            mappings,
+            tenantModels
+          );
+        }
+
+        if (unmatched > 0) {
+          // An unattributable created record is a future duplicate: nothing maps
+          // it to its SAP row, so the next run will not find it.
+          this.logger.warn?.(`Batch create: ${unmatched} record(s) could not be matched back by ${this.identityProperty}`);
+        }
+
+        for (const { entries, failure, error } of outcome.failed) {
+          this.logger.error?.(`ProcessCrmObjectBatches create failed (${failure}):`, error);
+
+          if (failure === BATCH_FAILURE.PAYLOAD) {
+            // The one case the per-item path is for: a single bad property
+            // rejects all 100 inputs, and only per item finds which record.
+            this.mergeStats(chunkStats, await sequentialFallback(entries.map(({ item }) => item)));
+            continue;
+          }
+
+          // Rate limits, unknown outcomes and fatals must NOT fan out: the
+          // transport already retried, and one request per item would multiply
+          // the pressure that caused the failure by two orders of magnitude.
+          chunkStats.failed += entries.length;
+          chunkStats.errors.push(...entries.map(({ item }) => ({
+            payloadHubspot: item?.properties ?? null,
+            responseHubspot: error?.details?.hubspotResponse ?? null,
+          })));
+        }
+
+        return chunkStats;
       }
     );
 
@@ -431,12 +482,28 @@ export class ProcessCrmObjectBatches {
             })),
           };
         } catch (error) {
-          this.logger.error?.('ProcessCrmObjectBatches update error:', error);
+          const failure = classifyBatchFailure(error);
+          this.logger.error?.(`ProcessCrmObjectBatches update failed (${failure}):`, error);
+          const chunkItems = entryChunk.map(({ item }) => item);
+
+          if (failure !== BATCH_FAILURE.PAYLOAD) {
+            // The transport already retried an update, which is replayable. Only
+            // a payload rejection has anything to gain from going per item, and
+            // fanning out on a rate limit is what caused the 429 storm.
+            return {
+              sent: 0,
+              failed: chunkItems.length,
+              errors: chunkItems.map((item) => ({
+                payloadHubspot: item?.properties ?? null,
+                responseHubspot: error?.details?.hubspotResponse ?? null,
+              })),
+            };
+          }
+
           // These items were already pushed to `processed` when their existing
           // record was read. The sequential fallback re-runs the whole per-item
           // flow (associations included), so drop them here to avoid doing the
           // association work twice.
-          const chunkItems = entryChunk.map(({ item }) => item);
           const chunkItemSet = new Set(chunkItems);
           for (let position = processed.length - 1; position >= 0; position -= 1) {
             if (chunkItemSet.has(processed[position].item)) {
@@ -469,13 +536,62 @@ export class ProcessCrmObjectBatches {
     return writeChunkSize(clientConfig);
   }
 
+  // HubSpot does not preserve input order in batch/create responses, so a
+  // property echoed back is the only sound match -- never a positional guess.
+  // Driven from the RESULTS rather than the inputs: what matters is that every
+  // record HubSpot created can be attributed to its SAP row, because one that
+  // cannot is an orphan that the next run will create all over again.
+  matchCreatedRecords({ results, chunkItems, fallbackProperty }) {
+    const useFallbackTier = Boolean(fallbackProperty) && fallbackProperty !== this.identityProperty;
+    const itemByIdentity = new Map();
+    const itemByFallback = new Map();
+
+    for (const item of chunkItems) {
+      const identity = normalizeIndexKey(item?.properties?.[this.identityProperty]);
+      if (identity && !itemByIdentity.has(identity)) {
+        itemByIdentity.set(identity, item);
+      }
+
+      if (useFallbackTier) {
+        const fallback = normalizeIndexKey(item?.properties?.[fallbackProperty]);
+        if (fallback && !itemByFallback.has(fallback)) {
+          itemByFallback.set(fallback, item);
+        }
+      }
+    }
+
+    const matched = [];
+    let unmatched = 0;
+
+    for (const record of results) {
+      const identity = normalizeIndexKey(record?.properties?.[this.identityProperty]);
+      // Fallback tier only when identity does not resolve: it is the same key
+      // index.find() would match on, so it is exactly as safe, and without it
+      // rows carrying no identity lose their associations too.
+      let item = identity ? itemByIdentity.get(identity) : undefined;
+
+      if (!item && useFallbackTier) {
+        item = itemByFallback.get(normalizeIndexKey(record?.properties?.[fallbackProperty]));
+      }
+
+      if (!item || !record?.id) {
+        unmatched += 1;
+        continue;
+      }
+
+      matched.push({ item, record });
+    }
+
+    return { matched, unmatched };
+  }
+
   // Every value index.find() could match this row on, namespaced by property
   // so an idsap of `x` cannot claim the same slot as an email of `x`. BOTH
   // tiers are returned, not just the winning one: row A {idsap, email} and row
   // B {email} claim different tiers, yet once A is created B matches it from
   // the next run onward -- so B has to be rejected on the shared email too.
   // An empty array means nothing can ever match this row, so it is created.
-  dedupeKeys(properties, fallbackProperty) {
+  dedupeKeys(properties, fallbackProperty, objectType) {
     const keys = [];
 
     const identity = normalizeIndexKey(properties?.[this.identityProperty]);
@@ -490,6 +606,20 @@ export class ProcessCrmObjectBatches {
       }
     }
 
+    // A HubSpot-enforced unique property has to be claimed too: two SAP rows
+    // sharing a contact email cannot both be created, so the second must collapse
+    // onto the first instead of being sent off to earn a 409.
+    for (const name of uniquePropertiesFor(objectType)) {
+      if (name === this.identityProperty || name === fallbackProperty) {
+        continue;
+      }
+
+      const value = normalizeIndexKey(properties?.[name]);
+      if (value) {
+        keys.push(`${name}:${value}`);
+      }
+    }
+
     return keys;
   }
 
@@ -499,9 +629,11 @@ export class ProcessCrmObjectBatches {
   // cannot do this job.
   async buildIndex({ objectType, fallbackProperty, clientConfig, tenantModels, handler, getToken }) {
     const searchProperties = await handler.getSearchProperties({ clientConfig, tenantModels });
+    const uniqueProperties = uniquePropertiesFor(objectType);
     const properties = [...new Set([
       this.identityProperty,
       fallbackProperty,
+      ...uniqueProperties,
       ...searchProperties,
     ].filter(Boolean))].filter((name) => name !== 'hs_object_id' && name !== 'associations');
 
@@ -516,6 +648,7 @@ export class ProcessCrmObjectBatches {
       records,
       identityProperty: this.identityProperty,
       fallbackProperty,
+      uniqueProperties,
     });
   }
 

@@ -34,6 +34,7 @@ export class TenantWebhookRuntimeRepository {
       contactBusinessPartnerMappings,
       contactEmployeeMappings,
       productMappings,
+      productOrdersQuotationsMappings,
       dealMappings,
       dealOrdersQuotationsMappings,
       taxCodes,
@@ -44,6 +45,15 @@ export class TenantWebhookRuntimeRepository {
       mappingService.getMappingsByObjectType(hubspotCredentialId, 'contact', 'businessPartner', tenantModels),
       mappingService.getMappingsByObjectType(hubspotCredentialId, 'contact', 'contactEmployee', tenantModels),
       mappingService.getMappingsByObjectType(hubspotCredentialId, 'product', 'product', tenantModels),
+      // HubSpot -> SAP line fields. The fallback stays off so a tenant without this context
+      // gets [] and its DocumentLines keep the exact shape they have today.
+      mappingService.getMappingsByObjectType(
+        hubspotCredentialId,
+        'product',
+        'orders-quotations',
+        tenantModels,
+        { allowBusinessPartnerFallback: false }
+      ),
       mappingService.getMappingsByObjectType(hubspotCredentialId, 'deal', 'businessPartner', tenantModels),
       mappingService.getMappingsByObjectType(
         hubspotCredentialId,
@@ -73,6 +83,7 @@ export class TenantWebhookRuntimeRepository {
         contactBusinessPartnerMappings,
         contactEmployeeMappings,
         productMappings,
+        productOrdersQuotationsMappings,
         dealMappings,
         dealOrdersQuotationsMappings,
       },

@@ -1,3 +1,9 @@
+import {
+  BATCH_FAILURE,
+  classifyBatchFailure,
+  parseConflictExistingId,
+} from './hubspotBatchFailure.service.js';
+
 // HubSpot batch endpoints (read/create/update) accept at most 100 inputs per call.
 export const HUBSPOT_BATCH_INPUT_LIMIT = 100;
 // Concurrent batch calls per wave. 4 keeps us well under HubSpot's ~190 requests/10s limit.
@@ -43,6 +49,50 @@ export async function runInWaves(chunks, concurrency, worker) {
     results.push(...await Promise.all(wave.map(worker)));
   }
   return results;
+}
+
+// A batch conflict rejects the WHOLE chunk and names at most one existing id,
+// without saying which input it belonged to -- so the colliding record cannot be
+// mapped from the response. Halving finds it in ~2*log2(n) calls against the
+// general bucket, instead of the ~2n calls (half of them Search) that the
+// per-item fallback used to spend, and every innocent record still gets created.
+// Only conflicts split: any other failure is returned as-is, never amplified.
+export async function createWithConflictSplit(entries, { send }) {
+  const responses = [];
+  const conflicts = [];
+  const failed = [];
+  const pending = [entries];
+
+  while (pending.length > 0) {
+    const chunk = pending.shift();
+
+    if (chunk.length === 0) {
+      continue;
+    }
+
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      responses.push(await send(chunk));
+    } catch (error) {
+      const failure = classifyBatchFailure(error);
+
+      if (failure !== BATCH_FAILURE.CONFLICT) {
+        failed.push({ entries: chunk, error, failure });
+        continue;
+      }
+
+      if (chunk.length === 1) {
+        // Narrowed to one record, so the id in the message is unambiguous.
+        conflicts.push({ entry: chunk[0], existingId: parseConflictExistingId(error) });
+        continue;
+      }
+
+      const middle = Math.floor(chunk.length / 2);
+      pending.push(chunk.slice(0, middle), chunk.slice(middle));
+    }
+  }
+
+  return { responses, conflicts, failed };
 }
 
 const defaultSleeper = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

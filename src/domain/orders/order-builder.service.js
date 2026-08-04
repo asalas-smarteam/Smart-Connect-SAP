@@ -42,6 +42,34 @@ function pickMappedHeaderFields(mappedDealFields) {
   return fields;
 }
 
+// Line fields owned by mapDocumentLines (or resolved through dedicated coercion, like TaxCode
+// by rate or UnitPrice by misc calculation) are excluded from the generic line-mapping spread
+// so mapped raw values cannot clobber them.
+const RESERVED_LINE_FIELDS = new Set([
+  'ItemCode',
+  'Quantity',
+  'UnitPrice',
+  'WarehouseCode',
+  'DiscountPercent',
+  'TaxCode',
+  'LineNum',
+  'BaseType',
+  'BaseEntry',
+  'BaseLine',
+]);
+
+function pickMappedLineFields(mappedLineFields) {
+  const fields = {};
+
+  for (const [field, value] of Object.entries(mappedLineFields || {})) {
+    if (!RESERVED_LINE_FIELDS.has(field)) {
+      fields[field] = value;
+    }
+  }
+
+  return fields;
+}
+
 // Precedence: mapped HubSpot value → tenant config default (groupCodeDefauls) → null (omit).
 export function resolvePaymentGroupCode({ mappedDeal, groupCodeDefaults }) {
   const mappedValue = normalizeInteger(mappedDeal?.PaymentGroupCode);
@@ -167,9 +195,14 @@ function resolveUnitPrice({ mapped, lineItem, miscPriceCalculationConfig }) {
   };
 }
 
+// `productMappings` (product/product) drive the SAP -> HubSpot product sync and are only read
+// here to resolve ItemCode/Quantity/UnitPrice. `lineMappings` (product/orders-quotations) are
+// the HubSpot -> SAP line fields and are the only ones spread into the line, so product sync
+// fields like Price or QuantityOnStock can never reach DocumentLines.
 export function mapDocumentLines({
   lineItems,
   productMappings,
+  lineMappings = [],
   taxCodes = [],
   miscPriceCalculationConfig = null,
   discountConfig = null,
@@ -199,12 +232,18 @@ export function mapDocumentLines({
       });
     }
 
+    const mappedLine = pickMappedLineFields(mapHubspotToSapFields(lineItem, lineMappings));
     const line = {
+      ...mappedLine,
       ItemCode: itemCode,
       Quantity: quantity,
-      UnitPrice: Number.isFinite(unitPrice) ? unitPrice : 0,
       WarehouseCode: lineItem.warehouses,
     };
+
+    // B1 takes either the net price or the VAT-inclusive price, never both.
+    if (!Object.prototype.hasOwnProperty.call(mappedLine, 'PriceAfterVAT')) {
+      line.UnitPrice = Number.isFinite(unitPrice) ? unitPrice : 0;
+    }
 
     if (discount !== 0) {
       line.DiscountPercent = discount;

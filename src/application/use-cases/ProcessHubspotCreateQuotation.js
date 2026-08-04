@@ -104,6 +104,7 @@ export class ProcessHubspotCreateQuotation {
       const documentLines = mapDocumentLines({
         lineItems,
         productMappings: mappings.productMappings,
+        lineMappings: mappings.productOrdersQuotationsMappings,
         taxCodes,
         miscPriceCalculationConfig,
         discountConfig,

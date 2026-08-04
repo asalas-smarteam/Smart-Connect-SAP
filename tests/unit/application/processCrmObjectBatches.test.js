@@ -394,9 +394,14 @@ describe('ProcessCrmObjectBatches', () => {
     expect(result).toMatchObject({ sent: 1, created: 1 });
   });
 
-  it('falls back to sequential for a failed create chunk only', async () => {
+  it('falls back to sequential for a payload rejection, which is what per item can isolate', async () => {
     const useCase = buildUseCase();
-    useCase.crmBatchClient.batchCreateObjects.mockRejectedValue(new Error('create down'));
+    // One unknown or read-only property rejects all inputs; only going per item
+    // finds which record carried it.
+    useCase.crmBatchClient.batchCreateObjects.mockRejectedValue(Object.assign(
+      new Error('create down'),
+      { details: { status: 400, hubspotResponse: { category: 'VALIDATION_ERROR' } } }
+    ));
     const params = baseParams();
     params.sequentialFallback.mockResolvedValue({ sent: 1, failed: 0, created: 1, updated: 0, errors: [] });
     const mappedItems = [{ properties: { email: 'a@x.com', idsap: 'C001' }, rawSapData: {} }];
@@ -405,6 +410,71 @@ describe('ProcessCrmObjectBatches', () => {
 
     expect(params.sequentialFallback).toHaveBeenCalledWith([mappedItems[0]]);
     expect(result).toMatchObject({ sent: 1, created: 1 });
+  });
+
+  it('never degrades a rate-limited create chunk to the per-item path', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.batchCreateObjects.mockRejectedValue(Object.assign(
+      new Error('rate limited'),
+      { details: { status: 429, hubspotResponse: { errorType: 'RATE_LIMIT' } } }
+    ));
+    const params = baseParams();
+    const mappedItems = [{ properties: { email: 'a@x.com', idsap: 'C001' }, rawSapData: {} }];
+
+    const result = await useCase.execute({ mappedItems, ...params });
+
+    // The per-item path would spend a Search call per record against the very
+    // bucket that just rejected us: one 429 became hundreds.
+    expect(params.sequentialFallback).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ sent: 0, failed: 1 });
+  });
+
+  it('never replays a create whose outcome is unknown', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.batchCreateObjects.mockRejectedValue(Object.assign(
+      new Error('timeout of 60000ms exceeded'),
+      { outcomeUnknown: true, details: { status: undefined, hubspotResponse: null } }
+    ));
+    const params = baseParams();
+    const mappedItems = [{ properties: { email: 'a@x.com', idsap: 'C001' }, rawSapData: {} }];
+
+    const result = await useCase.execute({ mappedItems, ...params });
+
+    // HubSpot may already hold the record; recreating it is how duplicates were
+    // born, and searching for it is how the 429 storm started.
+    expect(useCase.crmBatchClient.batchCreateObjects).toHaveBeenCalledTimes(1);
+    expect(params.sequentialFallback).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ sent: 0, failed: 1 });
+  });
+
+  it('links a conflicting record to the id HubSpot named instead of duplicating it', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.batchCreateObjects.mockRejectedValue(Object.assign(
+      new Error('conflict'),
+      {
+        details: {
+          status: 409,
+          hubspotResponse: {
+            category: 'CONFLICT',
+            message: 'Contact already exists. Existing ID: 238524122552',
+          },
+        },
+      }
+    ));
+    const params = baseParams();
+    const mappedItems = [{ properties: { email: 'a@x.com', idsap: 'C001' }, rawSapData: {} }];
+
+    const result = await useCase.execute({ mappedItems, ...params });
+
+    // Recording the link is what stops the next run from conflicting again.
+    expect(useCase.associationRegistry.registerBaseObjectMappings).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      [{ sapId: 'C001', hubspotId: '238524122552' }],
+      expect.anything()
+    );
+    expect(params.sequentialFallback).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ sent: 1, failed: 0 });
   });
 
   it('associates contacts with their companies in batch for contact runs', async () => {
@@ -538,7 +608,10 @@ describe('ProcessCrmObjectBatches', () => {
     useCase.crmBatchClient.listAllObjects.mockResolvedValue([
       { id: 'hs-1', properties: { email: 'a@x.com', name: 'Old' } },
     ]);
-    useCase.crmBatchClient.batchUpdateObjects.mockRejectedValue(new Error('update down'));
+    useCase.crmBatchClient.batchUpdateObjects.mockRejectedValue(Object.assign(
+      new Error('update down'),
+      { details: { status: 400, hubspotResponse: { category: 'VALIDATION_ERROR' } } }
+    ));
     const params = baseParams();
     params.handler.buildBatchUpdateEntry.mockReturnValue({ id: 'hs-1', properties: { idsap: 'C001' } });
     params.sequentialFallback.mockResolvedValue({ sent: 1, failed: 0, created: 0, updated: 1, errors: [] });
