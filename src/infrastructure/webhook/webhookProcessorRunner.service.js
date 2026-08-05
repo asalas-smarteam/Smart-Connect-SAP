@@ -104,8 +104,11 @@ export async function processWebhookTenant({ tenantId, tenantKey, portalId, trig
   }
 }
 
-export async function processWebhookForActiveTenants({ triggerType = 'manual' } = {}) {
-  const activeTenants = await listActiveTenants();
+export async function processWebhookForActiveTenants({ triggerType = 'manual', tenantID = null } = {}) {
+  const allActiveTenants = await listActiveTenants();
+  const activeTenants = tenantID
+    ? allActiveTenants.filter(({ client }) => client.tenantKey === tenantID)
+    : allActiveTenants;
   const summary = {
     tenants: activeTenants.length,
     processed: 0,

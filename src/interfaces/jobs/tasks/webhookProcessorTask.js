@@ -6,8 +6,8 @@ export async function runWebhookProcessorOnce() {
   return enqueueWebhookJobsForActiveTenants({ triggerType: 'scheduled' });
 }
 
-export async function runWebhookProcessorManualOnce() {
-  return processWebhookForActiveTenants({ triggerType: 'manual' });
+export async function runWebhookProcessorManualOnce({ tenantID = null } = {}) {
+  return processWebhookForActiveTenants({ triggerType: 'manual', tenantID });
 }
 
 export default function startWebhookProcessor() {

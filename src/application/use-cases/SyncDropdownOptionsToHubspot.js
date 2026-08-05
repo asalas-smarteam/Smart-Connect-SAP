@@ -5,6 +5,7 @@ import {
   extractOptionSets,
   mergePropertyOptions,
   propertyOptionsAreEqual,
+  validateHubspotPropertyName,
 } from '#domain/sync/dropdown-options.service.js';
 
 function emptyMetrics() {
@@ -41,6 +42,7 @@ export class SyncDropdownOptionsToHubspot {
     dropdownTargetRepository,
     hubspotPropertyGateway,
     hubspotCredentialRepository,
+    hubspotTokenProvider,
     clientConfigRepository,
     syncLogRepository,
     syncWarningRepository,
@@ -53,6 +55,7 @@ export class SyncDropdownOptionsToHubspot {
     this.dropdownTargetRepository = dropdownTargetRepository;
     this.hubspotPropertyGateway = hubspotPropertyGateway;
     this.hubspotCredentialRepository = hubspotCredentialRepository;
+    this.hubspotTokenProvider = hubspotTokenProvider;
     this.clientConfigRepository = clientConfigRepository;
     this.syncLogRepository = syncLogRepository;
     this.syncWarningRepository = syncWarningRepository;
@@ -124,12 +127,15 @@ export class SyncDropdownOptionsToHubspot {
         return this.finish({ ...context, status: 'completed' });
       }
 
+      // Presence is checked here to fail fast, but the token itself is resolved
+      // after the SAP reads: a stored accessToken may already be expired, and
+      // resolving late keeps it as fresh as possible for the writes.
       const credentials = await this.hubspotCredentialRepository.findByClientConfig({
         tenantContext,
         clientConfig: activeConfig,
       });
 
-      if (!credentials?.accessToken) {
+      if (!credentials) {
         return this.finish({
           ...context,
           status: 'errored',
@@ -151,10 +157,26 @@ export class SyncDropdownOptionsToHubspot {
         sources: dropdownConfig.sources,
       });
 
+      let accessToken = null;
+
+      try {
+        accessToken = await this.resolveAccessToken({
+          tenantContext,
+          clientConfig: activeConfig,
+          credentials,
+        });
+      } catch (error) {
+        return this.finish({
+          ...context,
+          status: 'errored',
+          errorMessage: `Could not obtain a valid HubSpot access token: ${error.message}`,
+        });
+      }
+
       await this.applyOptionSets({
         ...context,
         optionSetsByField,
-        accessToken: credentials.accessToken,
+        accessToken,
         hubspotCredentialId: activeConfig.hubspotCredentialId,
       });
 
@@ -176,6 +198,32 @@ export class SyncDropdownOptionsToHubspot {
         errorMessage: error.message,
       });
     }
+  }
+
+  // OAuth access tokens live ~30 minutes, so the value stored on the credential
+  // document is routinely stale. hubspotAuthService.getAccessToken returns it
+  // when still valid and refreshes it with the refreshToken when not, persisting
+  // the new one -- the same provider every other HubSpot flow uses.
+  async resolveAccessToken({ tenantContext, clientConfig, credentials }) {
+    if (typeof this.hubspotTokenProvider?.getAccessToken !== 'function') {
+      if (!credentials?.accessToken) {
+        throw new Error('no token provider configured and the credential has no accessToken');
+      }
+
+      return credentials.accessToken;
+    }
+
+    const token = await this.hubspotTokenProvider.getAccessToken(
+      credentials?._id ?? clientConfig?.hubspotCredentialId,
+      credentials,
+      tenantContext?.tenantModels
+    );
+
+    if (!token) {
+      throw new Error('the token provider returned no access token');
+    }
+
+    return token;
   }
 
   async resolveSapFlavor(tenantContext) {
@@ -285,6 +333,17 @@ export class SyncDropdownOptionsToHubspot {
         continue;
       }
 
+      // Without this line a field mapped on some object types but not others is
+      // invisible: FIELD_WITHOUT_MAPPING only fires when a field has no mapping
+      // at all, so the object types nobody mapped leave no trace whatsoever.
+      this.logger.info?.({
+        msg: 'Dropdown field resolved to HubSpot properties',
+        tenantKey: context.tenantContext?.tenantKey ?? null,
+        sapField: field,
+        optionCount: optionSetsByField.get(field)?.options?.length ?? 0,
+        targets: fieldTargets.map((target) => `${target.objectType}.${target.targetField}`),
+      });
+
       for (const target of fieldTargets) {
         await this.applyOptionSetToTarget({
           ...context,
@@ -300,6 +359,25 @@ export class SyncDropdownOptionsToHubspot {
   async applyOptionSetToTarget({ accessToken, field, target, optionSet, ...context }) {
     context.metrics.recordsProcessed += 1;
     const { objectType, targetField } = target;
+    const nameCheck = validateHubspotPropertyName(targetField);
+
+    if (!nameCheck.valid) {
+      context.metrics.dropdown.propertiesSkipped += 1;
+      await this.recordWarning({
+        ...context,
+        objectType,
+        code: DROPDOWN_WARNING_CODES.PROPERTY_NAME_INVALID,
+        message: `${objectType}.${targetField} skipped: ${nameCheck.reason}`,
+        details: {
+          field,
+          objectType,
+          targetField,
+          suggestedTargetField: String(targetField ?? '').trim().toLowerCase() || null,
+        },
+      });
+      return;
+    }
+
     let property = null;
 
     try {
@@ -347,6 +425,17 @@ export class SyncDropdownOptionsToHubspot {
 
     if (propertyOptionsAreEqual(property.options, options)) {
       context.metrics.dropdown.propertiesUnchanged += 1;
+      // Logged rather than skipped in silence: "already correct" and "never
+      // attempted" are indistinguishable otherwise, and that ambiguity is
+      // exactly what makes a missing dropdown hard to diagnose.
+      this.logger.info?.({
+        msg: 'Dropdown property options already up to date',
+        tenantKey: context.tenantContext?.tenantKey ?? null,
+        objectType,
+        property: targetField,
+        sapField: field,
+        optionCount: options.length,
+      });
       return;
     }
 

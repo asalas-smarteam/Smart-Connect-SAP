@@ -15,7 +15,8 @@ function createSapSyncController({ sapSyncAdmin = buildSapSyncAdmin() } = {}) {
 
     triggerWebHook: async (req, reply) => {
   try {
-    const data = await sapSyncAdmin.runWebhookProcessorManualOnce();
+    const { tenantID = null } = req.body ?? {};
+    const data = await sapSyncAdmin.runWebhookProcessorManualOnce({ tenantID });
     reply.code(200).send({ message: 'Webhook processing executed successfully', data });
   } catch (error) {
     req.log.error({ msg: 'Error executing webhook processing manually', error });

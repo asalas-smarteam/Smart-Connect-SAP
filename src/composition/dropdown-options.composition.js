@@ -16,6 +16,7 @@ import MongooseHubspotCredentialRepository from '#infrastructure/database/reposi
 import MongooseSyncLogRepository from '#infrastructure/database/repositories/MongooseSyncLogRepository.js';
 import MongooseSyncWarningRepository from '#infrastructure/database/repositories/MongooseSyncWarningRepository.js';
 import HubspotPropertyAdapter from '#infrastructure/hubspot/HubspotPropertyAdapter.js';
+import hubspotAuthService from '#infrastructure/hubspot/hubspotAuthService.js';
 import logger from '#infrastructure/logger/logger.adapter.js';
 import B1DropdownCatalogAdapter from '#infrastructure/sap/B1DropdownCatalogAdapter.js';
 
@@ -35,6 +36,9 @@ export function buildSyncDropdownOptionsToHubspot() {
       new MongooseHubspotCredentialRepository(),
       HubspotCredentialRepositoryPort
     ),
+    // Same provider hubspot-sync.composition injects as tokenProvider: it
+    // refreshes an expired accessToken instead of sending it and getting a 401.
+    hubspotTokenProvider: hubspotAuthService,
     clientConfigRepository: assertPort(
       new MongooseClientConfigRepository(),
       ClientConfigRepositoryPort

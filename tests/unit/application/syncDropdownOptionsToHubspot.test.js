@@ -14,6 +14,8 @@ function buildHarness({
   sapFlavor = 'B1',
   fetchRows,
   updatePropertyOptions,
+  credentials = { _id: CREDENTIAL_ID, accessToken: 'stale-token', expiresAt: new Date('2026-08-03T22:15:54.103Z') },
+  getAccessToken,
 } = {}) {
   const warnings = [];
   const finishedLogs = [];
@@ -42,14 +44,19 @@ function buildHarness({
     }),
   };
 
+  const hubspotTokenProvider = {
+    getAccessToken: getAccessToken ?? jest.fn(async () => 'token-123'),
+  };
+
   const useCase = new SyncDropdownOptionsToHubspot({
     dropdownConfigRepository,
     dropdownCatalog,
     dropdownTargetRepository,
     hubspotPropertyGateway,
     hubspotCredentialRepository: {
-      findByClientConfig: jest.fn(async () => ({ accessToken: 'token-123' })),
+      findByClientConfig: jest.fn(async () => credentials),
     },
+    hubspotTokenProvider,
     clientConfigRepository: {
       findById: jest.fn(async () => null),
       markSyncSucceeded: jest.fn(async () => ({})),
@@ -92,6 +99,7 @@ function buildHarness({
     dropdownCatalog,
     dropdownTargetRepository,
     hubspotPropertyGateway,
+    hubspotTokenProvider,
     run: () => useCase.execute({ config, tenantContext }),
   };
 }
@@ -145,11 +153,11 @@ describe('SyncDropdownOptionsToHubspot', () => {
         ],
       },
       targets: [
-        { sourceField: 'PayTermsGrpCode', objectType: 'company', targetField: 'PayTermsGrpCode' },
+        { sourceField: 'PayTermsGrpCode', objectType: 'company', targetField: 'paytermsgrpcode' },
         { sourceField: 'PayTermsGrpCode', objectType: 'contact', targetField: 'pay_terms' },
       ],
       properties: {
-        'company.PayTermsGrpCode': { name: 'PayTermsGrpCode', type: 'enumeration', options: [] },
+        'company.paytermsgrpcode': { name: 'paytermsgrpcode', type: 'enumeration', options: [] },
         'contact.pay_terms': { name: 'pay_terms', type: 'enumeration', options: [] },
       },
     });
@@ -159,7 +167,7 @@ describe('SyncDropdownOptionsToHubspot', () => {
     expect(harness.updates).toHaveLength(2);
     expect(harness.updates[0]).toMatchObject({
       objectType: 'company',
-      propertyName: 'PayTermsGrpCode',
+      propertyName: 'paytermsgrpcode',
     });
     expect(harness.updates[1]).toMatchObject({
       objectType: 'contact',
@@ -213,9 +221,9 @@ describe('SyncDropdownOptionsToHubspot', () => {
         }],
       },
       rows: { '/BusinessPartnerGroups': [{ Code: 100, Name: 'Nacional' }] },
-      targets: [{ sourceField: 'GroupCode', objectType: 'company', targetField: 'GroupCode' }],
+      targets: [{ sourceField: 'GroupCode', objectType: 'company', targetField: 'groupcode' }],
       properties: {
-        'company.GroupCode': {
+        'company.groupcode': {
           type: 'enumeration',
           options: [
             { value: '100', label: 'Nacional' },
@@ -400,6 +408,183 @@ describe('SyncDropdownOptionsToHubspot', () => {
       { label: 'A', value: 'A', displayOrder: 0, hidden: false },
     ]);
     expect(warningCodes(harness.warnings)).toContain(DROPDOWN_WARNING_CODES.TARGET_CONFLICT);
+  });
+
+  // A stored accessToken is routinely expired (they last ~30 min), so the token
+  // has to come from the provider that refreshes it, never from the document.
+  it('asks the token provider for the token instead of using the stored one', async () => {
+    const harness = buildHarness({
+      dropdownConfigValue: {
+        sources: [{ serviceLayerPath: '/Currencies', valueField: 'Code', fields: ['Currency'] }],
+      },
+      rows: { '/Currencies': [{ Code: 'CRC' }] },
+      targets: [{ sourceField: 'Currency', objectType: 'company', targetField: 'moneda' }],
+      properties: { 'company.moneda': { type: 'enumeration', options: [] } },
+    });
+    await harness.run();
+
+    expect(harness.hubspotTokenProvider.getAccessToken).toHaveBeenCalledWith(
+      CREDENTIAL_ID,
+      expect.objectContaining({ accessToken: 'stale-token' }),
+      harness.tenantContext.tenantModels
+    );
+    expect(harness.hubspotPropertyGateway.findProperty)
+      .toHaveBeenCalledWith(expect.objectContaining({ accessToken: 'token-123' }));
+    expect(harness.updates[0].accessToken).toBe('token-123');
+  });
+
+  it('resolves the token only after reading SAP, so it is fresh for the writes', async () => {
+    const calls = [];
+    const harness = buildHarness({
+      dropdownConfigValue: {
+        sources: [{ serviceLayerPath: '/Currencies', valueField: 'Code', fields: ['Currency'] }],
+      },
+      fetchRows: jest.fn(async () => {
+        calls.push('sap');
+        return [{ Code: 'CRC' }];
+      }),
+      getAccessToken: jest.fn(async () => {
+        calls.push('token');
+        return 'token-123';
+      }),
+      targets: [{ sourceField: 'Currency', objectType: 'company', targetField: 'moneda' }],
+      properties: { 'company.moneda': { type: 'enumeration', options: [] } },
+    });
+    await harness.run();
+
+    expect(calls).toEqual(['sap', 'token']);
+  });
+
+  it('errors clearly when the refresh token can no longer be exchanged', async () => {
+    const harness = buildHarness({
+      dropdownConfigValue: {
+        sources: [{ serviceLayerPath: '/Currencies', valueField: 'Code', fields: ['Currency'] }],
+      },
+      rows: { '/Currencies': [{ Code: 'CRC' }] },
+      getAccessToken: jest.fn(async () => {
+        throw new Error('Refresh token not found for client configuration');
+      }),
+    });
+    const result = await harness.run();
+
+    expect(result).toMatchObject({ ok: false, status: 'errored' });
+    expect(result.error).toContain('Could not obtain a valid HubSpot access token');
+    expect(harness.updates).toEqual([]);
+  });
+
+  // HubSpot property names are lowercase, so a PascalCase targetField can never
+  // match. Caught before the API call and reported with the fix.
+  it('skips a targetField that has uppercase letters and suggests the fix', async () => {
+    const harness = buildHarness({
+      dropdownConfigValue: {
+        sources: [{
+          serviceLayerPath: '/BusinessPartnerGroups',
+          valueField: 'Code',
+          labelField: 'Name',
+          fields: ['GroupCode'],
+        }],
+      },
+      rows: { '/BusinessPartnerGroups': [{ Code: 100, Name: 'Nacional' }] },
+      targets: [
+        { sourceField: 'GroupCode', objectType: 'contact', targetField: 'GroupCode' },
+        { sourceField: 'GroupCode', objectType: 'company', targetField: 'groupcode' },
+      ],
+      properties: { 'company.groupcode': { type: 'enumeration', options: [] } },
+    });
+    const result = await harness.run();
+
+    const invalid = harness.warnings.find(
+      (warning) => warning.code === DROPDOWN_WARNING_CODES.PROPERTY_NAME_INVALID
+    );
+    expect(invalid.message).toContain("cannot exist");
+    expect(invalid.details).toMatchObject({
+      targetField: 'GroupCode',
+      suggestedTargetField: 'groupcode',
+    });
+    // The uppercase one never reaches HubSpot; the correct one still syncs.
+    expect(harness.hubspotPropertyGateway.findProperty).toHaveBeenCalledTimes(1);
+    expect(harness.updates).toHaveLength(1);
+    expect(harness.updates[0].propertyName).toBe('groupcode');
+    expect(result.metrics.dropdown.propertiesSkipped).toBe(1);
+  });
+
+  it('sends the mapping targetField as the property name, not the SAP field', async () => {
+    const harness = buildHarness({
+      dropdownConfigValue: {
+        sources: [{
+          serviceLayerPath: '/BusinessPartnerGroups',
+          valueField: 'Code',
+          labelField: 'Name',
+          fields: ['GroupCode'],
+        }],
+      },
+      rows: { '/BusinessPartnerGroups': [{ Code: 100, Name: 'Nacional' }] },
+      targets: [{ sourceField: 'GroupCode', objectType: 'contact', targetField: 'groupcode' }],
+      properties: { 'contact.groupcode': { type: 'enumeration', options: [] } },
+    });
+    await harness.run();
+
+    expect(harness.hubspotPropertyGateway.findProperty).toHaveBeenCalledWith({
+      accessToken: 'token-123',
+      objectType: 'contact',
+      propertyName: 'groupcode',
+    });
+  });
+
+  // The diagnostic gap this closes: a field mapped on contact but not on company
+  // used to leave no trace at all for the company side.
+  it('logs which properties each SAP field resolved to', async () => {
+    const harness = buildHarness({
+      dropdownConfigValue: {
+        sources: [{
+          serviceLayerPath: '/BusinessPartnerGroups',
+          valueField: 'Code',
+          labelField: 'Name',
+          fields: ['GroupCode'],
+        }],
+      },
+      rows: { '/BusinessPartnerGroups': [{ Code: 100, Name: 'Nacional' }] },
+      targets: [{ sourceField: 'GroupCode', objectType: 'contact', targetField: 'groupcode' }],
+      properties: { 'contact.groupcode': { type: 'enumeration', options: [] } },
+    });
+    await harness.run();
+
+    expect(harness.useCase.logger.info).toHaveBeenCalledWith(expect.objectContaining({
+      msg: 'Dropdown field resolved to HubSpot properties',
+      sapField: 'GroupCode',
+      targets: ['contact.groupcode'],
+      optionCount: 1,
+    }));
+  });
+
+  it('logs an already-correct property instead of staying silent', async () => {
+    const harness = buildHarness({
+      dropdownConfigValue: {
+        sources: [{
+          serviceLayerPath: '/UserFieldsMD',
+          valueField: 'Code',
+          labelField: 'Name',
+          fields: ['U_SA'],
+        }],
+      },
+      rows: { '/UserFieldsMD': [{ Code: 'S', Name: 'Si' }] },
+      targets: [{ sourceField: 'U_SA', objectType: 'contact', targetField: 'segmento_actividad' }],
+      properties: {
+        'contact.segmento_actividad': {
+          type: 'enumeration',
+          options: [{ value: 'S', label: 'Si', displayOrder: 0, hidden: false }],
+        },
+      },
+    });
+    await harness.run();
+
+    expect(harness.updates).toEqual([]);
+    expect(harness.useCase.logger.info).toHaveBeenCalledWith(expect.objectContaining({
+      msg: 'Dropdown property options already up to date',
+      objectType: 'contact',
+      property: 'segmento_actividad',
+      sapField: 'U_SA',
+    }));
   });
 
   it('fails cleanly when the clientConfig has no HubSpot credential', async () => {

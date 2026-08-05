@@ -14,8 +14,8 @@ export class SapSyncAdminAdapter {
     return runSapSyncOnce(payload);
   }
 
-  runWebhookProcessorManualOnce() {
-    return runWebhookProcessorManualOnce();
+  runWebhookProcessorManualOnce(payload) {
+    return runWebhookProcessorManualOnce(payload);
   }
 
   getQueueDashboardSnapshot() {

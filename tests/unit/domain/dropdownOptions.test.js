@@ -5,6 +5,7 @@ import {
   normalizeDropdownOptionsConfig,
   normalizeDropdownSource,
   propertyOptionsAreEqual,
+  validateHubspotPropertyName,
 } from '../../../src/domain/sync/dropdown-options.service.js';
 import {
   DROPDOWN_WARNING_CODES,
@@ -426,6 +427,31 @@ describe('propertyOptionsAreEqual', () => {
       [{ value: '1', label: 'Uno' }, { value: '2', label: 'Dos' }],
       [{ value: '2', label: 'Dos' }, { value: '1', label: 'Uno' }]
     )).toBe(false);
+  });
+});
+
+describe('validateHubspotPropertyName', () => {
+  it('accepts the lowercase names HubSpot actually allows', () => {
+    ['groupcode', 'pay_terms', 'u_sa', 'sap_docentry', 'moneda2'].forEach((name) => {
+      expect(validateHubspotPropertyName(name)).toEqual({ valid: true, reason: null });
+    });
+  });
+
+  it('rejects a PascalCase targetField and names the correct one', () => {
+    const result = validateHubspotPropertyName('GroupCode');
+
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain("'groupcode'");
+  });
+
+  it('rejects a single stray uppercase letter', () => {
+    // The real-world case: opendeliverynotesBalance.
+    expect(validateHubspotPropertyName('opendeliverynotesBalance').valid).toBe(false);
+  });
+
+  it('rejects an empty targetField', () => {
+    expect(validateHubspotPropertyName('  ').valid).toBe(false);
+    expect(validateHubspotPropertyName(null).valid).toBe(false);
   });
 });
 

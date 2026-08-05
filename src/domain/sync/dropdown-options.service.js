@@ -471,6 +471,28 @@ export function propertyOptionsAreEqual(left, right) {
   return a.every((option, index) => toComparableOption(option) === toComparableOption(b[index]));
 }
 
+// HubSpot internal property names are lowercase, so a mapping whose targetField
+// carries an uppercase letter ('GroupCode' instead of 'groupcode') can never
+// match a real property. Caught before the API call because the failure is
+// otherwise silent in the record pipeline too: sanitizeProperties matches names
+// against a case-sensitive Set and simply drops the unknown one.
+export function validateHubspotPropertyName(propertyName) {
+  const name = toTrimmedString(propertyName);
+
+  if (!name) {
+    return { valid: false, reason: 'the mapping has an empty targetField' };
+  }
+
+  if (name !== name.toLowerCase()) {
+    return {
+      valid: false,
+      reason: `HubSpot property names are lowercase, so '${name}' cannot exist; the mapping's targetField should be '${name.toLowerCase()}'`,
+    };
+  }
+
+  return { valid: true, reason: null };
+}
+
 // HubSpot marks properties it owns as read-only definitions; PATCHing their
 // options fails, so they are reported instead of attempted.
 export function classifyTargetProperty(property) {
@@ -508,4 +530,5 @@ export default {
   normalizeDropdownOptionsConfig,
   normalizeDropdownSource,
   propertyOptionsAreEqual,
+  validateHubspotPropertyName,
 };
