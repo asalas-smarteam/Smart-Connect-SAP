@@ -1,4 +1,7 @@
-import { buildOrderFromQuotationPayload } from '#domain/orders/order-builder.service.js';
+import {
+  buildOrderFromQuotationPayload,
+  mapHubspotToSapFields,
+} from '#domain/orders/order-builder.service.js';
 import { PermanentWebhookError } from '#shared/errors/index.js';
 import { resolveEventPayload } from '../services/webhook-payload.service.js';
 import {
@@ -91,6 +94,8 @@ export class ProcessHubspotConvertQuotationToOrder {
         logger: this.logger,
       });
 
+      const mappedDeal = mapHubspotToSapFields(deal || {}, mappings.dealOrdersQuotationsMappings);
+
       const orderPayload = buildOrderFromQuotationPayload({
         cardCode,
         baseEntry: quotationLink.sapDocEntry,
@@ -98,6 +103,7 @@ export class ProcessHubspotConvertQuotationToOrder {
         slpCode,
         numAtCard: buildDealNumAtCard(dealId),
         comments: 'Pedido creado desde oferta SAP por etapa Orden de Compra en HubSpot',
+        mappedDealFields: mappedDeal,
       });
       auditTrail.payload_SAP.order = orderPayload;
 

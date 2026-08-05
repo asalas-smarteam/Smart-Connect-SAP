@@ -1,5 +1,9 @@
 import mongoose from 'mongoose';
 import { SAP_FILTER_OPERATORS } from '#domain/sap/sap-filter.constants.js';
+import {
+  CLIENT_CONFIG_TASK_TYPE_VALUES,
+  DEFAULT_CLIENT_CONFIG_TASK_TYPE,
+} from '#domain/sync/dropdown-options.constants.js';
 
 const { Schema } = mongoose;
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -68,6 +72,17 @@ export const clientConfigSchema = new Schema(
   {
     clientName: {
       type: String,
+    },
+    // What this scheduled task does. SAP_SYNC is the record pipeline and stays
+    // the default so existing documents keep their behavior. DROPDOWN_OPTIONS
+    // only rewrites HubSpot enumeration options: it ignores serviceLayerPath,
+    // objectType, filters, orderBy and mode, because what to read comes from the
+    // `dropdownOptionsSync` configuration and where to write it comes from the
+    // fieldMappings.
+    taskType: {
+      type: String,
+      enum: CLIENT_CONFIG_TASK_TYPE_VALUES,
+      default: DEFAULT_CLIENT_CONFIG_TASK_TYPE,
     },
     integrationModeId: {
       type: Schema.Types.ObjectId,

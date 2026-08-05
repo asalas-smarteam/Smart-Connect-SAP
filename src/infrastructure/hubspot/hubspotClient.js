@@ -102,6 +102,10 @@ export async function hubspotPost(token, path, data) {
   return hubspotRequest('post', path, token, data);
 }
 
+export async function hubspotPatch(token, path, data) {
+  return hubspotRequest('patch', path, token, data);
+}
+
 async function searchObject(token, objectType, filters, properties = []) {
   const payload = {
     filterGroups: [

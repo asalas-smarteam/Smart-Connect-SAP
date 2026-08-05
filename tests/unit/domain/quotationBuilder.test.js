@@ -25,6 +25,16 @@ describe('order-builder.service buildQuotationPayload', () => {
     expect(payload.DocDueDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
+  it('uses the DocDueDate mapped from HubSpot instead of today', () => {
+    const payload = buildQuotationPayload({
+      cardCode: 'CL00129',
+      documentLines: [{ ItemCode: 'A01', Quantity: 1, UnitPrice: 10 }],
+      mappedDealFields: { DocDueDate: '2026-07-21' },
+    });
+
+    expect(payload.DocDueDate).toBe('2026-07-21');
+  });
+
   it('throws when there are no document lines', () => {
     expect(() => buildQuotationPayload({ cardCode: 'CL1', documentLines: [] })).toThrow(
       /At least one line_item/
@@ -61,6 +71,27 @@ describe('order-builder.service buildOrderFromQuotationPayload', () => {
       { BaseType: 23, BaseEntry: 9, BaseLine: 0 },
       { BaseType: 23, BaseEntry: 9, BaseLine: 2 },
     ]);
+  });
+
+  it('uses the DocDueDate mapped from HubSpot instead of today', () => {
+    const payload = buildOrderFromQuotationPayload({
+      cardCode: 'CL00129',
+      baseEntry: 12345,
+      baseLines: [0],
+      mappedDealFields: { DocDueDate: '2026-07-21' },
+    });
+
+    expect(payload.DocDueDate).toBe('2026-07-21');
+  });
+
+  it('falls back to today when the deal carries no DocDueDate', () => {
+    const payload = buildOrderFromQuotationPayload({
+      cardCode: 'CL00129',
+      baseEntry: 12345,
+      baseLines: [0],
+    });
+
+    expect(payload.DocDueDate).toBe(new Date().toISOString().slice(0, 10));
   });
 
   it('throws when baseEntry is invalid', () => {

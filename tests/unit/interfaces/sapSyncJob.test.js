@@ -16,6 +16,43 @@ function createJob(data = {}) {
 }
 
 describe('sap sync job processor', () => {
+  // A DROPDOWN_OPTIONS config must never reach the record pipeline: it has no
+  // serviceLayerPath or objectType, so SyncSapConfigToHubspot would fetch
+  // nothing and report a healthy empty run.
+  it.each([
+    ['DROPDOWN_OPTIONS', 'dropdown'],
+    ['SAP_SYNC', 'sync'],
+    [undefined, 'sync'],
+  ])('routes a %s config to the %s use case', async (taskType, expected) => {
+    const config = { _id: 'cfg-1', active: true, ...(taskType ? { taskType } : {}) };
+    const tenantModels = { ClientConfig: {} };
+    const result = { ok: true, metrics: { recordsProcessed: 0 } };
+    const syncUseCase = { execute: jest.fn().mockResolvedValue(result) };
+    const dropdownUseCase = { execute: jest.fn().mockResolvedValue(result) };
+    const processor = createSapSyncJobProcessor({
+      tenantRepository: { loadConfig: jest.fn().mockResolvedValue({ tenantModels, config }) },
+      lockAdapter: {
+        acquire: jest.fn().mockResolvedValue({ key: 'lock', token: 't', ttlMs: 60000 }),
+        extend: jest.fn(),
+        release: jest.fn().mockResolvedValue(true),
+      },
+      syncUseCase,
+      dropdownUseCase,
+    });
+
+    await processor(createJob({ tenantKey: 'tenant-a', configId: 'cfg-1', triggerType: 'manual' }));
+
+    const [called, notCalled] = expected === 'dropdown'
+      ? [dropdownUseCase, syncUseCase]
+      : [syncUseCase, dropdownUseCase];
+
+    expect(called.execute).toHaveBeenCalledWith({
+      config,
+      tenantContext: { tenantKey: 'tenant-a', tenantModels },
+    });
+    expect(notCalled.execute).not.toHaveBeenCalled();
+  });
+
   it('executes a SAP sync job with tenant lock protection', async () => {
     const config = { _id: 'cfg-1', active: true };
     const tenantModels = { ClientConfig: {} };

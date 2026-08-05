@@ -3,6 +3,9 @@ import {
   buildSyncSapConfigToHubspot,
   buildTenantSapSyncLockAdapter,
 } from '#composition/sap-sync.composition.js';
+import { buildSyncDropdownOptionsToHubspot } from '#composition/dropdown-options.composition.js';
+import { resolveSyncUseCase } from '#application/services/syncTaskRouter.service.js';
+import { resolveClientConfigTaskType } from '#domain/sync/dropdown-options.constants.js';
 import logger from '#infrastructure/logger/logger.adapter.js';
 import { SAP_SYNC_JOB_NAME } from '#infrastructure/queue/sap-sync.queue.adapter.js';
 
@@ -125,6 +128,7 @@ export function createSapSyncJobProcessor({
   tenantRepository = buildSapSyncTenantRepository(),
   lockAdapter = buildTenantSapSyncLockAdapter(),
   syncUseCase = buildSyncSapConfigToHubspot(),
+  dropdownUseCase = buildSyncDropdownOptionsToHubspot(),
   dateProvider = () => new Date(),
 } = {}) {
   return async function processSapSyncJob(job) {
@@ -242,7 +246,11 @@ export function createSapSyncJobProcessor({
         triggerType,
       });
 
-      const syncResult = await syncUseCase.execute({
+      const syncResult = await resolveSyncUseCase({
+        config,
+        syncUseCase,
+        dropdownUseCase,
+      }).execute({
         config,
         tenantContext: { tenantKey, tenantModels },
       });
@@ -273,6 +281,7 @@ export function createSapSyncJobProcessor({
         tenantKey,
         configId,
         triggerType,
+        taskType: resolveClientConfigTaskType(config?.taskType),
         jobId: job.id,
         startedAt: startedAt.toISOString(),
         finishedAt: finishedAt.toISOString(),

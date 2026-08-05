@@ -70,6 +70,48 @@ function pickMappedLineFields(mappedLineFields) {
   return fields;
 }
 
+// SAP wants a plain YYYY-MM-DD. HubSpot date properties reach us either already formatted
+// (optionally with a time component) or as epoch millis, depending on how the workflow
+// serializes them, so both shapes are normalized here. Anything else yields null.
+function normalizeSapDate(value) {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10);
+  }
+
+  const raw = toNonEmptyString(value);
+  if (!raw) {
+    return null;
+  }
+
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})(?:[T\s]|$)/.exec(raw);
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch.map(Number);
+    // Rejects things like 2026-13-45 that match the shape but are not real dates.
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    const isRealDate = parsed.getUTCFullYear() === year
+      && parsed.getUTCMonth() === month - 1
+      && parsed.getUTCDate() === day;
+
+    return isRealDate ? parsed.toISOString().slice(0, 10) : null;
+  }
+
+  // Epoch millis (HubSpot stores date properties as midnight UTC). Seconds-precision
+  // values are not accepted: they would silently resolve to 1970.
+  if (/^\d{12,}$/.test(raw)) {
+    const parsed = new Date(Number(raw));
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+  }
+
+  return null;
+}
+
+// Precedence: mapped HubSpot value (FieldMapping DocDueDate -> docduedate) → today.
+// DocDueDate is mandatory in SAP, so an absent or unusable value degrades to today
+// rather than failing the document.
+export function resolveDocDueDate({ mappedDeal = null, now = new Date() } = {}) {
+  return normalizeSapDate(mappedDeal?.DocDueDate) ?? now.toISOString().slice(0, 10);
+}
+
 // Precedence: mapped HubSpot value → tenant config default (groupCodeDefauls) → null (omit).
 export function resolvePaymentGroupCode({ mappedDeal, groupCodeDefaults }) {
   const mappedValue = normalizeInteger(mappedDeal?.PaymentGroupCode);
@@ -280,7 +322,7 @@ export function buildOrderPayload({
   const payload = {
     ...pickMappedHeaderFields(mappedDealFields),
     CardCode: cardCode,
-    DocDueDate: new Date().toISOString().slice(0, 10),
+    DocDueDate: resolveDocDueDate({ mappedDeal: mappedDealFields }),
     DocumentLines: documentLines,
   };
 
@@ -327,7 +369,7 @@ export function buildQuotationPayload({
   const payload = {
     ...pickMappedHeaderFields(mappedDealFields),
     CardCode: cardCode,
-    DocDueDate: new Date().toISOString().slice(0, 10),
+    DocDueDate: resolveDocDueDate({ mappedDeal: mappedDealFields }),
     DocumentLines: documentLines,
   };
 
@@ -352,6 +394,8 @@ export function buildQuotationPayload({
   return payload;
 }
 
+// Only DocDueDate is taken from mappedDealFields here: the rest of the header is copied by
+// SAP from the base quotation, so the mapped fields are deliberately not spread in.
 export function buildOrderFromQuotationPayload({
   cardCode,
   baseEntry,
@@ -359,6 +403,7 @@ export function buildOrderFromQuotationPayload({
   slpCode = null,
   numAtCard = null,
   comments = null,
+  mappedDealFields = {},
 }) {
   const normalizedBaseEntry = baseEntry === null || typeof baseEntry === 'undefined'
     ? null
@@ -384,7 +429,7 @@ export function buildOrderFromQuotationPayload({
 
   const payload = {
     CardCode: cardCode,
-    DocDueDate: new Date().toISOString().slice(0, 10),
+    DocDueDate: resolveDocDueDate({ mappedDeal: mappedDealFields }),
     DocumentLines: documentLines,
   };
 

@@ -4,6 +4,8 @@ import {
   buildOrderPayload,
   buildQuotationPayload,
   mapDocumentLines,
+  mapHubspotToSapFields,
+  resolveDocDueDate,
   resolvePaymentGroupCode,
 } from '../../../src/domain/orders/order-builder.service.js';
 
@@ -466,16 +468,89 @@ describe('order-builder.service buildOrderPayload', () => {
       paymentGroupCode: null,
       mappedDealFields: {
         CardCode: 'HACKED',
-        DocDueDate: '1999-01-01',
         DocumentLines: [],
         PaymentGroupCode: 'abc',
       },
     });
 
     expect(payload.CardCode).toBe('CL99999');
-    expect(payload.DocDueDate).not.toBe('1999-01-01');
     expect(payload.DocumentLines).toHaveLength(1);
     expect(payload).not.toHaveProperty('PaymentGroupCode');
+  });
+
+  it('uses the DocDueDate mapped from HubSpot instead of today', () => {
+    const payload = buildOrderPayload({
+      cardCode: 'CL99999',
+      documentLines: [{ ItemCode: 'A56010004', Quantity: 1 }],
+      mappedDealFields: { DocDueDate: '2026-07-21' },
+    });
+
+    expect(payload.DocDueDate).toBe('2026-07-21');
+  });
+
+  it('falls back to today when the deal carries no DocDueDate', () => {
+    const payload = buildOrderPayload({
+      cardCode: 'CL99999',
+      documentLines: [{ ItemCode: 'A56010004', Quantity: 1 }],
+      mappedDealFields: {},
+    });
+
+    expect(payload.DocDueDate).toBe(new Date().toISOString().slice(0, 10));
+  });
+});
+
+describe('order-builder.service resolveDocDueDate', () => {
+  const today = new Date().toISOString().slice(0, 10);
+
+  it('prefers the mapped HubSpot value over today', () => {
+    expect(resolveDocDueDate({ mappedDeal: { DocDueDate: '2026-07-21' } })).toBe('2026-07-21');
+  });
+
+  it('trims the time component off an ISO datetime', () => {
+    expect(resolveDocDueDate({ mappedDeal: { DocDueDate: '2026-07-21T00:00:00Z' } })).toBe(
+      '2026-07-21'
+    );
+  });
+
+  it('accepts HubSpot epoch-millis date properties', () => {
+    const epochMillis = Date.UTC(2026, 6, 21);
+    expect(resolveDocDueDate({ mappedDeal: { DocDueDate: String(epochMillis) } })).toBe(
+      '2026-07-21'
+    );
+  });
+
+  it('accepts a Date instance', () => {
+    expect(resolveDocDueDate({ mappedDeal: { DocDueDate: new Date('2026-07-21T12:00:00Z') } })).toBe(
+      '2026-07-21'
+    );
+  });
+
+  // DocDueDate is mandatory in SAP, so an unusable value must never reach the payload
+  // as-is: it degrades to today rather than failing the document.
+  it.each([
+    ['missing', undefined],
+    ['null', null],
+    ['empty', '   '],
+    ['not a date', 'manana'],
+    ['impossible calendar date', '2026-13-45'],
+  ])('falls back to today when the mapped value is %s', (_label, value) => {
+    expect(resolveDocDueDate({ mappedDeal: { DocDueDate: value } })).toBe(today);
+  });
+
+  it('falls back to today when there is no mapped deal at all', () => {
+    expect(resolveDocDueDate({})).toBe(today);
+    expect(resolveDocDueDate()).toBe(today);
+  });
+
+  // The FieldMapping is { sourceField: 'DocDueDate', targetField: 'docduedate' }, so the
+  // value only reaches the resolver if mapHubspotToSapFields read it off the HubSpot deal.
+  it('reads the value produced by the DocDueDate field mapping', () => {
+    const mappedDeal = mapHubspotToSapFields(
+      { docduedate: '2026-07-21', dealname: 'PGN ROL' },
+      [{ sourceField: 'DocDueDate', targetField: 'docduedate', isActive: true }]
+    );
+
+    expect(resolveDocDueDate({ mappedDeal })).toBe('2026-07-21');
   });
 });
 

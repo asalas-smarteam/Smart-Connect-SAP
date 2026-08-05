@@ -253,21 +253,39 @@ describe('hexagonal architecture boundaries', () => {
     expect(violations).toEqual([]);
   });
 
+  // Resolves each specifier to a path instead of matching the substring
+  // '/services/', which also flagged the legitimate #application/services/ once
+  // an interface job needed one. The banned targets are the removed legacy roots
+  // (src/services, src/tasks, src/queues, src/utils), and those are still caught
+  // whether they are reached by alias or by a relative path.
   it('keeps interface jobs from importing legacy services directly', () => {
     const jobFiles = listJavaScriptFiles(path.join(srcRoot, 'interfaces', 'jobs'));
+    const bannedRootsForJobs = [
+      'services',
+      'tasks',
+      'queues',
+      'utils',
+    ].map((directory) => path.join(srcRoot, directory));
     const violations = jobFiles.flatMap((filePath) => {
       const source = fs.readFileSync(filePath, 'utf8');
 
       return parseImportSpecifiers(source)
-        .filter((specifier) =>
-          [
-            '/services/',
-            '/tasks/',
-            '/queues/',
-            '/utils/',
-          ].some((legacySegment) => specifier.includes(legacySegment))
-        )
-        .map((specifier) => `${path.relative(projectRoot, filePath)} imports ${specifier}`);
+        .map((specifier) => {
+          const resolved = resolveImportPath(filePath, specifier);
+
+          if (!resolved) {
+            return null;
+          }
+
+          const bannedRoot = bannedRootsForJobs.find((directory) =>
+            resolved === directory || isInsideDirectory(resolved, directory)
+          );
+
+          return bannedRoot
+            ? `${path.relative(projectRoot, filePath)} imports ${path.relative(projectRoot, resolved)}`
+            : null;
+        })
+        .filter(Boolean);
     });
 
     expect(violations).toEqual([]);
