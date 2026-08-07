@@ -264,6 +264,19 @@ export class SyncDropdownOptionsToHubspot {
       }
 
       context.metrics.dropdown.sourcesProcessed += 1;
+
+      // Paired with the optionCount on the 'resolved to' line further down: a
+      // short dropdown is otherwise ambiguous between "SAP only gave us page
+      // one" and "the rows arrived and extraction discarded most of them".
+      this.logger.info?.({
+        msg: 'Dropdown source rows fetched',
+        tenantKey: context.tenantContext?.tenantKey ?? null,
+        source: source.id,
+        serviceLayerPath: source.serviceLayerPath,
+        query: source.query,
+        rowCount: Array.isArray(rows) ? rows.length : 0,
+      });
+
       const { optionSets, issues } = extractOptionSets({ source, rows });
 
       for (const issue of issues) {

@@ -28,6 +28,7 @@ jest.unstable_mockModule('../../../src/infrastructure/logger/logger.js', () => (
   },
 }));
 
+const { default: logger } = await import('../../../src/infrastructure/logger/logger.js');
 const { B1ServiceLayerTransport } = await import(
   '../../../src/infrastructure/sap/transport/B1ServiceLayerTransport.js'
 );
@@ -129,6 +130,59 @@ describe('B1ServiceLayerTransport', () => {
     );
     expect(mockAxiosGet.mock.calls[1][0]).toBe(
       'https://sap.example.com:50000/b1s/v2/BusinessPartners?$skip=100'
+    );
+  });
+
+  // What a real B1 Service Layer sends back: the entity set and the original
+  // query options, relative and without the /b1s/v2 prefix.
+  it('follows a bare relative @odata.nextLink across several pages', async () => {
+    mockGetSessionCookie.mockResolvedValue({ cookie: 'B1SESSION=abc' });
+    mockAxiosGet
+      .mockResolvedValueOnce({
+        data: {
+          value: [{ SalesEmployeeCode: 1 }],
+          '@odata.nextLink': 'SalesPersons?$select=SalesEmployeeCode&$skip=20',
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          value: [{ SalesEmployeeCode: 2 }],
+          '@odata.nextLink': 'SalesPersons?$select=SalesEmployeeCode&$skip=40',
+        },
+      })
+      .mockResolvedValueOnce({
+        data: { value: [{ SalesEmployeeCode: 3 }] },
+      });
+
+    const transport = new B1ServiceLayerTransport({ config });
+    const result = await transport.fetchAll({
+      path: '/SalesPersons',
+      query: { $select: 'SalesEmployeeCode' },
+    });
+
+    expect(result).toHaveLength(3);
+    expect(mockAxiosGet.mock.calls[1][0]).toBe(
+      'https://sap.example.com:50000/b1s/v2/SalesPersons?$select=SalesEmployeeCode&$skip=20'
+    );
+    expect(mockAxiosGet.mock.calls[2][0]).toBe(
+      'https://sap.example.com:50000/b1s/v2/SalesPersons?$select=SalesEmployeeCode&$skip=40'
+    );
+  });
+
+  it('logs how many pages and rows a collection read produced', async () => {
+    mockGetSessionCookie.mockResolvedValue({ cookie: 'B1SESSION=abc' });
+    mockAxiosGet
+      .mockResolvedValueOnce({
+        data: { value: [{ SalesEmployeeCode: 1 }], '@odata.nextLink': 'SalesPersons?$skip=20' },
+      })
+      .mockResolvedValueOnce({ data: { value: [{ SalesEmployeeCode: 2 }] } });
+
+    const transport = new B1ServiceLayerTransport({ config });
+    await transport.fetchAll({ path: '/SalesPersons' });
+
+    expect(logger.info).toHaveBeenCalledWith(
+      'B1 Service Layer collection fetched',
+      expect.objectContaining({ path: '/SalesPersons', pages: 2, rowCount: 2 })
     );
   });
 });

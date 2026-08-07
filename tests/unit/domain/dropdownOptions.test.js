@@ -189,6 +189,25 @@ describe('extractOptionSets - shared mode', () => {
     ]);
   });
 
+  // A dropdown shorter than the SAP catalog used to look identical to a SAP
+  // catalog that was simply short.
+  it('reports rows dropped for an empty or repeated value', () => {
+    const { optionSets, issues } = extractOptionSets({
+      source,
+      rows: [
+        { Code: 100, Name: 'Nacional' },
+        { Code: '', Name: 'Sin codigo' },
+        { Code: 100, Name: 'Nacional duplicado' },
+      ],
+    });
+
+    expect(optionSets[0].options).toEqual([{ value: '100', label: 'Nacional' }]);
+    expect(issues[0]).toMatchObject({
+      code: DROPDOWN_WARNING_CODES.OPTIONS_SKIPPED,
+      details: { skippedEmpty: 1, skippedDuplicate: 1, valueField: 'Code' },
+    });
+  });
+
   it('refuses values containing the HubSpot separator and reports them', () => {
     const { optionSets, issues } = extractOptionSets({
       source,

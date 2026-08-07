@@ -1,3 +1,5 @@
+import { resolveErrorMessageText } from '#application/services/error-message.service.js';
+
 function emptySummary() {
   return {
     processed: 0,
@@ -9,11 +11,9 @@ function emptySummary() {
   };
 }
 
-function resolveLastErrorMessage(error) {
-  return error?.response?.data?.error?.message || error.message;
-}
-
 const POST_SAP_FAILURE_STATUS = 'sap_created_hubspot_error';
+
+async function noopNotifyWebhookFailure() {}
 
 export class ProcessWebhookDealEventBatch {
   constructor({
@@ -23,6 +23,7 @@ export class ProcessWebhookDealEventBatch {
     maxRetries,
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
+    notifyWebhookFailure = noopNotifyWebhookFailure,
   }) {
     this.webhookEventRepository = webhookEventRepository;
     this.processWebhookDealEvent = processWebhookDealEvent;
@@ -30,6 +31,7 @@ export class ProcessWebhookDealEventBatch {
     this.maxRetries = Math.max(1, Number(maxRetries || 1));
     this.buildWebhookSyncErrorEntry = buildWebhookSyncErrorEntry;
     this.buildErrorResponseSnapshot = buildErrorResponseSnapshot;
+    this.notifyWebhookFailure = notifyWebhookFailure;
   }
 
   async execute({ tenantModels, tenantId, tenantKey, portalId } = {}) {
@@ -57,15 +59,34 @@ export class ProcessWebhookDealEventBatch {
     };
 
     for (const event of events) {
+      let result;
+
       try {
-        const result = await this.processWebhookDealEvent({
+        result = await this.processWebhookDealEvent({
           event,
           tenantModels,
           tenantId,
           tenantKey,
           portalId,
         });
+      } catch (error) {
+        await this.safelyHandleProcessingError({
+          error,
+          event,
+          tenantId,
+          tenantKey,
+          tenantModels,
+          portalId,
+          summary,
+        });
+        continue;
+      }
 
+      // markCompleted lives in its own try: SAP already created the order at
+      // this point, so a bookkeeping failure here must never fall back to
+      // handleProcessingError's 'waiting' path -- the cron would reprocess the
+      // event and duplicate the order in SAP.
+      try {
         await this.webhookEventRepository.markCompleted(event, result);
         summary.completed += 1;
 
@@ -78,12 +99,15 @@ export class ProcessWebhookDealEventBatch {
           docEntry: result.docEntry,
           docNum: result.docNum,
         });
-      } catch (error) {
-        await this.handleProcessingError({
-          error,
+      } catch (bookkeepingError) {
+        await this.handlePostSapBookkeepingFailure({
+          error: bookkeepingError,
           event,
+          result,
           tenantId,
           tenantKey,
+          tenantModels,
+          portalId,
           summary,
         });
       }
@@ -92,9 +116,94 @@ export class ProcessWebhookDealEventBatch {
     return summary;
   }
 
-  async handleProcessingError({ error, event, tenantId, tenantKey, summary }) {
+  // Wraps handleProcessingError so a bookkeeping failure (CastError, Mongo
+  // down, etc.) can never escape the loop and abort the rest of the batch --
+  // it already did once, which is the bug this fixes. Falls back to a
+  // best-effort release to 'waiting' so the event isn't left stuck in
+  // 'inprocess'; if even that fails, it's logged and left for manual recovery.
+  async safelyHandleProcessingError({ error, event, tenantId, tenantKey, tenantModels, portalId, summary }) {
+    try {
+      await this.handleProcessingError({ error, event, tenantId, tenantKey, tenantModels, portalId, summary });
+    } catch (bookkeepingError) {
+      const currentRetries = Number(event?.retries || 0);
+      const lastError = resolveErrorMessageText(error);
+
+      this.logger.error({
+        msg: 'Webhook event bookkeeping failed',
+        tenantId: tenantId || null,
+        tenantKey: tenantKey || null,
+        eventId: String(event._id),
+        error: resolveErrorMessageText(bookkeepingError),
+        originalError: lastError,
+      });
+
+      try {
+        await this.webhookEventRepository.markFailed(event, {
+          status: 'waiting',
+          retries: currentRetries,
+          lastError,
+        });
+      } catch (releaseError) {
+        this.logger.error({
+          msg: 'Webhook event release after bookkeeping failure also failed',
+          tenantId: tenantId || null,
+          tenantKey: tenantKey || null,
+          eventId: String(event._id),
+          error: resolveErrorMessageText(releaseError),
+        });
+      }
+
+      summary.errored += 1;
+    }
+  }
+
+  // Sibling of the error.sapOrderCreated branch in handleProcessingError:
+  // here processWebhookDealEvent already succeeded (SAP order created) and
+  // only the local bookkeeping (markCompleted) failed, so the event is marked
+  // terminally failed too -- never 'waiting' -- to avoid duplicating the SAP
+  // order on the next cron pass. Never throws, so a repeat bookkeeping
+  // failure still can't take down the batch.
+  async handlePostSapBookkeepingFailure({ error, event, result, tenantId, tenantKey, tenantModels, portalId, summary }) {
     const currentRetries = Number(event?.retries || 0);
-    const lastError = resolveLastErrorMessage(error);
+    const lastError = resolveErrorMessageText(error);
+
+    try {
+      await this.webhookEventRepository.markFailed(event, {
+        status: POST_SAP_FAILURE_STATUS,
+        retries: currentRetries,
+        lastError,
+        sapResult: result,
+        sapAudit: result?.sapAudit,
+      });
+    } catch (bookkeepingError) {
+      this.logger.error({
+        msg: 'Webhook event bookkeeping failed',
+        tenantId: tenantId || null,
+        tenantKey: tenantKey || null,
+        eventId: String(event._id),
+        error: resolveErrorMessageText(bookkeepingError),
+        originalError: lastError,
+      });
+    }
+
+    summary.errored += 1;
+    this.appendErrorDetails(summary, event, error);
+    this.logger.error({
+      msg: 'Webhook event failed after SAP order creation',
+      tenantId: tenantId || null,
+      tenantKey: tenantKey || null,
+      eventId: String(event._id),
+      retries: currentRetries,
+      nextStatus: POST_SAP_FAILURE_STATUS,
+      docEntry: result?.docEntry ?? null,
+      docNum: result?.docNum ?? null,
+      error: lastError,
+    });
+  }
+
+  async handleProcessingError({ error, event, tenantId, tenantKey, tenantModels, portalId, summary }) {
+    const currentRetries = Number(event?.retries || 0);
+    const lastError = resolveErrorMessageText(error);
 
     if (error?.sapOrderCreated) {
       await this.webhookEventRepository.markFailed(event, {
@@ -102,7 +211,7 @@ export class ProcessWebhookDealEventBatch {
         retries: currentRetries,
         lastError,
         sapResult: error.sapOrderResult,
-        payloadSap: error.sapOrderPayload ?? null,
+        sapAudit: error?.sapAudit,
       });
 
       summary.errored += 1;
@@ -134,7 +243,7 @@ export class ProcessWebhookDealEventBatch {
       status: nextStatus,
       retries: nextRetries,
       lastError,
-      payloadSap: error?.sapOrderPayload ?? null,
+      sapAudit: error?.sapAudit,
     });
 
     if (shouldRetry) {
@@ -142,6 +251,7 @@ export class ProcessWebhookDealEventBatch {
     } else {
       summary.errored += 1;
       this.appendErrorDetails(summary, event, error);
+      await this.notifyWebhookFailure({ event, lastError, tenantModels, portalId });
     }
 
     this.logger.error({

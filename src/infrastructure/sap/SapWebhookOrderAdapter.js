@@ -31,10 +31,11 @@ function resolveContactEmployeePayload(contact, contactEmployeeMappings) {
 
   if (email) {
     payload.E_Mail = email;
-    if (!payload.EmailAddress) {
-      payload.EmailAddress = email;
-    }
   }
+
+  // ContactEmployee has no EmailAddress property in SAP B1 (only BusinessPartner does);
+  // sending it makes the Service Layer reject the whole PATCH.
+  delete payload.EmailAddress;
 
   return payload;
 }

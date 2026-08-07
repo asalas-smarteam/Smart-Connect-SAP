@@ -54,6 +54,88 @@ export function buildWebhookSyncErrorEntry({
   };
 }
 
+function isEmptyAuditValue(value) {
+  if (value === null || value === undefined) {
+    return true;
+  }
+
+  if (Array.isArray(value)) {
+    return value.every(isEmptyAuditValue);
+  }
+
+  if (typeof value === 'object') {
+    return Object.values(value).every(isEmptyAuditValue);
+  }
+
+  return false;
+}
+
+// SAP B1 Service Layer responses can carry OData annotation keys (e.g. `@odata.context`,
+// `@odata.etag`, `DocumentLines@odata.count`) at any depth. MongoDB only allows dotted field
+// names from server version 5.0 onward, and these annotations are pure noise in an audit
+// record anyway, so they're stripped before persisting. Operates on the already-serialized
+// (JSON-safe, non-circular) output of serializeLogValue, never on the raw SAP response.
+function stripODataKeys(value) {
+  if (Array.isArray(value)) {
+    return value.map(stripODataKeys);
+  }
+
+  if (value && typeof value === 'object') {
+    const cleaned = {};
+    for (const [key, nested] of Object.entries(value)) {
+      if (key.includes('@odata.')) {
+        continue;
+      }
+      cleaned[key] = stripODataKeys(nested);
+    }
+    return cleaned;
+  }
+
+  return value;
+}
+
+function serializeAuditObject(obj) {
+  if (obj === null || obj === undefined) {
+    return null;
+  }
+
+  if (typeof obj !== 'object' || Array.isArray(obj)) {
+    return stripODataKeys(serializeLogValue(obj));
+  }
+
+  const result = {};
+  for (const [key, value] of Object.entries(obj)) {
+    result[key] = stripODataKeys(serializeLogValue(value));
+  }
+  return result;
+}
+
+// Builds the persisted record of everything a webhook use case sent to and received from
+// SAP (BusinessPartner, ContactEmployee, order/quotation), plus the HubSpot response, so a
+// failed WebhookEvent shows exactly what was attempted instead of just an error message.
+// Returns null when nothing was ever sent to SAP (e.g. the use case failed before its first
+// SAP call), so WebhookEvent documents aren't cluttered with an all-null audit record.
+export function buildWebhookSapAudit(auditTrail) {
+  try {
+    const payloadSap = serializeAuditObject(auditTrail?.payload_SAP ?? null);
+    const responseSap = serializeAuditObject(auditTrail?.response_SAP ?? null);
+    const responseHubspot = serializeLogValue(auditTrail?.response_hubspot ?? null);
+
+    if (isEmptyAuditValue(payloadSap) && isEmptyAuditValue(responseSap) && isEmptyAuditValue(responseHubspot)) {
+      return null;
+    }
+
+    return {
+      payloadSap,
+      responseSap,
+      responseHubspot,
+      capturedAt: new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
 const SYNC_LOG_OBJECT_TYPES = Object.freeze({
   product: 'Product',
   products: 'Product',

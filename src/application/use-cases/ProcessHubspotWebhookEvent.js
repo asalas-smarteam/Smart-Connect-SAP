@@ -19,6 +19,7 @@ export class ProcessHubspotWebhookEvent {
     webhookEventProgressRepository,
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
+    buildWebhookSapAudit,
     logger = { warn: () => {} },
   }) {
     this.runtimeRepository = runtimeRepository;
@@ -28,6 +29,7 @@ export class ProcessHubspotWebhookEvent {
     this.webhookEventProgressRepository = webhookEventProgressRepository;
     this.buildWebhookSyncErrorEntry = buildWebhookSyncErrorEntry;
     this.buildErrorResponseSnapshot = buildErrorResponseSnapshot;
+    this.buildWebhookSapAudit = buildWebhookSapAudit;
     this.logger = logger;
   }
 
@@ -113,12 +115,6 @@ export class ProcessHubspotWebhookEvent {
       }
 
       if (businessPartnerResult.created) {
-        await this.webhookEventProgressRepository?.markBusinessPartnerCreated({
-          WebhookEvent,
-          eventId: event?._id,
-          requestPayload: businessPartnerResult.requestPayload,
-          responsePayload: businessPartnerResult.responsePayload,
-        });
         await this.webhookReferenceRepository.persistReferences({
           WebhookEvent,
           eventId: event?._id,
@@ -225,10 +221,14 @@ export class ProcessHubspotWebhookEvent {
         docEntry: orderResponse?.DocEntry ?? null,
         docNum: orderResponse?.DocNum ?? null,
         dealId: toNonEmptyString(deal?.hs_object_id),
-        payloadSap: orderPayload,
+        sapAudit: this.buildWebhookSapAudit(auditTrail),
       };
     } catch (error) {
-      error.sapOrderPayload = auditTrail.payload_SAP.order;
+      try {
+        error.sapAudit = this.buildWebhookSapAudit(auditTrail);
+      } catch {
+        error.sapAudit = null;
+      }
 
       if (orderResponse) {
         error.sapOrderCreated = true;

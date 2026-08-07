@@ -1,3 +1,21 @@
+import { resolveErrorMessageText } from '#application/services/error-message.service.js';
+
+// Defense in depth: ProcessWebhookDealEventBatch already normalizes lastError
+// before calling markFailed, but this keeps any future caller from repeating
+// the bug that caused it (a raw SAP error object handed to a String schema
+// field triggers a Mongoose CastError).
+function toSafeLastError(lastError) {
+  if (lastError === null) {
+    return null;
+  }
+
+  if (typeof lastError === 'string') {
+    return lastError;
+  }
+
+  return resolveErrorMessageText(lastError);
+}
+
 export class MongooseWebhookEventRepository {
   constructor({ WebhookEvent, batchSize }) {
     if (!WebhookEvent) {
@@ -28,6 +46,9 @@ export class MongooseWebhookEventRepository {
     return claimed;
   }
 
+  // payload.payloadSAP (the old single-document snapshot) is superseded by sapAudit, which
+  // captures request + response for BusinessPartner, ContactEmployee and the document
+  // together -- see buildWebhookSapAudit in infrastructure/sync/syncLog.service.js.
   async markCompleted(event, result) {
     const updates = {
       status: 'completed',
@@ -40,8 +61,8 @@ export class MongooseWebhookEventRepository {
       'payload.processedAt': new Date().toISOString(),
     };
 
-    if (result.payloadSap) {
-      updates['payload.payloadSAP'] = result.payloadSap;
+    if (result.sapAudit) {
+      updates.sapAudit = result.sapAudit;
     }
 
     await this.WebhookEvent.updateOne(
@@ -56,7 +77,7 @@ export class MongooseWebhookEventRepository {
     const updates = {
       status: failure.status,
       retries: failure.retries,
-      lastError: failure.lastError,
+      lastError: toSafeLastError(failure.lastError),
     };
 
     if (failure.sapResult) {
@@ -67,8 +88,8 @@ export class MongooseWebhookEventRepository {
       };
     }
 
-    if (failure.payloadSap) {
-      updates['payload.payloadSAP'] = failure.payloadSap;
+    if (failure.sapAudit) {
+      updates.sapAudit = failure.sapAudit;
     }
 
     await this.WebhookEvent.updateOne(

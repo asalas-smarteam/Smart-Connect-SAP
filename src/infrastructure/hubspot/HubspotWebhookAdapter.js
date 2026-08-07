@@ -12,6 +12,23 @@ export class HubspotWebhookAdapter {
     );
   }
 
+  async resolveAccessTokenForPortal({ tenantModels, portalId }) {
+    const { HubspotCredentials } = tenantModels;
+    const query = portalId ? { portalId } : {};
+    let hubspotCredentials = await HubspotCredentials.findOne(query).lean();
+
+    if (!hubspotCredentials) {
+      hubspotCredentials = await HubspotCredentials.findOne({}).sort({ _id: 1 }).lean();
+    }
+
+    if (!hubspotCredentials?._id) {
+      return null;
+    }
+
+    const token = await this.getAccessToken({ tenantModels, hubspotCredentials });
+    return { token, hubspotCredentials };
+  }
+
   async updateBusinessPartnerIds({
     token,
     payload,

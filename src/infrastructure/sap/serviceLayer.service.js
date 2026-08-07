@@ -1,29 +1,5 @@
-import axios from 'axios';
-import https from 'https';
 import { buildServiceLayerUrl } from './serviceLayerUrlBuilder.js';
-import logger from '../logger/logger.js';
-import sapSessionManager, { isSessionInvalidError } from './sapSessionManager.js';
-
-const httpsAgent = new https.Agent({
-  rejectUnauthorized: false,
-});
-
-function normalizeNextLink(baseUrl, nextLink) {
-  if (!nextLink) {
-    return null;
-  }
-
-  if (/^https?:\/\//i.test(nextLink)) {
-    return nextLink;
-  }
-
-  if (nextLink.startsWith('/b1s/v2')) {
-    return `${baseUrl.replace(/\/b1s\/v2$/, '')}${nextLink}`;
-  }
-
-  return `${baseUrl}${nextLink.startsWith('/') ? '' : '/'}${nextLink}`;
-}
-
+import { B1ServiceLayerTransport } from './transport/B1ServiceLayerTransport.js';
 
 function withTopParam(url, top) {
   if (!top || /[?&]\$top=/.test(url)) {
@@ -33,34 +9,6 @@ function withTopParam(url, top) {
   return `${url}${url.includes('?') ? '&' : '?'}$top=${encodeURIComponent(String(top))}`;
 }
 
-async function fetchAllPages(baseUrl, initialUrl, headers) {
-  const items = [];
-  let nextUrl = initialUrl;
-
-  while (nextUrl) {
-    const response = await axios.get(nextUrl, {
-      headers,
-      httpsAgent,
-    });
-
-    /*if(items.length === 3000){
-      return items; // Stop fetching more pages if we have reached 3000 items
-    }*/
-
-    const data = response?.data;
-    if (Array.isArray(data?.value)) {
-      items.push(...data.value);
-    } else if (Array.isArray(data)) {
-      items.push(...data);
-    } else if (data) {
-      items.push(data);
-    }
-
-    nextUrl = normalizeNextLink(`${baseUrl}/b1s/v2`, data?.['@odata.nextLink']);
-  }
-
-  return items;
-}
 const serviceLayerService = {
   async execute(config, mappings, options = {}) {
     const baseUrl = String(config?.serviceLayerBaseUrl || '').trim().replace(/\/+$/, '');
@@ -76,27 +24,11 @@ const serviceLayerService = {
 
     const dataUrl = withTopParam(buildServiceLayerUrl(config, mappings, requestOptions)); // , requestOptions.top
 
-    const requestWithSession = async () => {
-      const { cookie } = await sapSessionManager.getSessionCookie(config);
-      return fetchAllPages(baseUrl, dataUrl, { Cookie: cookie, Prefer: "odata.maxpagesize=100" });
-    };
-
-    try {
-      return await requestWithSession();
-    } catch (error) {
-      if (!isSessionInvalidError(error)) {
-        throw error;
-      }
-
-      const tenantKey = sapSessionManager.resolveTenantKey(config);
-      logger.warn('Invalid SAP session, invalidating and retrying once', {
-        tenantKey,
-        error: error.message,
-      });
-
-      await sapSessionManager.invalidateSession(tenantKey);
-      return requestWithSession();
-    }
+    // The URL is built here (buildServiceLayerUrl knows about mappings and
+    // filters), but the session cookie, the retry-once-on-invalid-session and
+    // the @odata.nextLink walk are the transport's job.
+    const transport = new B1ServiceLayerTransport({ config });
+    return transport.fetchAll({ url: dataUrl, path: config?.serviceLayerPath ?? null });
   },
 };
 

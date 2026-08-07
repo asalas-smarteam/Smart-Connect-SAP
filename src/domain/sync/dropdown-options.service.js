@@ -187,15 +187,20 @@ function buildOptions(rawItems, { valueField, labelField }) {
   const options = [];
   const seen = new Set();
   const rejected = [];
+  // Rows dropped for reasons that are legitimate but invisible: without a count
+  // a short dropdown looks identical to a short SAP catalog.
+  const skipped = { empty: 0, duplicate: 0 };
 
   items.forEach((item) => {
     if (item === null || typeof item === 'undefined') {
+      skipped.empty += 1;
       return;
     }
 
     const value = toTrimmedString(resolveByPath(item, valueField));
 
     if (!value) {
+      skipped.empty += 1;
       return;
     }
 
@@ -205,6 +210,7 @@ function buildOptions(rawItems, { valueField, labelField }) {
     }
 
     if (seen.has(value)) {
+      skipped.duplicate += 1;
       return;
     }
 
@@ -215,7 +221,7 @@ function buildOptions(rawItems, { valueField, labelField }) {
     });
   });
 
-  return { options, rejected };
+  return { options, rejected, skipped };
 }
 
 function capOptions(options) {
@@ -238,8 +244,33 @@ function buildIssue({ code, field, message, details }) {
   };
 }
 
-function collectIssuesForOptions({ source, field, rejected, truncated }) {
+function collectIssuesForOptions({ source, field, rejected, truncated, skipped }) {
   const issues = [];
+  const empty = skipped?.empty ?? 0;
+  const duplicate = skipped?.duplicate ?? 0;
+
+  // Reported rather than assumed harmless: a catalog whose valueField is wrong
+  // for this entity drops every row this way, and the run would otherwise look
+  // like SAP simply had nothing to give.
+  if (empty > 0 || duplicate > 0) {
+    const reasons = [
+      ...(empty > 0 ? [`${empty} with an empty '${source.valueField}'`] : []),
+      ...(duplicate > 0 ? [`${duplicate} repeating a '${source.valueField}' already seen`] : []),
+    ];
+
+    issues.push(buildIssue({
+      code: DROPDOWN_WARNING_CODES.OPTIONS_SKIPPED,
+      field,
+      message: `${empty + duplicate} SAP row(s) produced no option: ${reasons.join(' and ')}`,
+      details: {
+        source: source.id,
+        serviceLayerPath: source.serviceLayerPath,
+        valueField: source.valueField,
+        skippedEmpty: empty,
+        skippedDuplicate: duplicate,
+      },
+    }));
+  }
 
   if (rejected.length > 0) {
     issues.push(buildIssue({
@@ -286,10 +317,10 @@ function extractPerRow({ source, rows }) {
     matched.add(field);
 
     const rawItems = source.optionsPath ? resolveByPath(row, source.optionsPath) : [row];
-    const { options, rejected } = buildOptions(rawItems, source);
+    const { options, rejected, skipped } = buildOptions(rawItems, source);
     const { options: capped, truncated } = capOptions(options);
 
-    issues.push(...collectIssuesForOptions({ source, field, rejected, truncated }));
+    issues.push(...collectIssuesForOptions({ source, field, rejected, truncated, skipped }));
 
     if (capped.length === 0) {
       issues.push(buildIssue({
@@ -331,9 +362,9 @@ function extractShared({ source, rows }) {
       return Array.isArray(nested) ? nested : [];
     })
     : rows;
-  const { options, rejected } = buildOptions(rawItems, source);
+  const { options, rejected, skipped } = buildOptions(rawItems, source);
   const { options: capped, truncated } = capOptions(options);
-  const issues = collectIssuesForOptions({ source, field: null, rejected, truncated });
+  const issues = collectIssuesForOptions({ source, field: null, rejected, truncated, skipped });
 
   if (capped.length === 0) {
     issues.push(buildIssue({

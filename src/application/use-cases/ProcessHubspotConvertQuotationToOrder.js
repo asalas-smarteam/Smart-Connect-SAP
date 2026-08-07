@@ -20,6 +20,7 @@ export class ProcessHubspotConvertQuotationToOrder {
     sapDocumentLinkRepository,
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
+    buildWebhookSapAudit,
     logger = { warn: () => {} },
   }) {
     this.runtimeRepository = runtimeRepository;
@@ -28,6 +29,7 @@ export class ProcessHubspotConvertQuotationToOrder {
     this.sapDocumentLinkRepository = sapDocumentLinkRepository;
     this.buildWebhookSyncErrorEntry = buildWebhookSyncErrorEntry;
     this.buildErrorResponseSnapshot = buildErrorResponseSnapshot;
+    this.buildWebhookSapAudit = buildWebhookSapAudit;
     this.logger = logger;
   }
 
@@ -158,10 +160,14 @@ export class ProcessHubspotConvertQuotationToOrder {
         docEntry: orderResponse?.DocEntry ?? null,
         docNum: orderResponse?.DocNum ?? null,
         dealId,
-        payloadSap: orderPayload,
+        sapAudit: this.buildWebhookSapAudit(auditTrail),
       };
     } catch (error) {
-      error.sapOrderPayload = auditTrail.payload_SAP.order;
+      try {
+        error.sapAudit = this.buildWebhookSapAudit(auditTrail);
+      } catch {
+        error.sapAudit = null;
+      }
 
       if (orderResponse) {
         error.sapOrderCreated = true;

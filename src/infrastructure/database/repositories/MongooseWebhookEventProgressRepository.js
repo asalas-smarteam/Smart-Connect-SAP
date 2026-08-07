@@ -1,20 +1,4 @@
 export class MongooseWebhookEventProgressRepository {
-  async markBusinessPartnerCreated({ WebhookEvent, eventId, requestPayload, responsePayload }) {
-    if (!WebhookEvent || !eventId) {
-      return;
-    }
-
-    await WebhookEvent.updateOne(
-      { _id: eventId },
-      {
-        $set: {
-          'payload.payloadBPSAP': requestPayload ?? null,
-          'payload.responseBPSAP': responsePayload ?? null,
-        },
-      }
-    );
-  }
-
   async markOrderCreated({ WebhookEvent, eventId, result }) {
     if (!WebhookEvent || !eventId) {
       return;

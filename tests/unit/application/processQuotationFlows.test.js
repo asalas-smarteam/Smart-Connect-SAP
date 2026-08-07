@@ -6,6 +6,7 @@ import ProcessHubspotConvertQuotationToOrder from '../../../src/application/use-
 const noopSyncError = {
   buildWebhookSyncErrorEntry: jest.fn((x) => x),
   buildErrorResponseSnapshot: jest.fn((e) => ({ message: e.message })),
+  buildWebhookSapAudit: jest.fn((auditTrail) => ({ auditTrail })),
 };
 
 function buildContext(overrides = {}) {
@@ -122,11 +123,17 @@ describe('ProcessHubspotCreateQuotation', () => {
     });
     expect(linkArg.lines[0]).toMatchObject({ hubspotLineItemId: 'li-1', sapLineNum: 0 });
     expect(deps.hubspotWebhookAdapter.updateAfterSap).toHaveBeenCalledTimes(1);
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       cardCode: 'CL00129',
       docEntry: 12345,
       docNum: 8001,
       dealId: '59680314911',
+    });
+    expect(result.sapAudit.auditTrail.payload_SAP.quotation).toMatchObject({ CardCode: 'CL00129' });
+    expect(result.sapAudit.auditTrail.response_SAP.quotation).toEqual({
+      DocEntry: 12345,
+      DocNum: 8001,
+      DocumentLines: [{ LineNum: 0 }],
     });
   });
 
@@ -232,6 +239,26 @@ describe('ProcessHubspotCreateQuotation', () => {
       dealId: '59680314911',
     });
   });
+
+  it('attaches sapAudit with the attempted quotation payload when SAP creation fails', async () => {
+    const deps = buildDeps();
+    const sapError = new Error('Request failed with status code 400');
+    sapError.response = {
+      data: {
+        error: {
+          code: -5002,
+          message: { lang: 'en-us', value: 'To generate this document, first define the numbering series' },
+        },
+      },
+    };
+    deps.sapQuotationAdapter.createQuotation.mockRejectedValue(sapError);
+    const useCase = new ProcessHubspotCreateQuotation(deps);
+
+    await expect(useCase.execute({ event: baseEvent, tenantModels })).rejects.toBe(sapError);
+
+    expect(sapError.sapAudit.auditTrail.payload_SAP.quotation).toMatchObject({ CardCode: 'CL00129' });
+    expect(sapError.sapAudit.auditTrail.response_SAP.quotation).toBeNull();
+  });
 });
 
 describe('ProcessHubspotUpdateQuotation', () => {
@@ -286,6 +313,9 @@ describe('ProcessHubspotUpdateQuotation', () => {
     expect(patch.SalesPersonCode).toBe(61);
     expect(deps.sapDocumentLinkRepository.updateLines).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({ docEntry: 12345, docNum: 8001, dealId: '59680314911' });
+    expect(result.sapAudit.auditTrail.payload_SAP.quotation).toMatchObject({
+      Comments: 'Oferta actualizada por contrapropuesta desde HubSpot',
+    });
   });
 
   it('fails in a controlled way when there is no quotation link for the deal', async () => {
@@ -297,6 +327,19 @@ describe('ProcessHubspotUpdateQuotation', () => {
       permanent: true,
     });
     expect(deps.sapQuotationAdapter.updateQuotation).not.toHaveBeenCalled();
+  });
+
+  it('attaches sapAudit with the attempted patch payload when SAP update fails', async () => {
+    const deps = buildDeps();
+    const sapError = new Error('SAP update failed');
+    deps.sapQuotationAdapter.updateQuotation.mockRejectedValue(sapError);
+    const useCase = new ProcessHubspotUpdateQuotation(deps);
+
+    await expect(useCase.execute({ event: updateEvent, tenantModels })).rejects.toBe(sapError);
+
+    expect(sapError.sapAudit.auditTrail.payload_SAP.quotation).toMatchObject({
+      DocumentLines: [{ LineNum: 0, UnitPrice: 17.5, Quantity: 2 }],
+    });
   });
 });
 
@@ -353,13 +396,14 @@ describe('ProcessHubspotConvertQuotationToOrder', () => {
       sapDocEntry: 67890,
       baseDocument: { documentType: 'quotation', sapDocEntry: 12345, sapBaseType: 23 },
     });
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       cardCode: 'CL00129',
       docEntry: 67890,
       docNum: 9001,
       dealId: '59680314911',
-      payloadSap: orderPayload,
     });
+    expect(result.sapAudit.auditTrail.payload_SAP.order).toBe(orderPayload);
+    expect(result.sapAudit.auditTrail.response_SAP.order).toEqual({ DocEntry: 67890, DocNum: 9001 });
   });
 
   it('is idempotent: skips when an order link already exists', async () => {
@@ -384,5 +428,26 @@ describe('ProcessHubspotConvertQuotationToOrder', () => {
       permanent: true,
     });
     expect(deps.sapOrderAdapter.createOrder).not.toHaveBeenCalled();
+  });
+
+  it('attaches sapAudit with the attempted order payload when SAP order creation fails', async () => {
+    const deps = buildDeps();
+    deps.sapDocumentLinkRepository.findByDeal
+      .mockResolvedValueOnce({
+        cardCode: 'CL00129',
+        sapDocEntry: 12345,
+        sapDocNum: 8001,
+        lines: [{ sapLineNum: 0 }],
+      })
+      .mockResolvedValueOnce(null);
+    const sapError = new Error('SAP order create failed');
+    deps.sapOrderAdapter.createOrder.mockRejectedValue(sapError);
+    const useCase = new ProcessHubspotConvertQuotationToOrder(deps);
+
+    await expect(useCase.execute({ event: convertEvent, tenantModels })).rejects.toBe(sapError);
+
+    expect(sapError.sapAudit.auditTrail.payload_SAP.order).toMatchObject({
+      DocumentLines: [{ BaseType: 23, BaseEntry: 12345, BaseLine: 0 }],
+    });
   });
 });

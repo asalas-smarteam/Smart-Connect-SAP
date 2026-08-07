@@ -1371,7 +1371,7 @@ describe('webhookProcessor flow', () => {
     expect(tenantModels.WebhookEvent.updateOne).toHaveBeenCalledWith(
       { _id: 'evt-1' },
       {
-        $set: {
+        $set: expect.objectContaining({
           status: 'sap_created_hubspot_error',
           retries: 0,
           lastError: 'HubSpot update failed',
@@ -1380,11 +1380,13 @@ describe('webhookProcessor flow', () => {
             docEntry: 99,
             docNum: 199,
           },
-          'payload.payloadSAP': expect.objectContaining({
-            CardCode: 'CL99999',
-          }),
-        },
+        }),
       }
     );
+
+    const [, secondUpdateArgs] = tenantModels.WebhookEvent.updateOne.mock.calls[1];
+    expect(Object.keys(secondUpdateArgs.$set)).not.toContain('payload.payloadSAP');
+    expect(secondUpdateArgs.$set.sapAudit.payloadSap.order).toMatchObject({ CardCode: 'CL99999' });
+    expect(secondUpdateArgs.$set.sapAudit.responseSap.order).toEqual({ DocEntry: 99, DocNum: 199 });
   });
 });

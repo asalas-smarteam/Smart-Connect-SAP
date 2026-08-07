@@ -36,6 +36,7 @@ export class ProcessHubspotUpdateQuotation {
     sapDocumentLinkRepository,
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
+    buildWebhookSapAudit,
     logger = { warn: () => {} },
   }) {
     this.runtimeRepository = runtimeRepository;
@@ -43,6 +44,7 @@ export class ProcessHubspotUpdateQuotation {
     this.sapDocumentLinkRepository = sapDocumentLinkRepository;
     this.buildWebhookSyncErrorEntry = buildWebhookSyncErrorEntry;
     this.buildErrorResponseSnapshot = buildErrorResponseSnapshot;
+    this.buildWebhookSapAudit = buildWebhookSapAudit;
     this.logger = logger;
   }
 
@@ -128,8 +130,15 @@ export class ProcessHubspotUpdateQuotation {
         docEntry: link.sapDocEntry,
         docNum: link.sapDocNum,
         dealId,
+        sapAudit: this.buildWebhookSapAudit(auditTrail),
       };
     } catch (error) {
+      try {
+        error.sapAudit = this.buildWebhookSapAudit(auditTrail);
+      } catch {
+        error.sapAudit = null;
+      }
+
       error.syncLogWebhookErrors = [
         this.buildWebhookSyncErrorEntry({
           payloadHubspot: auditTrail.payload_Hubspot,

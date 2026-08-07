@@ -3,17 +3,22 @@ import ProcessHubspotCreateQuotation from '#application/use-cases/ProcessHubspot
 import ProcessHubspotUpdateQuotation from '#application/use-cases/ProcessHubspotUpdateQuotation.js';
 import ProcessHubspotWebhookEvent from '#application/use-cases/ProcessHubspotWebhookEvent.js';
 import ProcessWebhookDealEventBatch from '#application/use-cases/ProcessWebhookDealEventBatch.js';
+import { resolveEventPayload } from '#application/services/webhook-payload.service.js';
 import MongooseSapDocumentLinkRepository from '#infrastructure/database/repositories/MongooseSapDocumentLinkRepository.js';
 import MongooseWebhookEventProgressRepository from '#infrastructure/database/repositories/MongooseWebhookEventProgressRepository.js';
 import MongooseWebhookReferenceRepository from '#infrastructure/database/repositories/MongooseWebhookReferenceRepository.js';
 import TenantWebhookRuntimeRepository from '#infrastructure/database/repositories/TenantWebhookRuntimeRepository.js';
+import { getWebhookFailureNotificationConfig } from '#infrastructure/config/webhookFailureNotification.config.js';
+import hubspotClient from '#infrastructure/hubspot/hubspot-client.adapter.js';
 import HubspotWebhookAdapter from '#infrastructure/hubspot/HubspotWebhookAdapter.js';
+import { buildNotifyWebhookFailure } from '#infrastructure/hubspot/webhookFailureNotifier.service.js';
 import logger from '#infrastructure/logger/logger.adapter.js';
 import MongooseWebhookEventRepository from '#infrastructure/repositories/MongooseWebhookEventRepository.js';
 import SapWebhookOrderAdapter from '#infrastructure/sap/SapWebhookOrderAdapter.js';
 import SapWebhookQuotationAdapter from '#infrastructure/sap/SapWebhookQuotationAdapter.js';
 import {
   buildErrorResponseSnapshot,
+  buildWebhookSapAudit,
   buildWebhookSyncErrorEntry,
 } from '#infrastructure/sync/syncLog.service.js';
 
@@ -26,6 +31,7 @@ export function buildProcessHubspotWebhookEventUseCase() {
     webhookEventProgressRepository: new MongooseWebhookEventProgressRepository(),
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
+    buildWebhookSapAudit,
     logger,
   });
 }
@@ -40,6 +46,7 @@ export function buildProcessHubspotCreateQuotationUseCase() {
     sapDocumentLinkRepository: new MongooseSapDocumentLinkRepository(),
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
+    buildWebhookSapAudit,
     logger,
   });
 }
@@ -51,6 +58,7 @@ export function buildProcessHubspotUpdateQuotationUseCase() {
     sapDocumentLinkRepository: new MongooseSapDocumentLinkRepository(),
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
+    buildWebhookSapAudit,
     logger,
   });
 }
@@ -63,6 +71,7 @@ export function buildProcessHubspotConvertQuotationToOrderUseCase() {
     sapDocumentLinkRepository: new MongooseSapDocumentLinkRepository(),
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
+    buildWebhookSapAudit,
     logger,
   });
 }
@@ -96,6 +105,13 @@ export function buildProcessWebhookDealEventBatch({
   webhookEventRepository,
   processWebhookDealEvent = buildWebhookEventDispatcher(),
   maxRetries,
+  notifyWebhookFailure = buildNotifyWebhookFailure({
+    hubspotClient,
+    hubspotWebhookAdapter: new HubspotWebhookAdapter(),
+    getWebhookFailureNotificationConfig,
+    resolveEventPayload,
+    logger,
+  }),
 } = {}) {
   return new ProcessWebhookDealEventBatch({
     webhookEventRepository,
@@ -104,5 +120,6 @@ export function buildProcessWebhookDealEventBatch({
     maxRetries,
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
+    notifyWebhookFailure,
   });
 }

@@ -45,6 +45,10 @@ export const webhookEventSchema = new Schema(
       type: String,
       default: null,
     },
+    sapAudit: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
   },
   {
     timestamps: true,

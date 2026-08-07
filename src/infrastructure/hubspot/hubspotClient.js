@@ -204,6 +204,15 @@ export async function updateDeal(token, id, data) {
   return hubspotRequest('patch', `/crm/v3/objects/deals/${id}`, token, data);
 }
 
+export async function createNote(token, { body, timestamp } = {}) {
+  return hubspotRequest('post', '/crm/v3/objects/notes', token, {
+    properties: {
+      hs_timestamp: timestamp ?? Date.now(),
+      hs_note_body: body,
+    },
+  });
+}
+
 export async function findProductBySKU(token, sku) {
   return searchObject(token, 'products', [
     {

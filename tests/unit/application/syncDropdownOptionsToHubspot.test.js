@@ -531,6 +531,37 @@ describe('SyncDropdownOptionsToHubspot', () => {
     });
   });
 
+  // Pairs with the optionCount below: rowCount says what SAP handed over, so a
+  // short dropdown can be blamed on the read or on the extraction, not both.
+  it('logs how many rows each source returned from SAP', async () => {
+    const harness = buildHarness({
+      dropdownConfigValue: {
+        sources: [{
+          serviceLayerPath: '/SalesPersons',
+          valueField: 'SalesEmployeeCode',
+          labelField: 'SalesEmployeeName',
+          fields: ['SalesPersonCode'],
+        }],
+      },
+      rows: {
+        '/SalesPersons': [
+          { SalesEmployeeCode: 1, SalesEmployeeName: 'Ana' },
+          { SalesEmployeeCode: 2, SalesEmployeeName: 'Luis' },
+          { SalesEmployeeCode: 3, SalesEmployeeName: 'Sofia' },
+        ],
+      },
+      targets: [{ sourceField: 'SalesPersonCode', objectType: 'contact', targetField: 'slpcodelist' }],
+      properties: { 'contact.slpcodelist': { type: 'enumeration', options: [] } },
+    });
+    await harness.run();
+
+    expect(harness.useCase.logger.info).toHaveBeenCalledWith(expect.objectContaining({
+      msg: 'Dropdown source rows fetched',
+      serviceLayerPath: '/SalesPersons',
+      rowCount: 3,
+    }));
+  });
+
   // The diagnostic gap this closes: a field mapped on contact but not on company
   // used to leave no trace at all for the company side.
   it('logs which properties each SAP field resolved to', async () => {
