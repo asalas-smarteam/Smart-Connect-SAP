@@ -37,6 +37,8 @@ export class TenantWebhookRuntimeRepository {
       productOrdersQuotationsMappings,
       dealMappings,
       dealOrdersQuotationsMappings,
+      dealInventoryTransferRequestMappings,
+      productInventoryTransferRequestMappings,
       taxCodes,
       miscPriceCalculationConfig,
       requireDiscounts,
@@ -59,6 +61,23 @@ export class TenantWebhookRuntimeRepository {
         hubspotCredentialId,
         'deal',
         'orders-quotations',
+        tenantModels,
+        { allowBusinessPartnerFallback: false }
+      ),
+      // Inventory Transfer Request: every header/line field comes from this context. The
+      // fallback stays off so a tenant without it gets [] instead of leaking businessPartner
+      // fields (DocEntry, DocNum, DocTotal...) into the OWTQ header via the generic spread.
+      mappingService.getMappingsByObjectType(
+        hubspotCredentialId,
+        'deal',
+        'inventory-transfer-request',
+        tenantModels,
+        { allowBusinessPartnerFallback: false }
+      ),
+      mappingService.getMappingsByObjectType(
+        hubspotCredentialId,
+        'product',
+        'inventory-transfer-request',
         tenantModels,
         { allowBusinessPartnerFallback: false }
       ),
@@ -86,6 +105,8 @@ export class TenantWebhookRuntimeRepository {
         productOrdersQuotationsMappings,
         dealMappings,
         dealOrdersQuotationsMappings,
+        dealInventoryTransferRequestMappings,
+        productInventoryTransferRequestMappings,
       },
       taxCodes,
       miscPriceCalculationConfig,

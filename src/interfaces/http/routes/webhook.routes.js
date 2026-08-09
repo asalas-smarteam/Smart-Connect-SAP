@@ -4,6 +4,7 @@ import {
   buildCreateQuotationController,
   buildUpdateQuotationController,
   buildConvertQuotationToOrderController,
+  buildInventoryTransferRequestController,
 } from '#composition/webhooks.composition.js';
 
 export default async function routes(app) {
@@ -29,5 +30,11 @@ export default async function routes(app) {
     '/webhooks/hubspot/convertQuotationToOrder',
     { preHandler: tenantResolver },
     buildConvertQuotationToOrderController()
+  );
+
+  app.post(
+    '/webhooks/hubspot/inventoryTransferRequest',
+    { preHandler: tenantResolver },
+    buildInventoryTransferRequestController()
   );
 }

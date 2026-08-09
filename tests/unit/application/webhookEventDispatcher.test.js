@@ -11,37 +11,57 @@ describe('buildWebhookEventDispatcher', () => {
     const processHubspotCreateQuotation = stub();
     const processHubspotUpdateQuotation = stub();
     const processHubspotConvertQuotationToOrder = stub();
+    const processHubspotInventoryTransferRequest = stub();
 
     const dispatch = buildWebhookEventDispatcher({
       processHubspotWebhookEvent,
       processHubspotCreateQuotation,
       processHubspotUpdateQuotation,
       processHubspotConvertQuotationToOrder,
+      processHubspotInventoryTransferRequest,
     });
 
     await dispatch({ event: { eventType: 'createDeal' } });
     await dispatch({ event: { eventType: 'createQuotation' } });
     await dispatch({ event: { eventType: 'updateQuotation' } });
     await dispatch({ event: { eventType: 'convertQuotationToOrder' } });
+    await dispatch({ event: { eventType: 'inventoryTransferRequest' } });
 
     expect(processHubspotWebhookEvent.execute).toHaveBeenCalledTimes(1);
     expect(processHubspotCreateQuotation.execute).toHaveBeenCalledTimes(1);
     expect(processHubspotUpdateQuotation.execute).toHaveBeenCalledTimes(1);
     expect(processHubspotConvertQuotationToOrder.execute).toHaveBeenCalledTimes(1);
+    expect(processHubspotInventoryTransferRequest.execute).toHaveBeenCalledTimes(1);
   });
 
-  it('falls back to the createDeal flow for unknown event types', async () => {
+  it('falls back to the createDeal flow when eventType is absent (legacy events)', async () => {
     const processHubspotWebhookEvent = stub();
     const dispatch = buildWebhookEventDispatcher({
       processHubspotWebhookEvent,
       processHubspotCreateQuotation: stub(),
       processHubspotUpdateQuotation: stub(),
       processHubspotConvertQuotationToOrder: stub(),
+      processHubspotInventoryTransferRequest: stub(),
     });
 
-    await dispatch({ event: { eventType: 'somethingElse' } });
     await dispatch({ event: {} });
 
-    expect(processHubspotWebhookEvent.execute).toHaveBeenCalledTimes(2);
+    expect(processHubspotWebhookEvent.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails permanently instead of falling back for an unrecognized eventType', async () => {
+    const processHubspotWebhookEvent = stub();
+    const dispatch = buildWebhookEventDispatcher({
+      processHubspotWebhookEvent,
+      processHubspotCreateQuotation: stub(),
+      processHubspotUpdateQuotation: stub(),
+      processHubspotConvertQuotationToOrder: stub(),
+      processHubspotInventoryTransferRequest: stub(),
+    });
+
+    await expect(dispatch({ event: { eventType: 'somethingElse' } })).rejects.toMatchObject({
+      permanent: true,
+    });
+    expect(processHubspotWebhookEvent.execute).not.toHaveBeenCalled();
   });
 });

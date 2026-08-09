@@ -1,5 +1,6 @@
 import ProcessHubspotConvertQuotationToOrder from '#application/use-cases/ProcessHubspotConvertQuotationToOrder.js';
 import ProcessHubspotCreateQuotation from '#application/use-cases/ProcessHubspotCreateQuotation.js';
+import ProcessHubspotInventoryTransferRequest from '#application/use-cases/ProcessHubspotInventoryTransferRequest.js';
 import ProcessHubspotUpdateQuotation from '#application/use-cases/ProcessHubspotUpdateQuotation.js';
 import ProcessHubspotWebhookEvent from '#application/use-cases/ProcessHubspotWebhookEvent.js';
 import ProcessWebhookDealEventBatch from '#application/use-cases/ProcessWebhookDealEventBatch.js';
@@ -14,8 +15,10 @@ import HubspotWebhookAdapter from '#infrastructure/hubspot/HubspotWebhookAdapter
 import { buildNotifyWebhookFailure } from '#infrastructure/hubspot/webhookFailureNotifier.service.js';
 import logger from '#infrastructure/logger/logger.adapter.js';
 import MongooseWebhookEventRepository from '#infrastructure/repositories/MongooseWebhookEventRepository.js';
+import SapWebhookInventoryTransferRequestAdapter from '#infrastructure/sap/SapWebhookInventoryTransferRequestAdapter.js';
 import SapWebhookOrderAdapter from '#infrastructure/sap/SapWebhookOrderAdapter.js';
 import SapWebhookQuotationAdapter from '#infrastructure/sap/SapWebhookQuotationAdapter.js';
+import { PermanentWebhookError } from '#shared/errors/index.js';
 import {
   buildErrorResponseSnapshot,
   buildWebhookSapAudit,
@@ -76,23 +79,50 @@ export function buildProcessHubspotConvertQuotationToOrderUseCase() {
   });
 }
 
-// Routes each claimed webhook event to the right use case by its eventType. Unknown
-// event types fall back to the existing createDeal flow so current behaviour is preserved.
+export function buildProcessHubspotInventoryTransferRequestUseCase() {
+  return new ProcessHubspotInventoryTransferRequest({
+    runtimeRepository: new TenantWebhookRuntimeRepository(),
+    sapOrderAdapter: new SapWebhookOrderAdapter(),
+    sapInventoryTransferRequestAdapter: new SapWebhookInventoryTransferRequestAdapter(),
+    hubspotWebhookAdapter: new HubspotWebhookAdapter(),
+    webhookReferenceRepository: new MongooseWebhookReferenceRepository(),
+    sapDocumentLinkRepository: new MongooseSapDocumentLinkRepository(),
+    buildWebhookSyncErrorEntry,
+    buildErrorResponseSnapshot,
+    buildWebhookSapAudit,
+    logger,
+  });
+}
+
+// Routes each claimed webhook event to the right use case by its eventType. An eventType
+// that is absent (legacy events queued before the field existed) falls back to the
+// createDeal flow. An eventType that is present but unrecognized fails loudly instead of
+// silently falling back: falling back used to route it to createDeal, which creates a real
+// Sales Order in SAP -- a single typo between the route and this handler map would create
+// orders for documents that were never meant to be orders.
 export function buildWebhookEventDispatcher({
   processHubspotWebhookEvent = buildProcessHubspotWebhookEventUseCase(),
   processHubspotCreateQuotation = buildProcessHubspotCreateQuotationUseCase(),
   processHubspotUpdateQuotation = buildProcessHubspotUpdateQuotationUseCase(),
   processHubspotConvertQuotationToOrder = buildProcessHubspotConvertQuotationToOrderUseCase(),
+  processHubspotInventoryTransferRequest = buildProcessHubspotInventoryTransferRequestUseCase(),
 } = {}) {
   const handlers = {
     createDeal: processHubspotWebhookEvent,
     createQuotation: processHubspotCreateQuotation,
     updateQuotation: processHubspotUpdateQuotation,
     convertQuotationToOrder: processHubspotConvertQuotationToOrder,
+    inventoryTransferRequest: processHubspotInventoryTransferRequest,
   };
 
-  return (input) => {
-    const handler = handlers[input?.event?.eventType] || processHubspotWebhookEvent;
+  return async (input) => {
+    const eventType = input?.event?.eventType;
+    const handler = eventType ? handlers[eventType] : processHubspotWebhookEvent;
+
+    if (!handler) {
+      throw new PermanentWebhookError(`Unsupported webhook eventType: ${eventType}`);
+    }
+
     return handler.execute(input);
   };
 }

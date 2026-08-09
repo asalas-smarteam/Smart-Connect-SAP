@@ -5,6 +5,7 @@ const DEDUPLICATED_EVENT_TYPES = new Set([
   CREATE_DEAL_EVENT_TYPE,
   'createQuotation',
   'convertQuotationToOrder',
+  'inventoryTransferRequest',
 ]);
 
 function normalizeDealId(payload) {

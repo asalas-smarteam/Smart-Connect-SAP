@@ -42,6 +42,26 @@ const DEFAULT_PRODUCT_MAPPINGS = [
   { sourceField: 'Price', targetField: 'price', sourceContext: 'product', includeInServiceLayerSelect: false },
 ];
 
+// Inventory Transfer Request (OWTQ). Unlike every other default set above, these are NOT
+// seeded automatically: `filler`/`towhscode` are tenant-specific HubSpot property names, not
+// universal ones like `hs_sku`, so seeding them for every tenant would create dead mappings
+// in the admin UI. ensureDefaultInventoryTransferRequestMappings below exists to be invoked
+// explicitly during a tenant's onboarding, once its actual warehouse property names are known.
+// Per the design rule for this document (see inventory-transfer-request-builder.service.js),
+// every SAP field the document needs must be mapped -- FromWarehouse/ToWarehouse and
+// ItemCode/Quantity are not optional, the rest is.
+export const DEFAULT_INVENTORY_TRANSFER_REQUEST_DEAL_MAPPINGS = [
+  { sourceField: 'FromWarehouse', targetField: 'filler', sourceContext: 'inventory-transfer-request', includeInServiceLayerSelect: false },
+  { sourceField: 'ToWarehouse', targetField: 'towhscode', sourceContext: 'inventory-transfer-request', includeInServiceLayerSelect: false },
+];
+
+export const DEFAULT_INVENTORY_TRANSFER_REQUEST_PRODUCT_MAPPINGS = [
+  { sourceField: 'ItemCode', targetField: 'hs_sku', sourceContext: 'inventory-transfer-request', includeInServiceLayerSelect: false },
+  { sourceField: 'Quantity', targetField: 'quantity', sourceContext: 'inventory-transfer-request', includeInServiceLayerSelect: false },
+  { sourceField: 'FromWarehouseCode', targetField: 'filler', sourceContext: 'inventory-transfer-request', includeInServiceLayerSelect: false },
+  { sourceField: 'WarehouseCode', targetField: 'towhscode', sourceContext: 'inventory-transfer-request', includeInServiceLayerSelect: false },
+];
+
 // Invoices are not pushed to a HubSpot object; the mappings only drive the SAP $select so
 // the reconciler can read NumAtCard (HS-DEAL-<dealId>) and identify the deal to update.
 export const DEFAULT_INVOICE_MAPPINGS = [
@@ -247,6 +267,30 @@ export async function ensureDefaultProductMappings({
     objectType: 'product',
     editable: false,
   });
+}
+
+// Opt-in seeding for the Inventory Transfer Request context: call this from a tenant's
+// onboarding flow (or the admin UI), not from ensureAll/DefaultClientConfigMappingInitializer.
+// See the note above DEFAULT_INVENTORY_TRANSFER_REQUEST_DEAL_MAPPINGS for why.
+export async function ensureDefaultInventoryTransferRequestMappings({ FieldMapping, clientConfig }) {
+  if (clientConfig?.objectType === 'deal') {
+    await ensureDefaultMappings({
+      FieldMapping,
+      clientConfig,
+      mappings: DEFAULT_INVENTORY_TRANSFER_REQUEST_DEAL_MAPPINGS,
+      objectType: 'deal',
+    });
+    return;
+  }
+
+  if (clientConfig?.objectType === 'product') {
+    await ensureDefaultMappings({
+      FieldMapping,
+      clientConfig,
+      mappings: DEFAULT_INVENTORY_TRANSFER_REQUEST_PRODUCT_MAPPINGS,
+      objectType: 'product',
+    });
+  }
 }
 
 export async function ensureDefaultInvoiceMappings({ FieldMapping, clientConfig }) {

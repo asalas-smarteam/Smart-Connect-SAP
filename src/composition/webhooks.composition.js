@@ -43,4 +43,8 @@ export function buildConvertQuotationToOrderController() {
   return buildWebhookController('convertQuotationToOrder');
 }
 
+export function buildInventoryTransferRequestController() {
+  return buildWebhookController('inventoryTransferRequest');
+}
+
 export default buildWebhookController;

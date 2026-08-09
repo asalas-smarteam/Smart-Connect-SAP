@@ -15,7 +15,14 @@ export const fieldMappingSchema = new Schema(
     },
     sourceContext: {
       type: String,
-      enum: ['businessPartner', 'contactEmployee', 'product', 'ItemWarehouseInfoCollection', 'orders-quotations'],
+      enum: [
+        'businessPartner',
+        'contactEmployee',
+        'product',
+        'ItemWarehouseInfoCollection',
+        'orders-quotations',
+        'inventory-transfer-request',
+      ],
       default: '',
     },
     clientConfigId: {
