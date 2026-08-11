@@ -24,7 +24,7 @@ describe('LegacyWhitelistBusinessPartnerPayloadStrategy', () => {
   // SapWebhookOrderAdapter.js:268-299 antes del refactor.
   it('reproduce el payload historico cuando el BP es una company con CardCode', () => {
     const payload = strategy.buildCreatePayload({
-      mappedBusinessPartner: { Phone1: '+50259877130', GroupCode: 105, U_TIPO: 'N' },
+      mappedBusinessPartner: { GroupCode: 105, U_TIPO: 'N' },
       resolved: {
         cardName: 'ACME',
         cardCode: 'CL123',
@@ -33,6 +33,7 @@ describe('LegacyWhitelistBusinessPartnerPayloadStrategy', () => {
         payTermsGrpCode: 13,
         federalTaxId: '0003004080-9',
         mappedEmail: 'ac@example.com',
+        phone1: '+50259877130',
         isCompanyBusinessPartner: true,
       },
     });
@@ -57,7 +58,7 @@ describe('LegacyWhitelistBusinessPartnerPayloadStrategy', () => {
       mappedBusinessPartner: { GroupCode: 105, U_TIPO_IND: 'IP', Currency: 'GTQ' },
       resolved: {
         cardName: 'ACME', cardCode: null, defaultSeries: null, priceListNum: 1,
-        payTermsGrpCode: null, federalTaxId: null, mappedEmail: null,
+        payTermsGrpCode: null, federalTaxId: null, mappedEmail: null, phone1: null,
         isCompanyBusinessPartner: true,
       },
     });
@@ -72,7 +73,7 @@ describe('LegacyWhitelistBusinessPartnerPayloadStrategy', () => {
       mappedBusinessPartner: {},
       resolved: {
         cardName: 'Juan Perez', cardCode: null, defaultSeries: 59, priceListNum: 2,
-        payTermsGrpCode: null, federalTaxId: null, mappedEmail: null,
+        payTermsGrpCode: null, federalTaxId: null, mappedEmail: null, phone1: null,
         isCompanyBusinessPartner: false,
       },
     });
@@ -86,10 +87,10 @@ describe('LegacyWhitelistBusinessPartnerPayloadStrategy', () => {
 
   it('omite Phone1 y FederalTaxID cuando vienen vacios', () => {
     const payload = strategy.buildCreatePayload({
-      mappedBusinessPartner: { Phone1: '   ' },
+      mappedBusinessPartner: {},
       resolved: {
         cardName: 'ACME', cardCode: 'X', defaultSeries: null, priceListNum: 1,
-        payTermsGrpCode: null, federalTaxId: '  ', mappedEmail: null,
+        payTermsGrpCode: null, federalTaxId: '  ', mappedEmail: null, phone1: '   ',
         isCompanyBusinessPartner: true,
       },
     });
@@ -103,13 +104,37 @@ describe('LegacyWhitelistBusinessPartnerPayloadStrategy', () => {
       mappedBusinessPartner: {},
       resolved: {
         cardName: 'ACME', cardCode: 'X', defaultSeries: null, priceListNum: 0,
-        payTermsGrpCode: 0, federalTaxId: null, mappedEmail: null,
+        payTermsGrpCode: 0, federalTaxId: null, mappedEmail: null, phone1: null,
         isCompanyBusinessPartner: true,
       },
     });
 
     expect(payload.PriceListNum).toBe(0);
     expect(payload.PayTermsGrpCode).toBe(0);
+  });
+
+  // GUARDIA DE REGRESION (Finding 1 del review): el adapter real resuelve
+  // Phone1 con `mappedCompany?.Phone1 || mappedContact?.Phone1` ANTES de
+  // fusionar objetos. Si mappedCompany.Phone1 es un falsy-pero-presente no
+  // string (0, false), un merge `{ ...mappedContact, ...mappedCompany }`
+  // produciria "0"/"false" en vez de caer al telefono del contacto. Por eso
+  // resolved.phone1 debe llegar YA resuelto con esa misma logica OR, nunca
+  // leido de mappedBusinessPartner.
+  it('usa el telefono del contacto cuando el de la company es 0 (falsy no vacio)', () => {
+    const mappedCompany = { Phone1: 0 };
+    const mappedContact = { Phone1: '+50259877130' };
+    const phone1 = mappedCompany.Phone1 || mappedContact.Phone1;
+
+    const payload = strategy.buildCreatePayload({
+      mappedBusinessPartner: { ...mappedContact, ...mappedCompany },
+      resolved: {
+        cardName: 'ACME', cardCode: 'X', defaultSeries: null, priceListNum: 1,
+        payTermsGrpCode: null, federalTaxId: null, mappedEmail: null, phone1,
+        isCompanyBusinessPartner: true,
+      },
+    });
+
+    expect(payload.Phone1).toBe('+50259877130');
   });
 });
 

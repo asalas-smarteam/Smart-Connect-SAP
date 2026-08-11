@@ -17,9 +17,10 @@ export class BusinessPartnerPayloadStrategyFactory {
   // de que el webhook escriba nada en SAP, no a mitad del flujo.
   getStrategy(strategyName) {
     const normalizedStrategyName = String(strategyName ?? '').trim();
+    const strategy = this.strategies[normalizedStrategyName];
 
-    if (Object.hasOwn(this.strategies, normalizedStrategyName)) {
-      return this.strategies[normalizedStrategyName];
+    if (strategy) {
+      return strategy;
     }
 
     this.logger.error?.({

@@ -12,7 +12,7 @@ export class LegacyWhitelistBusinessPartnerPayloadStrategy {
       CardType: 'C',
       CompanyPrivate: resolved.isCompanyBusinessPartner ? 'C' : 'I',
       EmailAddress: resolved.mappedEmail || '',
-      Phone1: toNonEmptyString(mappedBusinessPartner?.Phone1) || undefined,
+      Phone1: toNonEmptyString(resolved.phone1) || undefined,
       PriceListNum: resolved.priceListNum,
       FederalTaxID: toNonEmptyString(resolved.federalTaxId) || undefined,
       Frozen: 'tNO',
