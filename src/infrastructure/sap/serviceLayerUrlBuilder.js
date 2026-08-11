@@ -18,6 +18,12 @@ function normalizePath(path) {
   return `/${cleaned.replace(/^\/+/, '')}`;
 }
 
+// Contextos cuyos sourceField NO son campos de cabecera de la entidad SAP que
+// se consulta: viajan dentro de una colección anidada (ContactEmployees) o de
+// una entidad aparte (BPAddresses). Meterlos en el $select hace que el Service
+// Layer rechace el request completo.
+const SELECT_EXCLUDED_SOURCE_CONTEXTS = new Set(['contactEmployee', 'bpAddress']);
+
 function sanitizeSelectFields(mappings) {
   if (!Array.isArray(mappings) || mappings.length === 0) {
     return [];
@@ -26,7 +32,7 @@ function sanitizeSelectFields(mappings) {
   const unique = new Set();
 
   mappings.filter(
-    (mapping) => mapping.sourceContext !== 'contactEmployee'
+    (mapping) => !SELECT_EXCLUDED_SOURCE_CONTEXTS.has(mapping.sourceContext)
       && mapping.includeInServiceLayerSelect !== false
   )
     .forEach((mapping) => {

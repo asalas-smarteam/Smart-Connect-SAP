@@ -18,6 +18,10 @@ export const fieldMappingSchema = new Schema(
       enum: [
         'businessPartner',
         'contactEmployee',
+        // Campos de BPAddresses[]. Se mapean con objectType: 'address' porque el
+        // array llega como entidad propia en el payload del webhook y no depende
+        // de si el BusinessPartner es una company o un contact de HubSpot.
+        'bpAddress',
         'product',
         'ItemWarehouseInfoCollection',
         'orders-quotations',
