@@ -132,4 +132,25 @@ describe('BusinessPartnerCreationConfigRepository', () => {
       trueValue: 'tYES',
     });
   });
+
+  it('usa el tenantContext para flavor guard cuando tenantModels no se pasa', async () => {
+    const tenantContext = {
+      tenantModels: {
+        Configuration: buildConfigurationModel({
+          sapFlavor: 'S4',
+          businessPartnerCreation: {
+            payloadStrategy: 'fullMapped',
+            contactEmployeeSource: 'payloadArray',
+            addresses: { strategy: 'payloadArray', byName: { factura: {} }, required: ['factura'] },
+          },
+        }),
+      },
+    };
+
+    const config = await repository.getBusinessPartnerCreationConfig({ tenantContext });
+
+    expect(config.payloadStrategy).toBe('legacyWhitelist');
+    expect(config.addresses.strategy).toBe('none');
+    expect(config.addresses.required).toEqual([]);
+  });
 });

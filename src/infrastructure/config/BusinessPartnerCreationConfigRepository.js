@@ -107,7 +107,7 @@ export class BusinessPartnerCreationConfigRepository {
       // BPAddresses y ContactEmployees anidados son forma de SAP B1. En S/4 son
       // entidades separadas, así que la config se ignora en vez de generar un
       // payload que el gateway rechazaría.
-      const sapFlavor = await resolveSapFlavor({ tenantModels });
+      const sapFlavor = await resolveSapFlavor({ tenantModels: { Configuration } });
 
       if (sapFlavor !== SAP_FLAVORS.B1) {
         console.warn('businessPartnerCreation ignorada: solo aplica a SAP B1', { sapFlavor });
