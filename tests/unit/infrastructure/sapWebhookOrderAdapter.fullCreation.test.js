@@ -1,0 +1,126 @@
+import { jest } from '@jest/globals';
+import SapWebhookOrderAdapter from '../../../src/infrastructure/sap/SapWebhookOrderAdapter.js';
+import FullMappedBusinessPartnerPayloadStrategy
+  from '../../../src/domain/business-partners/strategies/full-mapped-bp-payload.strategy.js';
+
+function buildAdapter(requestImpl) {
+  const adapter = new SapWebhookOrderAdapter();
+  adapter.request = jest.fn(requestImpl);
+  return adapter;
+}
+
+const BASE_ARGS = {
+  sapConfig: { serviceLayerBaseUrl: 'https://sap.example.com' },
+  tenantModels: {},
+  company: { hs_object_id: '1', name: 'ACME' },
+  contact: null,
+  mappedContact: {},
+  companyExists: true,
+  resolveDefaultPriceListNum: async () => 1,
+  resolveRequireRandCardCode: async () => false,
+  resolveDefaultSeries: async () => 59,
+  resolveDefaultFindSAP: async () => 'EmailAddress',
+  resolveGroupCodeDefaults: async () => null,
+};
+
+describe('findOrCreateBusinessPartner — payload con la strategy fullMapped', () => {
+  it('manda BPAddresses, ContactEmployees y PropertiesN anidados en el POST', async () => {
+    const adapter = buildAdapter(async (config, { method, path }) => {
+      if (method === 'get' && path.startsWith("/BusinessPartners('")) {
+        const error = new Error('not found');
+        error.response = { status: 404 };
+        throw error;
+      }
+      if (method === 'get') { return { value: [] }; }
+      return { CardCode: 'CL999' };
+    });
+
+    const result = await adapter.findOrCreateBusinessPartner({
+      ...BASE_ARGS,
+      mappedCompany: { CardName: 'ACME', GroupCode: 105, U_TIPO: 'N' },
+      payloadStrategy: new FullMappedBusinessPartnerPayloadStrategy(),
+      bpAddresses: [{ AddressName: 'factura', AddressType: 'bo_BillTo', Street: 'Calle 1' }],
+      mappedContactEmployees: [{ Name: 'Juan', Active: 'tYES' }],
+      propertiesFlags: { Properties1: 'tYES', Properties55: 'tYES' },
+      creationDefaults: { BusinessPartner: { CardType: 'cCustomer' }, ContactEmployee: {}, BPAddress: {} },
+    });
+
+    const postCall = adapter.request.mock.calls.find(([, options]) => options.method === 'post');
+
+    expect(postCall[1].path).toBe('/BusinessPartners');
+    expect(postCall[1].data).toMatchObject({
+      CardName: 'ACME',
+      CardType: 'cCustomer',
+      GroupCode: 105,
+      U_TIPO: 'N',
+      Properties1: 'tYES',
+      Properties55: 'tYES',
+      BPAddresses: [{ AddressName: 'factura', AddressType: 'bo_BillTo', Street: 'Calle 1' }],
+      ContactEmployees: [{ Name: 'Juan', Active: 'tYES' }],
+    });
+    expect(result.created).toBe(true);
+    expect(result.cardCode).toBe('CL999');
+  });
+
+  it('sin payloadStrategy conserva el payload historico de nueve campos', async () => {
+    const adapter = buildAdapter(async (config, { method, path }) => {
+      if (method === 'get' && path.startsWith("/BusinessPartners('")) {
+        const error = new Error('not found');
+        error.response = { status: 404 };
+        throw error;
+      }
+      if (method === 'get') { return { value: [] }; }
+      return { CardCode: 'CL999' };
+    });
+
+    await adapter.findOrCreateBusinessPartner({
+      ...BASE_ARGS,
+      mappedCompany: { CardName: 'ACME', GroupCode: 105, U_TIPO: 'N' },
+    });
+
+    const postCall = adapter.request.mock.calls.find(([, options]) => options.method === 'post');
+
+    expect(postCall[1].data).not.toHaveProperty('GroupCode');
+    expect(postCall[1].data).not.toHaveProperty('U_TIPO');
+    expect(postCall[1].data).not.toHaveProperty('BPAddresses');
+    expect(postCall[1].data.CardType).toBe('C');
+    expect(postCall[1].data.Frozen).toBe('tNO');
+  });
+});
+
+describe('addContactEmployeesIfNeeded', () => {
+  it('agrega cada contacto de la lista y devuelve sus internalCodes', async () => {
+    const adapter = new SapWebhookOrderAdapter();
+    adapter.addContactEmployeeIfNeeded = jest.fn()
+      .mockResolvedValueOnce({ created: true, internalCode: 11, requestPayload: { Name: 'Ana' }, responsePayload: {} })
+      .mockResolvedValueOnce({ created: true, internalCode: 12, requestPayload: { Name: 'Luis' }, responsePayload: {} });
+
+    const contacts = [{ firstname: 'Ana' }, { firstname: 'Luis' }];
+    const result = await adapter.addContactEmployeesIfNeeded({
+      sapConfig: {}, cardCode: 'CL999', businessPartner: { CardCode: 'CL999' },
+      contacts, contactEmployeeMappings: [], upsertConfig: null,
+    });
+
+    expect(adapter.addContactEmployeeIfNeeded).toHaveBeenCalledTimes(2);
+    expect(result.created).toBe(true);
+    expect(result.internalCodes).toEqual([
+      { contact: contacts[0], internalCode: 11 },
+      { contact: contacts[1], internalCode: 12 },
+    ]);
+    expect(result.requestPayload).toEqual([{ Name: 'Ana' }, { Name: 'Luis' }]);
+  });
+
+  it('con lista vacia no llama a SAP', async () => {
+    const adapter = new SapWebhookOrderAdapter();
+    adapter.addContactEmployeeIfNeeded = jest.fn();
+
+    const result = await adapter.addContactEmployeesIfNeeded({
+      sapConfig: {}, cardCode: 'CL999', businessPartner: {}, contacts: [],
+      contactEmployeeMappings: [], upsertConfig: null,
+    });
+
+    expect(adapter.addContactEmployeeIfNeeded).not.toHaveBeenCalled();
+    expect(result.created).toBe(false);
+    expect(result.internalCodes).toEqual([]);
+  });
+});

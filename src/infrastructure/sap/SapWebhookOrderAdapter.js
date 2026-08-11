@@ -8,6 +8,7 @@ import {
   buildBusinessPartnerUpdatePayload,
   buildContactEmployeeUpdatePayload,
 } from '#domain/business-partners/upsert-sap-fields.service.js';
+import LegacyWhitelistBusinessPartnerPayloadStrategy from '#domain/business-partners/strategies/legacy-whitelist-bp-payload.strategy.js';
 import { PermanentWebhookError } from '#shared/errors/index.js';
 import {
   escapeODataString,
@@ -17,6 +18,7 @@ import {
 } from '#shared/utils/string.utils.js';
 
 const NO_OP_UPDATE_RESULT = { updated: false, requestPayload: null, responsePayload: null };
+const DEFAULT_BP_PAYLOAD_STRATEGY_INSTANCE = new LegacyWhitelistBusinessPartnerPayloadStrategy();
 
 function resolveContactEmployeePayload(contact, contactEmployeeMappings) {
   const mapped = mapHubspotToSapFields(contact || {}, contactEmployeeMappings);
@@ -165,6 +167,12 @@ export class SapWebhookOrderAdapter {
     resolveDefaultFindSAP = async () => 'EmailAddress',
     resolveGroupCodeDefaults = async () => null,
     upsertConfig = null,
+    // Sin estos, el payload es idéntico al que armaba el código anterior.
+    payloadStrategy = DEFAULT_BP_PAYLOAD_STRATEGY_INSTANCE,
+    bpAddresses = [],
+    mappedContactEmployees = [],
+    propertiesFlags = {},
+    creationDefaults = null,
   }) {
     const mappedCardCode = toNonEmptyString(mappedCompany?.CardCode || mappedContact?.CardCode);
     const mappedEmail = toNonEmptyString(mappedCompany?.EmailAddress || mappedContact?.EmailAddress);
@@ -265,27 +273,9 @@ export class SapWebhookOrderAdapter {
       throw new PermanentWebhookError('CardName is required to create Business Partner');
     }
 
-    const payload = {
-      CardName: cardName,
-      CardType: 'C',
-      CompanyPrivate: companyExists ? 'C' : 'I',
-      EmailAddress: mappedEmail || '',
-      Phone1: toNonEmptyString(mappedCompany?.Phone1 || mappedContact?.Phone1) || undefined,
-      PriceListNum: resolvedPriceListNum,
-      FederalTaxID: toNonEmptyString(federalTaxId) || undefined,
-      Frozen: 'tNO',
-      Valid: 'tYES',
-    };
-
-    if (resolvedCardCode) {
-      payload.CardCode = resolvedCardCode;
-    } else {
-      const resolvedDefaultSeries = await resolveDefaultSeries(tenantModels);
-
-      if (resolvedDefaultSeries) {
-        payload.Series = resolvedDefaultSeries;
-      }
-    }
+    const resolvedDefaultSeries = resolvedCardCode
+      ? null
+      : await resolveDefaultSeries(tenantModels);
 
     const mappedPayTermsGrpCode = normalizeInteger(
       mappedCompany?.PayTermsGrpCode ?? mappedContact?.PayTermsGrpCode
@@ -294,9 +284,32 @@ export class SapWebhookOrderAdapter {
       ? mappedPayTermsGrpCode
       : normalizeInteger((await resolveGroupCodeDefaults(tenantModels))?.PayTermsGrpCode);
 
-    if (resolvedPayTermsGrpCode !== null) {
-      payload.PayTermsGrpCode = resolvedPayTermsGrpCode;
-    }
+    const phone1 = toNonEmptyString(mappedCompany?.Phone1 || mappedContact?.Phone1);
+
+    // mapHubspotToSapFields ya descarta null/undefined/'', así que una llave
+    // solo existe en mappedCompany cuando tiene valor real. Por eso este
+    // spread equivale exactamente al `mappedCompany?.X || mappedContact?.X`
+    // que usaba el código anterior campo por campo.
+    const mappedBusinessPartner = { ...mappedContact, ...mappedCompany };
+
+    const payload = payloadStrategy.buildCreatePayload({
+      mappedBusinessPartner,
+      addresses: bpAddresses,
+      contactEmployees: mappedContactEmployees,
+      propertiesFlags,
+      defaults: creationDefaults,
+      resolved: {
+        cardName,
+        cardCode: resolvedCardCode,
+        defaultSeries: resolvedDefaultSeries,
+        priceListNum: resolvedPriceListNum,
+        payTermsGrpCode: resolvedPayTermsGrpCode,
+        federalTaxId,
+        mappedEmail,
+        phone1,
+        isCompanyBusinessPartner: Boolean(companyExists),
+      },
+    });
 
     const created = await this.request(sapConfig, {
       method: 'post',
@@ -449,7 +462,64 @@ export class SapWebhookOrderAdapter {
       internalCode: refreshed?.InternalCode || null,
       requestPayload: nextEmployee,
       responsePayload: refreshed,
+      businessPartner: refreshedBusinessPartner,
     };
+  }
+
+  // Envoltura de addContactEmployeeIfNeeded para varios contactos. Se usa
+  // cuando contactEmployeeSource es 'payloadArray'. Deliberadamente NO cambia
+  // el método de un solo contacto, para no arriesgar los flujos existentes.
+  // Secuencial a propósito: B1 reemplaza el array completo de ContactEmployees
+  // en cada PATCH, así que dos llamadas en paralelo se pisarían entre sí.
+  async addContactEmployeesIfNeeded({
+    sapConfig,
+    cardCode,
+    businessPartner,
+    contacts,
+    contactEmployeeMappings,
+    upsertConfig = null,
+  }) {
+    const contactList = Array.isArray(contacts) ? contacts.filter(Boolean) : [];
+    const results = [];
+    const internalCodes = [];
+    const requestPayload = [];
+    const responsePayload = [];
+    let created = false;
+    let currentBusinessPartner = businessPartner;
+
+    for (const contact of contactList) {
+      const result = await this.addContactEmployeeIfNeeded({
+        sapConfig,
+        cardCode,
+        businessPartner: currentBusinessPartner,
+        contact,
+        contactEmployeeMappings,
+        upsertConfig,
+      });
+
+      results.push(result);
+      created = created || Boolean(result?.created);
+
+      if (result?.internalCode) {
+        internalCodes.push({ contact, internalCode: result.internalCode });
+      }
+
+      if (result?.requestPayload) {
+        requestPayload.push(result.requestPayload);
+      }
+
+      if (result?.responsePayload) {
+        responsePayload.push(result.responsePayload);
+      }
+
+      // Cada append devuelve el BP recargado; usarlo en la vuelta siguiente
+      // evita que el segundo contacto borre al primero.
+      if (result?.businessPartner) {
+        currentBusinessPartner = result.businessPartner;
+      }
+    }
+
+    return { created, internalCodes, results, requestPayload, responsePayload };
   }
 
   async createOrder({ sapConfig, orderPayload }) {
