@@ -58,7 +58,7 @@ Sin que ningún tenant que no configure nada cambie de conducta.
 | Camino por lotes | Sacar el bloque de hijos de la rama `company` y ejecutarlo para ambos objectType, pasando `parentObjectType: objectType` | Hay que eliminar el `return` de `ProcessCrmObjectBatches.js:671`, que hoy corta la rama de `contact` antes del bloque |
 | Cómo llega `ContactEmployees` al `$select` de la tarea de contactos | Mapping sintético con `targetField: null`, con `sourceContext: 'businessPartner'` | Mismo mecanismo que para `PropertiesN` (ver abajo), y **crítico**: `sanitizeSelectFields` excluye del `$select` los mappings con `sourceContext: 'contactEmployee'` (`serviceLayerUrlBuilder.js:29`), así que el sintético NO puede llevar ese contexto o se filtraría a sí mismo. `ContactEmployees` sí pasa `SAP_FIELD_PATTERN` porque no tiene punto |
 | Asociación contacto→contacto por lotes | `batchAssociateDefault(token, 'contact', 'contact', pares)`, la función que ya existe | `hubspotClient.js:361-374` toma `fromObjectType`/`toObjectType` como strings libres, así que produce la URL v4 válida sin código nuevo, y ya apunta a la ruta `batch/associate/default` |
-| Asociación contacto→contacto por par | Función **nueva** `associateObjectsDefault`, con la ruta `/associations/default/` verificada en vivo | `associateObjects` (`hubspotClient.js:394-404`) usa la ruta **tipada** con cuerpo `[]`, que sigue sin verificar. No se modifica esa función porque afectaría asociaciones que ya están en producción; ver la sección de verificación |
+| Asociación por par, todos los tipos | Función nueva `associateObjectsDefault` con la ruta `/associations/default/` verificada, y **se migra a ella el único punto por donde pasan todas**: `associationService.associateObjectsBySapId` (`:169`) más el fallback de lotes (`SyncCompanyContactsInBatches:900`) | Revisado durante la redacción del plan: **todas** las asociaciones de a una pasan por `associateObjectsBySapId`, que ya recibe `fromObjectType` como parámetro, así que el caso contacto→contacto tiene que pasar por ahí. Dejar una función paralela solo para el caso nuevo dejaría dos rutas conviviendo y la vieja sin verificar. Y migrar **nunca es peor**: si el cuerpo `[]` funciona, ambas rutas producen la misma asociación sin etiqueta; si no funciona, esto arregla producción. Es la única parte de este spec que cambia conducta existente, y está aislada en su propia tarea del plan |
 | Doble dirección | Se asocia **una sola vez** por par | Verificado en vivo: HubSpot crea las dos direcciones en una sola llamada para el tipo sin etiqueta. Asociar dos veces sería una llamada desperdiciada por cada ContactEmployee |
 | Guarda de auto-asociación | Se descartan los pares donde `fromId === toId`, con warning | Cuando el BP es una persona, un ContactEmployee puede resolver al **mismo** contacto de HubSpot (mismo email). Asociar un contacto a sí mismo es basura o un rechazo de la API, y este caso no existía cuando el padre era siempre una company |
 | Identidad de los contactos hijo | `internalcode`, sin cambios | Ya está así (`hubspot-sync.composition.js:65`) y funciona igual sea el padre company o contact. `SyncCompanyContactsInBatches:185-192` **aborta** si esa propiedad no es escribible, en vez de degradar — esa protección se conserva tal cual |
@@ -106,7 +106,11 @@ Cuatro conclusiones, que entre ellas eliminan el riesgo que este spec tenía:
 3. **La asociación es simétrica: HubSpot crea las dos direcciones en una sola llamada.** Se ve en el `results` de arriba, que trae el par `from`/`to` y también su inverso. Consecuencias de diseño: (a) **no hay que asociar dos veces**, un solo PUT o un solo par en el batch basta; (b) el BusinessPartner va a aparecer en la lista de contactos asociados de su propio ContactEmployee, y eso es conducta de HubSpot, no algo que el código pueda evitar ni deba intentar corregir.
 4. La respuesta tiene forma de lote (`status`, `results`) incluso para el PUT individual.
 
-**Consecuencia para el código de este spec:** el camino nuevo usa la ruta `/associations/default/`, que es la verificada. Como `associateObjects` (`hubspotClient.js:394-404`) usa **otra** ruta (ver abajo), se agrega una función `associateObjectsDefault` en `hubspotClient.js` con la ruta verificada, y se usa para los pares contacto→contacto. Deliberadamente **no** se modifica `associateObjects`: eso depende de la investigación descrita abajo y afectaría asociaciones que ya están en producción.
+**Consecuencia para el código de este spec:** se agrega `associateObjectsDefault` en `hubspotClient.js` con la ruta verificada, y **se migran a ella todas las asociaciones de a una**, no solo el caso nuevo. La razón es que hay un único punto por donde pasan todas —`associationService.associateObjectsBySapId` (`:169`), que ya recibe `fromObjectType` como parámetro— más el fallback de lotes (`SyncCompanyContactsInBatches:900`). El caso contacto→contacto tiene que pasar por ese punto, así que una función paralela dejaría dos rutas conviviendo con la vieja sin verificar.
+
+Migrar **nunca es peor**: si el cuerpo `[]` funciona, ambas rutas producen la misma asociación sin etiqueta (`HUBSPOT_DEFINED` sin label); si no funciona, la migración arregla un fallo silencioso de producción. `associateObjects` queda sin usar y se elimina.
+
+Esta es **la única parte del spec que cambia conducta existente** (asociaciones company↔contact, contact↔company, deal↔contact, deal↔company, deal↔line_item), y está aislada en su propia tarea del plan para que se pueda revisar y revertir sola.
 
 ### Lo que queda abierto: el cuerpo `[]` del PUT por par
 
@@ -121,11 +125,9 @@ Cuidado con una diferencia de ruta que este spec **no** puede dar por resuelta. 
 
 Esto **no es un problema nuevo de este spec**: afecta igual a las asociaciones company↔contact que ya existen. Y hay un detalle que lo hace plausible: `SyncCompanyContactsInBatches` usa `batchAssociateDefault` como camino principal y el PUT por par **solo como fallback** (`:876-880` vs `:900`), mientras que el camino secuencial de `HandleHubspotAssociations` usa el PUT por par como principal. Si los tenants en producción corren con `hubspotBatchSize > 1`, el PUT por par casi nunca se ejecuta, y podría estar roto desde siempre sin que nadie lo note.
 
-La ruta `/associations/default/` quedó verificada (arriba). **La tipada con `[]` sigue sin verificar**, y por eso este spec no la usa y tampoco la toca.
+La ruta `/associations/default/` quedó verificada (arriba). **La tipada con `[]` sigue sin verificar, y este spec la elimina** en vez de dejarla conviviendo: ver la decisión de migración arriba. No hace falta averiguar si funcionaba, porque la ruta verificada la reemplaza sin pérdida en ninguno de los dos escenarios.
 
-Queda registrado como investigación aparte, fuera de este spec: revisar si `associateObjects` con cuerpo `[]` funciona, y si no, corregirlo para **todos** los tipos de objeto (company↔contact, contact↔company, deal↔contact, deal↔company, deal↔line_item). Es un cambio de una línea, pero es el arreglo de un bug latente en funcionalidad existente y merece su propio hilo, no colarse aquí. Vale la pena evaluar también dejar de tragar los errores de asociación, o al menos elevarlos a warning contable en el `SyncLog`, para que un fallo así no vuelva a ser invisible.
-
-El resto del spec no depende de ese resultado.
+**Lo que sí queda como investigación aparte:** que los errores de asociación se traguen (`associationService.js:176-184`, `SyncCompanyContactsInBatches:884-893`). Eso es lo que hizo posible que esta duda existiera durante meses sin que nadie la notara, y sigue siendo cierto después de este spec. Vale la pena elevar esos fallos a warning contable en el `SyncLog`. No entra aquí porque cambia la forma de las métricas de todas las corridas de todos los tenants.
 
 ## Alternativas descartadas
 
@@ -252,7 +254,7 @@ Requiere que `handleContactAssociations` reciba `syncLogId` (hoy no lo recibe; `
 
 `SyncCompanyContactsInBatches.execute` gana `parentObjectType = 'company'` y lo propaga a `associateContactBatches`, que lo usa en `batchAssociateDefault(token, parentObjectType, 'contact', ...)` (`:876-880`) y en el fallback por par (`:900`).
 
-**El fallback por par cambia de función.** Hoy es `associateObjects`, que usa la ruta tipada con cuerpo `[]` — sin verificar. Pasa a ser `associateObjectsDefault`, nueva en `hubspotClient.js`, con la ruta verificada:
+**El fallback por par cambia de función**, junto con todas las demás asociaciones de a una (ver la sección de verificación). `associateObjects` se reemplaza por:
 
 ```js
 // Ruta `default` de la API v4: sin cuerpo, HubSpot aplica el tipo sin etiqueta
@@ -267,9 +269,23 @@ export async function associateObjectsDefault(token, fromType, fromId, toType, t
 }
 ```
 
-Hay que exponerla también en `src/infrastructure/hubspot/hubspot-crm-batch.adapter.js:10-17`, que hoy expone una superficie deliberadamente estrecha (`associateObjects, batchAssociateDefault, batchCreateObjects, batchUpdateObjects, listAllObjects, listWritablePropertyNames`).
+`hubspotRequest(method, endpoint, token, data, opts)` acepta `data` ausente (`hubspotClient.js:31-49`): axios recibe `data: undefined` y no manda cuerpo, que es lo que esta ruta espera.
 
-Y el camino secuencial: `associationService.associateCompanyWithContacts` (`src/infrastructure/hubspot/associationService.js:244-260`) baja hasta `associateObjectsBySapId` (`:139-188`), que llama a `associateObjects` por id. Ese camino también necesita `parentObjectType` y la función nueva.
+Hay que exponerla en `src/infrastructure/hubspot/hubspot-crm-batch.adapter.js:10-17`, que hoy expone una superficie deliberadamente estrecha.
+
+**El camino secuencial de la asociación.** `syncCompanyContacts` asocia hoy con `associationService.associateCompanyWithContacts` (`:383-393`), que hardcodea `'company'`/`'contact'` (`associationService.js:244-260`). Se reemplaza por una llamada directa a `associationService.associateObjectsBySapId`, que **ya está exportada** (`:268`) y ya recibe `fromObjectType` como parámetro — no hace falta ninguna función envoltorio nueva:
+
+```js
+      await this.associationService.associateObjectsBySapId(
+        token,
+        clientConfig.hubspotCredentialId,
+        parentObjectType,
+        parentHubspotId,
+        'contact',
+        [{ hubspotId: contactHubspotId, sapId: sapInternalCode }],
+        tenantModels
+      );
+```
 
 **Guarda de auto-asociación**, en los dos caminos: se descarta el par cuando `fromId === toId`, con un warning. Caso nuevo que no podía ocurrir con un padre company.
 
@@ -340,7 +356,7 @@ Jest necesita `NODE_OPTIONS=--experimental-vm-modules` en este proyecto.
 4. Enricher: escribe `'1;3;64'` a partir de las banderas de SAP; escribe `''` cuando ninguna está en `tYES` (**el caso de deselección**); no escribe nada con la strategy apagada; se salta `product` y `deal`; se salta S/4; sobrevive a `rawSapData: null`; no lanza cuando la lectura de config falla.
 5. Hijos con padre contacto, camino secuencial: `handleContactAssociations` llama a `syncCompanyContacts`; los pares se arman `contact → contact`; un par con `fromId === toId` se descarta con warning.
 6. Hijos con padre contacto, camino por lotes: `handleAssociations` ya no retorna temprano en la rama de `contact`; `batchAssociateDefault` recibe `('contact', 'contact')`; el fallback por par usa `associateObjectsDefault`; sin `parentObjectType` recibe `('company', 'contact')`.
-7. `associateObjectsDefault` construye la URL con `/associations/default/` y **sin cuerpo**; cada par se asocia **una sola vez** (no se emite la llamada inversa, porque HubSpot ya la crea).
+7. `associateObjectsDefault` construye la URL con `/associations/default/` y **sin cuerpo**; cada par se asocia **una sola vez** (no se emite la llamada inversa, porque HubSpot ya la crea). Y la guardia de regresión de la migración: `associateObjectsBySapId` sigue asociando los mismos pares que antes para company↔contact, contact↔company y los caminos de deal — lo único que cambia es la URL.
 8. Composición: el adapter cumple `SapRecordEnricherPort`.
 9. `requireAddress`: default `false`; `true` produce el warning y no aborta.
 
@@ -360,9 +376,9 @@ Jest necesita `NODE_OPTIONS=--experimental-vm-modules` en este proyecto.
 | `src/application/use-cases/ProcessCrmObjectBatches.js:655-700` | Quitar el `return` de la línea 671 y ejecutar el bloque de hijos para ambos objectType con `parentObjectType` |
 | `src/application/use-cases/SyncCompanyContactsInBatches.js:119-324` | `execute` gana `parentObjectType = 'company'` y lo propaga |
 | `src/application/use-cases/SyncCompanyContactsInBatches.js:850-916` | `associateContactBatches` usa `parentObjectType` en el batch y en el fallback, más la guarda `fromId === toId` |
-| `src/infrastructure/hubspot/hubspotClient.js` | Agregar `associateObjectsDefault` con la ruta `/associations/default/`. **No** modificar `associateObjects` |
-| `src/infrastructure/hubspot/hubspot-crm-batch.adapter.js:10-17` | Exponer `associateObjectsDefault` |
-| `src/infrastructure/hubspot/associationService.js:139-188, 244-260` | `parentObjectType` y usar `associateObjectsDefault` en el camino secuencial |
+| `src/infrastructure/hubspot/hubspotClient.js:394-404` | Reemplazar `associateObjects` por `associateObjectsDefault` con la ruta `/associations/default/` |
+| `src/infrastructure/hubspot/hubspot-crm-batch.adapter.js:10-17` | Exponer `associateObjectsDefault` en lugar de `associateObjects` |
+| `src/infrastructure/hubspot/associationService.js:167-185` | `associateObjectsBySapId` usa `associateObjectsDefault` |
 | `src/composition/sap-sync.composition.js:69-97` | Cablear el enricher con `assertPort` |
 | `src/infrastructure/tenants/tenantProvisioning.js:83-158` | Sembrar `requireAddress` con `{ required: false }` |
 | `configuration_examples.md` | Documentar `requireAddress` |
