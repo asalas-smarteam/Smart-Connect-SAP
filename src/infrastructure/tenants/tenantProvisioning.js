@@ -13,6 +13,10 @@ import {
   UPDATE_DEAL_STAGE_CONFIG_KEY,
   DEFAULT_UPDATE_DEAL_STAGE_CONFIG,
 } from '#infrastructure/config/updateDealStage.config.js';
+import {
+  UPSERT_DATA_SAP_CONFIG_KEY,
+  DEFAULT_UPSERT_DATA_SAP_CONFIG,
+} from '#infrastructure/config/upsertDataSap.config.js';
 import { sanitizeMongoCollectionName } from '#shared/utils/provisioningValidation.js';
 import {
   DEFAULT_SAP_FLAVOR,
@@ -134,6 +138,19 @@ async function ensureTenantConfigurations({ Configuration }, { sapFlavor = DEFAU
         key: UPDATE_DEAL_STAGE_CONFIG_KEY,
         userUpdated: 'admin',
         value: { ...DEFAULT_UPDATE_DEAL_STAGE_CONFIG, dealstage: 'closedwon' },
+      },
+    },
+    { upsert: true }
+  );
+  // Seeded disabled (required: false) so the document is discoverable in the admin
+  // UI without changing behavior for any existing tenant.
+  await Configuration.updateOne(
+    { key: UPSERT_DATA_SAP_CONFIG_KEY },
+    {
+      $setOnInsert: {
+        key: UPSERT_DATA_SAP_CONFIG_KEY,
+        userUpdated: 'admin',
+        value: { ...DEFAULT_UPSERT_DATA_SAP_CONFIG },
       },
     },
     { upsert: true }

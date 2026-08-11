@@ -1,6 +1,8 @@
 import TenantFieldMappingRepository from '#infrastructure/database/repositories/TenantFieldMappingRepository.js';
 import DynamicDescriptionConfigRepository from '#infrastructure/config/DynamicDescriptionConfigRepository.js';
 import MappingFallbackConfigRepository from '#infrastructure/config/MappingFallbackConfigRepository.js';
+import SapFlavorConfigRepository from '#infrastructure/config/SapFlavorConfigRepository.js';
+import { SAP_FLAVORS } from '#domain/sap/sap-flavor.constants.js';
 import { applyDynamicDescription } from '#domain/sync/dynamic-description.service.js';
 import { DEFAULT_INVOICE_MAPPINGS } from '#application/services/defaultClientConfigMappings.service.js';
 import {
@@ -108,10 +110,12 @@ export class MappingSyncRepository {
     fieldMappingRepository = new TenantFieldMappingRepository(),
     dynamicDescriptionConfigRepository = new DynamicDescriptionConfigRepository(),
     mappingFallbackConfigRepository = new MappingFallbackConfigRepository(),
+    sapFlavorConfigRepository = new SapFlavorConfigRepository(),
   } = {}) {
     this.fieldMappingRepository = fieldMappingRepository;
     this.dynamicDescriptionConfigRepository = dynamicDescriptionConfigRepository;
     this.mappingFallbackConfigRepository = mappingFallbackConfigRepository;
+    this.sapFlavorConfigRepository = sapFlavorConfigRepository;
   }
 
   async mapRecords({ sapRecords, hubspotCredentialId, objectType, tenantContext, sourceContext }) {
@@ -179,6 +183,21 @@ export class MappingSyncRepository {
 
     if (!objectType) {
       throw new Error('objectType is required to ensure default mappings');
+    }
+
+    // Product mappings for S/4 tenants are DB-only: the field names (Product,
+    // to_Description.ProductDescription, BaseUnit...) are validated per tenant
+    // against their own Gateway and inserted directly as FieldMapping
+    // documents. Seeding a code default here would risk selecting a field
+    // that does not exist on a given tenant's Gateway, and the unique index
+    // ({hubspotCredentialId, objectType, sourceContext, sourceField}, no
+    // targetField) does not stop a stale B1 default from being added
+    // alongside it.
+    if (objectType === 'product') {
+      const sapFlavor = await this.sapFlavorConfigRepository.resolveSapFlavor({ tenantModels });
+      if (sapFlavor === SAP_FLAVORS.S4) {
+        return [];
+      }
     }
 
     const defaultMappings = DEFAULT_MAPPINGS_BY_OBJECT_TYPE[objectType];

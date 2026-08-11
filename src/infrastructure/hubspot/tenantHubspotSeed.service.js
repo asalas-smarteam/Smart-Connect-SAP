@@ -187,7 +187,10 @@ export async function seedCreateFieldsHubspot({ hubspotCredential, sapFlavor = D
           { label: 'Local', value: 'ZC01' },
           { label: 'Extranjero', value: 'ZC02' },
         ],
-      }
+      },
+      // BaseUnit has no B1 counterpart mapped by default; only S/4 tenants
+      // that map to_Description.ProductDescription/BaseUnit need this.
+      { objectType: 'products', label: 'Unidad de medida', name: 'unidad_medida' }
     );
   }
 

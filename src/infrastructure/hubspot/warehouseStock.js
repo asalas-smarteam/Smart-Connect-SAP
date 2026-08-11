@@ -1,73 +1,24 @@
+// Thin infrastructure wrapper: the actual B1 warehouse-stock logic now lives
+// in the domain strategy (src/domain/warehouses/strategies/b1-item-warehouse.strategy.js),
+// since it is one of two interchangeable WarehouseStockStrategyPort
+// implementations (see WarehouseStockEnrichmentAdapter). Kept here, with the
+// same export names, so product.handler.js's B1 fallback path and existing
+// tests do not need to change their imports.
 import tenantConfigurationService from '../config/tenantConfiguration.service.js';
+import {
+  buildB1WarehouseStockProperties,
+  getAvailableStockForB1Warehouse,
+  getWarehouseAvailableStock,
+  normalizeB1WarehouseFields,
+} from '#domain/warehouses/strategies/b1-item-warehouse.strategy.js';
 
 const DEFAULT_WAREHOUSE_FIELDS = [];
 const WAREHOUSE_FIELDS_KEY = 'fieldsWareHouseHS';
 
-function resolveWarehouseCodeFromPropertyName(propertyName) {
-  const normalizedPropertyName = propertyName;
-
-  if (!normalizedPropertyName) {
-    return null;
-  }
-
-  const match = normalizedPropertyName.match(/^([A-Za-z0-9]+)_stock$/i);
-  return match?.[1] ?? '';
-}
-
-function resolveWarehouseField(field) {
-  const propertyName = field?.value;
-
-  if (!propertyName) {
-    return null;
-  }
-
-  const warehouseCode = field?.valueSAP || resolveWarehouseCodeFromPropertyName(propertyName);
-
-  if (!warehouseCode) {
-    return null;
-  }
-
-  return { warehouseCode, propertyName };
-}
-
-export function getWarehouseAvailableStock(warehouse) {
-  const inStock = Number(warehouse?.InStock ?? 0);
-  const committed = Number(warehouse?.Committed ?? 0);
-  const ordered = Number(warehouse?.Ordered ?? 0);
-
-  return inStock - committed + ordered;
-}
+export { getWarehouseAvailableStock };
 
 export function normalizeHubspotWarehouseFields(value) {
-  if (!Array.isArray(value)) {
-    return DEFAULT_WAREHOUSE_FIELDS;
-  }
-
-  const seen = new Set();
-  const normalizedFields = [];
-
-  value.forEach((field) => {
-    const warehouseField = resolveWarehouseField(field);
-
-    if (!warehouseField) {
-      return;
-    }
-
-    const { warehouseCode, propertyName } = warehouseField;
-    const dedupeKey = `${warehouseCode}:${propertyName.toLowerCase()}`;
-
-    if (seen.has(dedupeKey)) {
-      return;
-    }
-
-    seen.add(dedupeKey);
-    normalizedFields.push({
-      warehouseCode,
-      propertyName,
-    });
-  });
-
-  return normalizedFields;
+  return normalizeB1WarehouseFields(value);
 }
 
 export async function resolveHubspotWarehouseFields(tenantModels) {
@@ -77,46 +28,21 @@ export async function resolveHubspotWarehouseFields(tenantModels) {
     DEFAULT_WAREHOUSE_FIELDS
   );
 
-  return normalizeHubspotWarehouseFields(value);
+  return normalizeB1WarehouseFields(value);
 }
 
 export function buildHubspotWarehouseStockProperties(
   warehouseItems,
   warehouseFields = DEFAULT_WAREHOUSE_FIELDS
 ) {
-  const warehousesByCode = new Map(
-    (Array.isArray(warehouseItems) ? warehouseItems : [])
-      .map((warehouse) => [warehouse?.WarehouseCode, warehouse])
-      .filter(([warehouseCode]) => warehouseCode)
-  );
-
-  return (Array.isArray(warehouseFields) ? warehouseFields : []).reduce((acc, field) => {
-    const propertyName = field?.propertyName;
-    const warehouseCode = field?.warehouseCode.toUpperCase();
-
-    if (!propertyName || !warehouseCode) {
-      return acc;
-    }
-
-    acc[propertyName] = getWarehouseAvailableStock(warehousesByCode.get(warehouseCode));
-    return acc;
-  }, {});
+  return buildB1WarehouseStockProperties(warehouseItems, warehouseFields);
 }
 
 export async function getHubspotWarehouseStockPropertiesForTenant(tenantModels, warehouseItems) {
   const warehouseFields = await resolveHubspotWarehouseFields(tenantModels);
-  return buildHubspotWarehouseStockProperties(warehouseItems, warehouseFields);
+  return buildB1WarehouseStockProperties(warehouseItems, warehouseFields);
 }
 
 export function getAvailableStockForWarehouse(warehouseItems, warehouseCode) {
-  const normalizedWarehouseCode = warehouseCode;
-  if (!normalizedWarehouseCode) {
-    return 0;
-  }
-
-  const warehouse = (Array.isArray(warehouseItems) ? warehouseItems : []).find(
-    (item) => item?.WarehouseCode === normalizedWarehouseCode
-  );
-
-  return getWarehouseAvailableStock(warehouse);
+  return getAvailableStockForB1Warehouse(warehouseItems, warehouseCode);
 }

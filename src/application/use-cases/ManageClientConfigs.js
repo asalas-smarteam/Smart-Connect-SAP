@@ -9,6 +9,7 @@ const allowedIntegrationModeNames = Object.freeze([
   'STORE_PROCEDURE',
   'SQL_SCRIPT',
   'SERVICE_LAYER',
+  'S4_ODATA',
 ]);
 
 function applyCustomFilterPatch(existingCustomFilters, incomingFilters) {
@@ -38,12 +39,14 @@ export class ManageClientConfigs {
     filterPolicy,
     defaultMappingInitializer,
     scheduler,
+    sapFlavorRepository = null,
     logger = console,
   }) {
     this.clientConfigRepository = clientConfigRepository;
     this.filterPolicy = filterPolicy;
     this.defaultMappingInitializer = defaultMappingInitializer;
     this.scheduler = scheduler;
+    this.sapFlavorRepository = sapFlavorRepository;
     this.logger = logger;
   }
 
@@ -92,9 +95,14 @@ export class ManageClientConfigs {
         payload: createPayload,
       });
 
+      const sapFlavor = typeof this.sapFlavorRepository?.resolveSapFlavor === 'function'
+        ? await this.sapFlavorRepository.resolveSapFlavor({ tenantModels })
+        : undefined;
+
       await this.defaultMappingInitializer.ensureAll({
         FieldMapping: tenantModels.FieldMapping,
         clientConfig: data,
+        ...(sapFlavor ? { sapFlavor } : {}),
       });
 
       await this.syncScheduler({ tenantKey, config: data });

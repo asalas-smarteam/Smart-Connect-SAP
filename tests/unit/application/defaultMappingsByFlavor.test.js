@@ -147,7 +147,7 @@ describe('default mappings by SAP flavor', () => {
       expect(FieldMapping.rows).toHaveLength(0);
     });
 
-    it('seeds S/4 product mappings', async () => {
+    it('does not seed S/4 product mappings: they are DB-only for this flavor', async () => {
       const FieldMapping = buildFieldMapping();
 
       await ensureDefaultProductMappings({
@@ -156,11 +156,7 @@ describe('default mappings by SAP flavor', () => {
         sapFlavor: 'S4',
       });
 
-      const byTarget = Object.fromEntries(
-        FieldMapping.rows.map((row) => [row.targetField, row.sourceField])
-      );
-      expect(byTarget.hs_sku).toBe('Product');
-      expect(byTarget.name).toBe('to_Description.ProductDescription');
+      expect(FieldMapping.rows).toHaveLength(0);
     });
 
     it('seeds no deal mappings for S/4 until A_SalesOrder is profiled', async () => {

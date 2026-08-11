@@ -4,6 +4,10 @@ import {
   mapHubspotToSapFields,
   resolveContactDisplayName,
 } from '#domain/orders/order-builder.service.js';
+import {
+  buildBusinessPartnerUpdatePayload,
+  buildContactEmployeeUpdatePayload,
+} from '#domain/business-partners/upsert-sap-fields.service.js';
 import { PermanentWebhookError } from '#shared/errors/index.js';
 import {
   escapeODataString,
@@ -11,6 +15,8 @@ import {
   normalizeNumber,
   toNonEmptyString,
 } from '#shared/utils/string.utils.js';
+
+const NO_OP_UPDATE_RESULT = { updated: false, requestPayload: null, responsePayload: null };
 
 function resolveContactEmployeePayload(contact, contactEmployeeMappings) {
   const mapped = mapHubspotToSapFields(contact || {}, contactEmployeeMappings);
@@ -103,6 +109,48 @@ export class SapWebhookOrderAdapter {
     return this.findBusinessPartnerByField(sapConfig, 'EmailAddress', email);
   }
 
+  // upsertDataSAP: when a BusinessPartner already exists, PATCH only the SAP
+  // fields the tenant configured and only when the HubSpot value actually
+  // differs from what SAP has. Never throws - a bad field name or a SAP
+  // error must not block order/quotation creation, which is the primary
+  // purpose of this flow. See
+  // docs/superpowers/specs/2026-08-10-upsert-data-sap-design.md.
+  async updateBusinessPartnerFields({ sapConfig, cardCode, fields, mappedCompany, mappedContact }) {
+    if (!toNonEmptyString(cardCode) || !Array.isArray(fields) || fields.length === 0) {
+      return { ...NO_OP_UPDATE_RESULT };
+    }
+
+    try {
+      const selectFields = [...new Set(['CardCode', ...fields])].join(',');
+      const sapBusinessPartner = await this.request(sapConfig, {
+        method: 'get',
+        path: `/BusinessPartners('${encodeURIComponent(String(cardCode))}')`,
+        params: { $select: selectFields },
+      });
+
+      const requestPayload = buildBusinessPartnerUpdatePayload({
+        fields,
+        mappedCompany,
+        mappedContact,
+        sapBusinessPartner,
+      });
+
+      if (Object.keys(requestPayload).length === 0) {
+        return { ...NO_OP_UPDATE_RESULT };
+      }
+
+      const responsePayload = await this.request(sapConfig, {
+        method: 'patch',
+        path: `/BusinessPartners('${encodeURIComponent(String(cardCode))}')`,
+        data: requestPayload,
+      });
+
+      return { updated: true, requestPayload, responsePayload };
+    } catch (error) {
+      return { updated: false, requestPayload: null, responsePayload: null, error };
+    }
+  }
+
   async findOrCreateBusinessPartner({
     sapConfig,
     tenantModels,
@@ -116,6 +164,7 @@ export class SapWebhookOrderAdapter {
     resolveDefaultSeries = async () => null,
     resolveDefaultFindSAP = async () => 'EmailAddress',
     resolveGroupCodeDefaults = async () => null,
+    upsertConfig = null,
   }) {
     const mappedCardCode = toNonEmptyString(mappedCompany?.CardCode || mappedContact?.CardCode);
     const mappedEmail = toNonEmptyString(mappedCompany?.EmailAddress || mappedContact?.EmailAddress);
@@ -143,8 +192,23 @@ export class SapWebhookOrderAdapter {
       mappedCompany?.[defaultFindSAP] || mappedContact?.[defaultFindSAP]
     );
 
+    const upsertFieldsBP = Array.isArray(upsertConfig?.fieldsUpdated_BP)
+      ? upsertConfig.fieldsUpdated_BP
+      : [];
+    const shouldUpsertBP = upsertConfig?.required === true && upsertFieldsBP.length > 0;
+
     const byCardCode = await this.findBusinessPartnerByCardCode(sapConfig, mappedCardCode);
     if (byCardCode?.CardCode) {
+      const updateResult = shouldUpsertBP
+        ? await this.updateBusinessPartnerFields({
+          sapConfig,
+          cardCode: byCardCode.CardCode,
+          fields: upsertFieldsBP,
+          mappedCompany,
+          mappedContact,
+        })
+        : { ...NO_OP_UPDATE_RESULT };
+
       return {
         cardCode: byCardCode.CardCode,
         created: false,
@@ -155,6 +219,7 @@ export class SapWebhookOrderAdapter {
           matchedBy: 'cardCode',
           businessPartner: byCardCode,
         },
+        updateResult,
       };
     }
 
@@ -164,6 +229,16 @@ export class SapWebhookOrderAdapter {
       defaultFindSAPValue
     );
     if (byDefaultField?.CardCode) {
+      const updateResult = shouldUpsertBP
+        ? await this.updateBusinessPartnerFields({
+          sapConfig,
+          cardCode: byDefaultField.CardCode,
+          fields: upsertFieldsBP,
+          mappedCompany,
+          mappedContact,
+        })
+        : { ...NO_OP_UPDATE_RESULT };
+
       return {
         cardCode: byDefaultField.CardCode,
         created: false,
@@ -174,6 +249,7 @@ export class SapWebhookOrderAdapter {
           matchedBy: defaultFindSAP,
           businessPartner: byDefaultField,
         },
+        updateResult,
       };
     }
 
@@ -244,12 +320,58 @@ export class SapWebhookOrderAdapter {
     };
   }
 
+  // upsertDataSAP: mirrors updateBusinessPartnerFields for the ContactEmployee
+  // collection. B1 replaces the whole ContactEmployees array on PATCH, so the
+  // matched employee (found by object identity in currentEmployees) is
+  // replaced in place with the diffed fields merged in; every other employee
+  // (including its InternalCode) is sent back untouched. Never throws.
+  async updateContactEmployeeFields({
+    sapConfig,
+    cardCode,
+    fields,
+    nextEmployee,
+    existingEmployee,
+    currentEmployees,
+  }) {
+    if (!toNonEmptyString(cardCode) || !Array.isArray(fields) || fields.length === 0) {
+      return { ...NO_OP_UPDATE_RESULT };
+    }
+
+    try {
+      const requestPayload = buildContactEmployeeUpdatePayload({
+        fields,
+        nextEmployee,
+        existingEmployee,
+      });
+
+      if (Object.keys(requestPayload).length === 0) {
+        return { ...NO_OP_UPDATE_RESULT };
+      }
+
+      const updatedEmployee = { ...existingEmployee, ...requestPayload };
+      const nextEmployees = (Array.isArray(currentEmployees) ? currentEmployees : []).map(
+        (employee) => (employee === existingEmployee ? updatedEmployee : employee)
+      );
+
+      const responsePayload = await this.request(sapConfig, {
+        method: 'patch',
+        path: `/BusinessPartners('${encodeURIComponent(String(cardCode))}')`,
+        data: { ContactEmployees: nextEmployees },
+      });
+
+      return { updated: true, requestPayload, responsePayload };
+    } catch (error) {
+      return { updated: false, requestPayload: null, responsePayload: null, error };
+    }
+  }
+
   async addContactEmployeeIfNeeded({
     sapConfig,
     cardCode,
     businessPartner,
     contact,
     contactEmployeeMappings,
+    upsertConfig = null,
   }) {
     if (!cardCode || !contact) {
       return { created: false, internalCode: null, requestPayload: null, responsePayload: null };
@@ -275,6 +397,21 @@ export class SapWebhookOrderAdapter {
     });
 
     if (existing) {
+      const upsertFieldsCE = Array.isArray(upsertConfig?.fieldsUpdated_CE)
+        ? upsertConfig.fieldsUpdated_CE
+        : [];
+      const shouldUpsertCE = upsertConfig?.required === true && upsertFieldsCE.length > 0;
+      const updateResult = shouldUpsertCE
+        ? await this.updateContactEmployeeFields({
+          sapConfig,
+          cardCode,
+          fields: upsertFieldsCE,
+          nextEmployee,
+          existingEmployee: existing,
+          currentEmployees,
+        })
+        : { ...NO_OP_UPDATE_RESULT };
+
       return {
         created: false,
         internalCode: existing.InternalCode || null,
@@ -283,6 +420,7 @@ export class SapWebhookOrderAdapter {
           matchedExisting: true,
           employee: existing,
         },
+        updateResult,
       };
     }
 

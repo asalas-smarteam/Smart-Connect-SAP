@@ -42,6 +42,11 @@ function buildRuntimeRepository(context = buildContext()) {
     resolveDefaultSeries: jest.fn().mockResolvedValue(null),
     resolveDefaultFindSAP: jest.fn().mockResolvedValue('EmailAddress'),
     resolveGroupCodeDefaults: jest.fn().mockResolvedValue(null),
+    resolveUpsertDataSap: jest.fn().mockResolvedValue({
+      required: false,
+      fieldsUpdated_BP: [],
+      fieldsUpdated_CE: [],
+    }),
     findOwnerMappingByHubspotOwner: jest.fn().mockResolvedValue(null),
   };
 }

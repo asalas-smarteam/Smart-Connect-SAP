@@ -61,6 +61,9 @@ export class ProcessHubspotWebhookEvent {
       } = context;
       const mappedCompany = mapHubspotToSapFields(company || {}, mappings.companyMappings);
       const mappedContact = mapHubspotToSapFields(contact || {}, mappings.contactBusinessPartnerMappings);
+      // Resolved once per event (not a resolver-per-item like the others below) so
+      // findOrCreateBusinessPartner/addContactEmployeeIfNeeded don't each trigger their own read.
+      const upsertConfig = await this.runtimeRepository.resolveUpsertDataSap(tenantModels);
       const businessPartnerResult = await this.sapOrderAdapter.findOrCreateBusinessPartner({
         sapConfig,
         tenantModels,
@@ -79,10 +82,13 @@ export class ProcessHubspotWebhookEvent {
           this.runtimeRepository.resolveDefaultFindSAP(models),
         resolveGroupCodeDefaults: (models) =>
           this.runtimeRepository.resolveGroupCodeDefaults(models),
+        upsertConfig,
       });
 
       auditTrail.payload_SAP.businessPartner = businessPartnerResult.requestPayload;
       auditTrail.response_SAP.businessPartner = businessPartnerResult.responsePayload;
+      auditTrail.payload_SAP.businessPartnerUpdate = businessPartnerResult.updateResult?.requestPayload ?? null;
+      auditTrail.response_SAP.businessPartnerUpdate = businessPartnerResult.updateResult?.responsePayload ?? null;
 
       cardCode = businessPartnerResult.cardCode;
       const syncPlan = this.resolveBusinessPartnerSyncPlan({
@@ -132,6 +138,7 @@ export class ProcessHubspotWebhookEvent {
           businessPartner: businessPartnerResult.businessPartner,
           contact,
           contactEmployeeMappings: mappings.contactEmployeeMappings,
+          upsertConfig,
         });
       }
 
@@ -148,6 +155,8 @@ export class ProcessHubspotWebhookEvent {
 
       auditTrail.payload_SAP.contactEmployee = contactEmployeeResult.requestPayload;
       auditTrail.response_SAP.contactEmployee = contactEmployeeResult.responsePayload;
+      auditTrail.payload_SAP.contactEmployeeUpdate = contactEmployeeResult.updateResult?.requestPayload ?? null;
+      auditTrail.response_SAP.contactEmployeeUpdate = contactEmployeeResult.updateResult?.responsePayload ?? null;
 
       const documentLines = mapDocumentLines({
         lineItems,
@@ -260,13 +269,17 @@ export class ProcessHubspotWebhookEvent {
       payload_Hubspot: payload,
       payload_SAP: {
         businessPartner: null,
+        businessPartnerUpdate: null,
         contactEmployee: null,
+        contactEmployeeUpdate: null,
         order: null,
       },
       response_hubspot: null,
       response_SAP: {
         businessPartner: null,
+        businessPartnerUpdate: null,
         contactEmployee: null,
+        contactEmployeeUpdate: null,
         order: null,
       },
     };

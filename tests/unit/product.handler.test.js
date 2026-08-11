@@ -200,6 +200,61 @@ describe('product.handler preprocess', () => {
     });
   });
 
+  describe('_warehouseStock set by WarehouseStockEnrichmentAdapter', () => {
+    it('uses the pre-resolved stock properties verbatim and skips the B1 lookup', async () => {
+      const tenantModels = {
+        Configuration: {
+          findOneAndUpdate: jest.fn().mockResolvedValue({
+            key: 'fieldsPricesHS',
+            value: ['price'],
+            userUpdated: 'admin',
+          }),
+        },
+      };
+      const item = {
+        properties: {},
+        rawSapData: {
+          _warehouseStock: { mqgt_0008_stock: 12, dpdo_stock: 0 },
+          // Present but must be ignored: on S/4 there is no
+          // ItemWarehouseInfoCollection at all, but even if there were, the
+          // _warehouseStock key must win.
+          ItemWarehouseInfoCollection: [{ WarehouseCode: 'A01', InStock: 999 }],
+        },
+      };
+
+      await preprocess({ item, tenantModels });
+
+      expect(item.properties).toEqual({
+        mqgt_0008_stock: 12,
+        dpdo_stock: 0,
+        price: 0,
+      });
+      expect(mockBuildHubspotWarehouseStockProperties).not.toHaveBeenCalled();
+      expect(mockGetHubspotWarehouseStockPropertiesForTenant).not.toHaveBeenCalled();
+    });
+
+    it('writes no warehouse properties when the resolved stock is empty', async () => {
+      const tenantModels = {
+        Configuration: {
+          findOneAndUpdate: jest.fn().mockResolvedValue({
+            key: 'fieldsPricesHS',
+            value: ['price'],
+            userUpdated: 'admin',
+          }),
+        },
+      };
+      const item = {
+        properties: {},
+        rawSapData: { _warehouseStock: {} },
+      };
+
+      await preprocess({ item, tenantModels });
+
+      expect(item.properties).toEqual({ price: 0 });
+      expect(mockGetHubspotWarehouseStockPropertiesForTenant).not.toHaveBeenCalled();
+    });
+  });
+
   describe('mutually exclusive discount properties', () => {
     const preprocessContext = { warehouseFields: [], priceFields: [] };
 

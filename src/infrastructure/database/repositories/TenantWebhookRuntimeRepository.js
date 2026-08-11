@@ -1,5 +1,6 @@
 import mappingService from './mapping.service.js';
 import tenantConfigurationService from '#infrastructure/config/tenantConfiguration.service.js';
+import { getUpsertDataSapConfig } from '#infrastructure/config/upsertDataSap.config.js';
 import { resolvePriceListFromConfigValue } from '#domain/prices/price-list-config.service.js';
 import { PermanentWebhookError } from '#shared/errors/index.js';
 import { normalizePositiveInteger, toNonEmptyString } from '#shared/utils/string.utils.js';
@@ -205,6 +206,16 @@ export class TenantWebhookRuntimeRepository {
       'defaultFindSAP',
       'EmailAddress'
     );
+  }
+
+  // upsertDataSAP: whether an already-existing BusinessPartner/ContactEmployee
+  // should be PATCHed with the current HubSpot data, and which SAP fields are
+  // eligible for each entity. Resolved once per webhook event (not per
+  // resolver-per-item like the others) so the deal use cases can pass the
+  // already-resolved value into findOrCreateBusinessPartner /
+  // addContactEmployeeIfNeeded without an extra Mongo read.
+  async resolveUpsertDataSap(tenantModels) {
+    return getUpsertDataSapConfig({ tenantModels });
   }
 }
 

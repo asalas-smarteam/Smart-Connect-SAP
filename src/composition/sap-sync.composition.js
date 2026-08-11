@@ -10,7 +10,12 @@ import { SapDataSourcePort } from '#application/ports/sap/sap-data-source.port.j
 import ProductSyncStrategyFactory from '#domain/products/product-sync-strategy.factory.js';
 import OneToManyProductStrategy from '#domain/products/strategies/one-to-many-product.strategy.js';
 import OneToOneProductStrategy from '#domain/products/strategies/one-to-one-product.strategy.js';
+import WarehouseStockStrategyFactory from '#domain/warehouses/warehouse-stock-strategy.factory.js';
+import B1ItemWarehouseStrategy from '#domain/warehouses/strategies/b1-item-warehouse.strategy.js';
+import S4PlantStorageLocationStrategy from '#domain/warehouses/strategies/s4-plant-storage-location.strategy.js';
+import { SapRecordEnricherPort } from '#application/ports/sap/sap-record-enricher.port.js';
 import ProductSyncStrategyConfigRepository from '#infrastructure/config/ProductSyncStrategyConfigRepository.js';
+import WarehouseStockConfigRepository from '#infrastructure/config/WarehouseStockConfigRepository.js';
 import MongooseClientConfigRepository from '#infrastructure/database/repositories/MongooseClientConfigRepository.js';
 import MongooseHubspotCredentialRepository from '#infrastructure/database/repositories/MongooseHubspotCredentialRepository.js';
 import MongooseSapSyncTenantRepository from '#infrastructure/database/repositories/MongooseSapSyncTenantRepository.js';
@@ -21,6 +26,7 @@ import TenantSapSyncLockAdapter from '#infrastructure/locks/TenantSapSyncLockAda
 import MappingSyncRepository from '#infrastructure/repositories/MappingSyncRepository.js';
 import SapSyncDataAdapter from '#infrastructure/sap/SapSyncDataAdapter.js';
 import S4ContactEnrichmentAdapter from '#infrastructure/sap/customers/S4ContactEnrichmentAdapter.js';
+import WarehouseStockEnrichmentAdapter from '#infrastructure/sap/products/WarehouseStockEnrichmentAdapter.js';
 import sapSyncAdminAdapter from '#infrastructure/scheduler/SapSyncAdminAdapter.js';
 import SapDiscountClient from '#infrastructure/external-services/SapDiscountClient.js';
 import TenantLineItemPriceConfigRepository from '#infrastructure/repositories/TenantLineItemPriceConfigRepository.js';
@@ -60,6 +66,12 @@ export function buildSyncSapConfigToHubspot() {
     logger,
   });
 
+  const warehouseStockStrategyFactory = new WarehouseStockStrategyFactory({
+    b1ItemWarehouseStrategy: new B1ItemWarehouseStrategy(),
+    s4PlantStorageLocationStrategy: new S4PlantStorageLocationStrategy(),
+    logger,
+  });
+
   return new SyncSapConfigToHubspot({
     sapDataSource,
     mappingRepository,
@@ -71,7 +83,18 @@ export function buildSyncSapConfigToHubspot() {
     productSyncStrategyFactory,
     sapDiscountClient: new SapDiscountClient(),
     discountConfigRepository: new TenantLineItemPriceConfigRepository(),
-    s4ContactEnricher: new S4ContactEnrichmentAdapter({ logger }),
+    s4ContactEnricher: assertPort(
+      new S4ContactEnrichmentAdapter({ logger }),
+      SapRecordEnricherPort
+    ),
+    warehouseStockEnricher: assertPort(
+      new WarehouseStockEnrichmentAdapter({
+        strategyFactory: warehouseStockStrategyFactory,
+        configRepository: new WarehouseStockConfigRepository(),
+        logger,
+      }),
+      SapRecordEnricherPort
+    ),
   });
 }
 

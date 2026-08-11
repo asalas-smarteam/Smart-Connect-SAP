@@ -35,6 +35,31 @@ describe('MappingSyncRepository', () => {
     expect(result[0]).not.toHaveProperty('save');
   });
 
+  it('does not seed product default mappings for S/4 tenants (DB-only for this flavor)', async () => {
+    const FieldMapping = {
+      findOne: jest.fn().mockResolvedValue(null),
+      create: jest.fn(),
+      updateOne: jest.fn(),
+    };
+    const Configuration = {
+      findOne: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue({ key: 'sapFlavor', value: 'S4' }),
+      }),
+    };
+    const repository = new MappingSyncRepository();
+
+    const result = await repository.ensureDefaultMappings({
+      tenantContext: { tenantModels: { FieldMapping, Configuration } },
+      hubspotCredentialId: 'cred-1',
+      objectType: 'product',
+      clientConfig: { _id: 'cfg-1' },
+    });
+
+    expect(result).toEqual([]);
+    expect(FieldMapping.findOne).not.toHaveBeenCalled();
+    expect(FieldMapping.create).not.toHaveBeenCalled();
+  });
+
   it('maps SAP records with DTO mappings returned by the repository', async () => {
     const fieldMappingRepository = {
       findByCredentialObjectAndContext: jest.fn().mockResolvedValue([

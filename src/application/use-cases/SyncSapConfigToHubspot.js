@@ -15,6 +15,7 @@ export class SyncSapConfigToHubspot {
     sapDiscountClient = null,
     discountConfigRepository = null,
     s4ContactEnricher = null,
+    warehouseStockEnricher = null,
     dateProvider = () => new Date(),
   }) {
     this.sapDataSource = sapDataSource;
@@ -28,6 +29,7 @@ export class SyncSapConfigToHubspot {
     this.sapDiscountClient = sapDiscountClient;
     this.discountConfigRepository = discountConfigRepository;
     this.s4ContactEnricher = s4ContactEnricher;
+    this.warehouseStockEnricher = warehouseStockEnricher;
     this.dateProvider = dateProvider;
   }
 
@@ -147,6 +149,18 @@ export class SyncSapConfigToHubspot {
       // association step (S/4 only; a no-op otherwise).
       if (this.s4ContactEnricher) {
         await this.s4ContactEnricher.enrich({
+          mappedRecords: mappedRecordsWithRawSap,
+          objectType,
+          tenantModels: tenantContext?.tenantModels,
+        });
+      }
+
+      // Attaches each product's resolved warehouse-stock HubSpot properties
+      // (a no-op for non-product syncs). Runs after mapRecords because it
+      // needs rawSapData, and before sendMappedRecords so product.handler.js
+      // finds it already resolved.
+      if (this.warehouseStockEnricher) {
+        await this.warehouseStockEnricher.enrich({
           mappedRecords: mappedRecordsWithRawSap,
           objectType,
           tenantModels: tenantContext?.tenantModels,

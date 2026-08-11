@@ -90,11 +90,11 @@ const DEFAULT_S4_COMPANY_MAPPINGS = [
   { sourceField: 'to_BusinessPartnerAddress.Country', targetField: 'country', sourceContext: 'businessPartner' },
 ];
 
-const DEFAULT_S4_PRODUCT_MAPPINGS = [
-  { sourceField: 'Product', targetField: 'hs_sku', sourceContext: 'product' },
-  { sourceField: 'to_Description.ProductDescription', targetField: 'name', sourceContext: 'product' },
-  { sourceField: 'BaseUnit', targetField: 'unidad_medida', sourceContext: 'product', includeInServiceLayerSelect: true },
-];
+// Unlike company/contact, product has no S/4 code defaults: the field names
+// (Product, to_Description.ProductDescription, BaseUnit...) are validated per
+// tenant against that tenant's own Gateway and inserted directly as
+// FieldMapping documents in the tenant DB. See ensureDefaultProductMappings
+// below, which returns without seeding anything when sapFlavor is S4.
 
 // S/4 contacts are the person-BP (BusinessPartnerCategory '1') reached from a
 // company through to_BusinessPartnerContact. Unlike B1 (ContactEmployees
@@ -258,12 +258,16 @@ export async function ensureDefaultProductMappings({
     return;
   }
 
+  // No code defaults for S/4: product FieldMapping rows are DB-only for this
+  // flavor (see the comment above DEFAULT_S4_PRODUCT_MAPPINGS's removal).
+  if (sapFlavor === SAP_FLAVORS.S4) {
+    return;
+  }
+
   await ensureDefaultMappings({
     FieldMapping,
     clientConfig,
-    mappings: sapFlavor === SAP_FLAVORS.S4
-      ? DEFAULT_S4_PRODUCT_MAPPINGS
-      : DEFAULT_PRODUCT_MAPPINGS,
+    mappings: DEFAULT_PRODUCT_MAPPINGS,
     objectType: 'product',
     editable: false,
   });

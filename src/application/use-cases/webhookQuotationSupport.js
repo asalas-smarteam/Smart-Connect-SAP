@@ -7,13 +7,17 @@ export function createDocumentAuditTrail(payload, documentKey) {
     payload_Hubspot: payload,
     payload_SAP: {
       businessPartner: null,
+      businessPartnerUpdate: null,
       contactEmployee: null,
+      contactEmployeeUpdate: null,
       [documentKey]: null,
     },
     response_hubspot: null,
     response_SAP: {
       businessPartner: null,
+      businessPartnerUpdate: null,
       contactEmployee: null,
+      contactEmployeeUpdate: null,
       [documentKey]: null,
     },
   };
@@ -123,6 +127,9 @@ export async function resolveBusinessPartnerForDocument({
   const { mappings, sapConfig, hubspotCredentials } = context;
   const mappedCompany = mapHubspotToSapFields(company || {}, mappings.companyMappings);
   const mappedContact = mapHubspotToSapFields(contact || {}, mappings.contactBusinessPartnerMappings);
+  // Resolved once per event (not a resolver-per-item like the others below) so
+  // findOrCreateBusinessPartner/addContactEmployeeIfNeeded don't each trigger their own read.
+  const upsertConfig = await runtimeRepository.resolveUpsertDataSap(context.tenantModels);
 
   const businessPartnerResult = await sapOrderAdapter.findOrCreateBusinessPartner({
     sapConfig,
@@ -137,10 +144,13 @@ export async function resolveBusinessPartnerForDocument({
     resolveDefaultSeries: (models) => runtimeRepository.resolveDefaultSeries(models),
     resolveDefaultFindSAP: (models) => runtimeRepository.resolveDefaultFindSAP(models),
     resolveGroupCodeDefaults: (models) => runtimeRepository.resolveGroupCodeDefaults(models),
+    upsertConfig,
   });
 
   auditTrail.payload_SAP.businessPartner = businessPartnerResult.requestPayload;
   auditTrail.response_SAP.businessPartner = businessPartnerResult.responsePayload;
+  auditTrail.payload_SAP.businessPartnerUpdate = businessPartnerResult.updateResult?.requestPayload ?? null;
+  auditTrail.response_SAP.businessPartnerUpdate = businessPartnerResult.updateResult?.responsePayload ?? null;
 
   const cardCode = businessPartnerResult.cardCode;
   const syncPlan = resolveBusinessPartnerSyncPlan({
@@ -191,6 +201,7 @@ export async function resolveBusinessPartnerForDocument({
       businessPartner: businessPartnerResult.businessPartner,
       contact,
       contactEmployeeMappings: mappings.contactEmployeeMappings,
+      upsertConfig,
     });
 
     if (contactEmployeeResult.internalCode) {
@@ -207,6 +218,8 @@ export async function resolveBusinessPartnerForDocument({
 
   auditTrail.payload_SAP.contactEmployee = contactEmployeeResult.requestPayload;
   auditTrail.response_SAP.contactEmployee = contactEmployeeResult.responsePayload;
+  auditTrail.payload_SAP.contactEmployeeUpdate = contactEmployeeResult.updateResult?.requestPayload ?? null;
+  auditTrail.response_SAP.contactEmployeeUpdate = contactEmployeeResult.updateResult?.responsePayload ?? null;
 
   return {
     cardCode,
