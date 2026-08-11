@@ -71,13 +71,43 @@ Sin que ningún tenant que no configure nada cambie de conducta.
 | Direcciones SAP→HubSpot | No se implementan. Config nueva `requireAddress` con `{ required: false }` | Decisión del usuario por tiempo. El destino real (custom object de HubSpot) es un spec aparte |
 | Ubicación de `requireAddress` | Clave propia, **no** dentro de `businessPartnerCreation` | Esa clave está definida en el spec hermano como HubSpot→SAP únicamente |
 
-## Riesgo residual: la asociación contacto→contacto
+## La asociación contacto→contacto: verificado en vivo
 
-Las dos funciones del cliente mandan siempre cuerpo `[]`, es decir asociación **default** sin tipo explícito (`hubspotClient.js:361-374` y `:394-404`). Para company→contact eso funciona porque el tipo default es el correcto. Para contacto→contacto HubSpot puede exigir un tipo **etiquetado** con `associationCategory` + `associationTypeId`.
+**Verificado el 2026-08-11 contra el portal real del cliente.** `GET /crm/v4/objects/contact/{id}/associations/contact?limit=100` devolvió asociaciones existentes con:
 
-El usuario confirmó desde la interfaz que a un contacto se le pueden agregar contactos asociados, así que se diseña con el endpoint default. Pero **la primera tarea del plan de implementación debe ser una verificación en vivo** contra el portal real: asociar dos contactos de prueba con `PUT /crm/v4/objects/contact/{id}/associations/contact/{id2}` y cuerpo `[]`, y confirmar que responde 2xx y que la asociación se ve en la interfaz.
+```json
+{
+  "category": "HUBSPOT_DEFINED",
+  "typeId": 449,
+  "label": null
+}
+```
 
-Si falla, el camino alterno está identificado: una función nueva en `hubspotClient.js` que mande `[{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: <id> }]`, con el `associationTypeId` obtenido de `GET /crm/v4/associations/contact/contact/labels`. Eso agrega una tarea, no rediseña nada: el resto del spec no depende de cuál de las dos variantes se use.
+Tres conclusiones que quitan la mayor parte del riesgo que este spec tenía:
+
+1. El par contacto↔contacto **existe** en el portal y HubSpot lo expone por la API v4.
+2. `label: null` con `category: HUBSPOT_DEFINED` es el tipo **sin etiqueta**, que es exactamente el que crean los endpoints `associate/default`. **No hace falta mandar `associationTypeId`**, y por tanto no hace falta ninguna función nueva en `hubspotClient.js` para el caso normal.
+3. La **lectura** de asociaciones contacto→contacto funciona, lo cual importa si alguna vez hay que reconciliar en vez de solo crear.
+
+### Lo que queda abierto: el cuerpo `[]` del PUT por par
+
+Cuidado con una diferencia de ruta que este spec **no** puede dar por resuelta. HubSpot tiene dos endpoints distintos para crear una asociación individual:
+
+| | Ruta | Cuerpo |
+|---|---|---|
+| Default (sin tipo) | `PUT /crm/v4/objects/{from}/{id}/associations/**default**/{to}/{id2}` | ninguno |
+| Tipada | `PUT /crm/v4/objects/{from}/{id}/associations/{to}/{id2}` | `[{ associationCategory, associationTypeId }]` |
+
+`associateObjects` (`hubspotClient.js:394-404`) usa **la tipada con cuerpo `[]`** — es decir, el endpoint que espera tipos, con la lista de tipos vacía. No es el endpoint default. Y las asociaciones fallidas **se tragan y solo se loguean** (`associationService.js:176-184`), así que un fallo ahí sería invisible.
+
+Esto **no es un problema nuevo de este spec**: afecta igual a las asociaciones company↔contact que ya existen. Y hay un detalle que lo hace plausible: `SyncCompanyContactsInBatches` usa `batchAssociateDefault` como camino principal y el PUT por par **solo como fallback** (`:876-880` vs `:900`), mientras que el camino secuencial de `HandleHubspotAssociations` usa el PUT por par como principal. Si los tenants en producción corren con `hubspotBatchSize > 1`, el PUT por par casi nunca se ejecuta, y podría estar roto desde siempre sin que nadie lo note.
+
+**Verificación pendiente, dos peticiones en Postman:** el PUT tipado con `[]` y el PUT `/associations/default/` sin cuerpo, comparando el código HTTP de cada uno.
+
+- Si las dos devuelven 2xx: no hay nada que arreglar; `associateObjects` se usa tal cual con `('contact', 'contact')`.
+- Si la tipada con `[]` falla y la default funciona: **hay que corregir `associateObjects` para todos los tipos de objeto**, no solo para el caso nuevo. Eso es una tarea de una línea en el cliente, pero es un arreglo de un bug latente en funcionalidad existente y debe registrarse como tal, no colarse dentro de este spec.
+
+El resto del spec no depende de cuál sea el resultado.
 
 ## Alternativas descartadas
 
