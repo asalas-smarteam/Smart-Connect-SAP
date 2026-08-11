@@ -1,5 +1,16 @@
 import { toNonEmptyString } from '#shared/utils/string.utils.js';
 
+// El workflow de HubSpot puede mandar una colección como array o, por descuido
+// de configuración, como objeto suelto. Envolverlo evita una clase entera de
+// errores silenciosos.
+function toObjectArray(value) {
+  if (Array.isArray(value)) {
+    return value.filter((item) => item && typeof item === 'object');
+  }
+
+  return value && typeof value === 'object' ? [value] : [];
+}
+
 export function resolveEventPayload(event) {
   const payload = event?.payload || {};
   return {
@@ -10,6 +21,12 @@ export function resolveEventPayload(event) {
     lineItems: Array.isArray(payload?.line_items)
       ? payload.line_items
       : (Array.isArray(payload?.data?.line_items) ? payload.data.line_items : []),
+    // Contactos que se convierten en ContactEmployees de SAP. Solo se usa
+    // cuando el tenant configura contactEmployeeSource: 'payloadArray'.
+    contactEmployees: toObjectArray(payload?.contactEmployees ?? payload?.data?.contactEmployees),
+    // Direcciones que se convierten en BPAddresses de SAP. La llave es
+    // singular porque así la manda el workflow de HubSpot.
+    bpAddress: toObjectArray(payload?.bpAddress ?? payload?.data?.bpAddress),
   };
 }
 

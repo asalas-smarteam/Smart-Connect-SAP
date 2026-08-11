@@ -207,6 +207,8 @@ function setupMappings({ ordersQuotationsMappings = [], lineMappings = [] } = {}
       { sourceField: 'Name', targetField: 'firstname' },
       { sourceField: 'E_Mail', targetField: 'email' },
     ])
+    // addressMappings (bpAddress) — not exercised by this suite's assertions.
+    .mockResolvedValueOnce([])
     .mockResolvedValueOnce([
       { sourceField: 'ItemCode', targetField: 'hs_sku' },
       { sourceField: 'Quantity', targetField: 'quantity' },

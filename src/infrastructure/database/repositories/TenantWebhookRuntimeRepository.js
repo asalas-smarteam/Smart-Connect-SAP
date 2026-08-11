@@ -4,9 +4,15 @@ import { getUpsertDataSapConfig } from '#infrastructure/config/upsertDataSap.con
 import { resolvePriceListFromConfigValue } from '#domain/prices/price-list-config.service.js';
 import { PermanentWebhookError } from '#shared/errors/index.js';
 import { normalizePositiveInteger, toNonEmptyString } from '#shared/utils/string.utils.js';
+import BusinessPartnerCreationConfigRepository from '#infrastructure/config/BusinessPartnerCreationConfigRepository.js';
+import {
+  BP_ADDRESS_OBJECT_TYPE,
+  BP_ADDRESS_SOURCE_CONTEXT,
+} from '#domain/business-partners/business-partner-creation.constants.js';
 
 // Key intencionalmente escrita "groupCodeDefauls" (sin la "t") — así existe en los tenants.
 const GROUP_CODE_DEFAULTS_CONFIG_KEY = 'groupCodeDefauls';
+const businessPartnerCreationConfigRepository = new BusinessPartnerCreationConfigRepository();
 
 export class TenantWebhookRuntimeRepository {
   async resolveRuntimeContext({ tenantModels, payload, tenantId, tenantKey, portalId }) {
@@ -34,6 +40,7 @@ export class TenantWebhookRuntimeRepository {
       companyMappings,
       contactBusinessPartnerMappings,
       contactEmployeeMappings,
+      addressMappings,
       productMappings,
       productOrdersQuotationsMappings,
       dealMappings,
@@ -47,6 +54,17 @@ export class TenantWebhookRuntimeRepository {
       mappingService.getMappingsByObjectType(hubspotCredentialId, 'company', 'businessPartner', tenantModels),
       mappingService.getMappingsByObjectType(hubspotCredentialId, 'contact', 'businessPartner', tenantModels),
       mappingService.getMappingsByObjectType(hubspotCredentialId, 'contact', 'contactEmployee', tenantModels),
+      // Direcciones de BPAddresses. El fallback a businessPartner queda
+      // APAGADO a propósito: sin eso, un tenant sin filas bpAddress recibiría
+      // las de contexto businessPartner y filtraría campos de cabecera
+      // (CardName, CardCode, DocEntry...) dentro de cada BPAddresses[].
+      mappingService.getMappingsByObjectType(
+        hubspotCredentialId,
+        BP_ADDRESS_OBJECT_TYPE,
+        BP_ADDRESS_SOURCE_CONTEXT,
+        tenantModels,
+        { allowBusinessPartnerFallback: false }
+      ),
       mappingService.getMappingsByObjectType(hubspotCredentialId, 'product', 'product', tenantModels),
       // HubSpot -> SAP line fields. The fallback stays off so a tenant without this context
       // gets [] and its DocumentLines keep the exact shape they have today.
@@ -102,6 +120,7 @@ export class TenantWebhookRuntimeRepository {
         companyMappings,
         contactBusinessPartnerMappings,
         contactEmployeeMappings,
+        addressMappings,
         productMappings,
         productOrdersQuotationsMappings,
         dealMappings,
@@ -216,6 +235,14 @@ export class TenantWebhookRuntimeRepository {
   // addContactEmployeeIfNeeded without an extra Mongo read.
   async resolveUpsertDataSap(tenantModels) {
     return getUpsertDataSapConfig({ tenantModels });
+  }
+
+  async resolveBusinessPartnerCreationConfig(tenantModels) {
+    return businessPartnerCreationConfigRepository.getBusinessPartnerCreationConfig({ tenantModels });
+  }
+
+  async resolvePropertiesFlagsConfig(tenantModels) {
+    return businessPartnerCreationConfigRepository.getPropertiesFlagsConfig({ tenantModels });
   }
 }
 
