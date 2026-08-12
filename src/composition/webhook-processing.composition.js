@@ -5,6 +5,11 @@ import ProcessHubspotUpdateQuotation from '#application/use-cases/ProcessHubspot
 import ProcessHubspotWebhookEvent from '#application/use-cases/ProcessHubspotWebhookEvent.js';
 import ProcessWebhookDealEventBatch from '#application/use-cases/ProcessWebhookDealEventBatch.js';
 import { resolveEventPayload } from '#application/services/webhook-payload.service.js';
+import { assertPort } from '#application/ports/port-validator.js';
+import { BusinessPartnerPayloadStrategyPort } from '#application/ports/sap/business-partner-payload-strategy.port.js';
+import BusinessPartnerPayloadStrategyFactory from '#domain/business-partners/business-partner-payload.factory.js';
+import LegacyWhitelistBusinessPartnerPayloadStrategy from '#domain/business-partners/strategies/legacy-whitelist-bp-payload.strategy.js';
+import FullMappedBusinessPartnerPayloadStrategy from '#domain/business-partners/strategies/full-mapped-bp-payload.strategy.js';
 import MongooseSapDocumentLinkRepository from '#infrastructure/database/repositories/MongooseSapDocumentLinkRepository.js';
 import MongooseWebhookEventProgressRepository from '#infrastructure/database/repositories/MongooseWebhookEventProgressRepository.js';
 import MongooseWebhookReferenceRepository from '#infrastructure/database/repositories/MongooseWebhookReferenceRepository.js';
@@ -25,6 +30,26 @@ import {
   buildWebhookSyncErrorEntry,
 } from '#infrastructure/sync/syncLog.service.js';
 
+// Real, port-validated factory used by composition. The three use-cases each carry an
+// inline default (see createDefaultBusinessPartnerPayloadStrategyFactory in their own
+// files) that builds the same pair of strategies WITHOUT port validation, purely so those
+// classes still work if constructed directly (e.g. in tests) without this composition
+// wiring. Composition always supplies this explicit instance instead, which takes
+// precedence over that default.
+export function buildBusinessPartnerPayloadStrategyFactory() {
+  return new BusinessPartnerPayloadStrategyFactory({
+    legacyStrategy: assertPort(
+      new LegacyWhitelistBusinessPartnerPayloadStrategy(),
+      BusinessPartnerPayloadStrategyPort
+    ),
+    fullMappedStrategy: assertPort(
+      new FullMappedBusinessPartnerPayloadStrategy(),
+      BusinessPartnerPayloadStrategyPort
+    ),
+    logger,
+  });
+}
+
 export function buildProcessHubspotWebhookEventUseCase() {
   return new ProcessHubspotWebhookEvent({
     runtimeRepository: new TenantWebhookRuntimeRepository(),
@@ -32,6 +57,7 @@ export function buildProcessHubspotWebhookEventUseCase() {
     hubspotWebhookAdapter: new HubspotWebhookAdapter(),
     webhookReferenceRepository: new MongooseWebhookReferenceRepository(),
     webhookEventProgressRepository: new MongooseWebhookEventProgressRepository(),
+    businessPartnerPayloadStrategyFactory: buildBusinessPartnerPayloadStrategyFactory(),
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
     buildWebhookSapAudit,
@@ -47,6 +73,7 @@ export function buildProcessHubspotCreateQuotationUseCase() {
     hubspotWebhookAdapter: new HubspotWebhookAdapter(),
     webhookReferenceRepository: new MongooseWebhookReferenceRepository(),
     sapDocumentLinkRepository: new MongooseSapDocumentLinkRepository(),
+    businessPartnerPayloadStrategyFactory: buildBusinessPartnerPayloadStrategyFactory(),
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
     buildWebhookSapAudit,
@@ -87,6 +114,7 @@ export function buildProcessHubspotInventoryTransferRequestUseCase() {
     hubspotWebhookAdapter: new HubspotWebhookAdapter(),
     webhookReferenceRepository: new MongooseWebhookReferenceRepository(),
     sapDocumentLinkRepository: new MongooseSapDocumentLinkRepository(),
+    businessPartnerPayloadStrategyFactory: buildBusinessPartnerPayloadStrategyFactory(),
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
     buildWebhookSapAudit,
