@@ -324,6 +324,53 @@ describe('ProcessHubspotCreateQuotation', () => {
       expect.objectContaining({ contacts: [event.payload.contact] })
     );
     expect(deps.sapOrderAdapter.addContactEmployeeIfNeeded).not.toHaveBeenCalled();
+    // Task 11: the write-back must actually receive the internalCodes array that
+    // addContactEmployeesIfNeeded resolved with, not just have the mock shape available.
+    expect(deps.hubspotWebhookAdapter.updateContactEmployeeCodes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        token: 'token',
+        internalCodes: [{ contact: { hs_object_id: 'contact-1' }, internalCode: 'IC1' }],
+      })
+    );
+  });
+
+  it('reuses the already-resolved HubSpot token instead of calling getAccessToken again to write back ContactEmployee codes', async () => {
+    const deps = buildDeps();
+    deps.sapOrderAdapter.findOrCreateBusinessPartner.mockResolvedValue({
+      cardCode: 'CL00129',
+      created: true,
+      matchedBy: null,
+      businessPartner: { CardCode: 'CL00129' },
+      requestPayload: null,
+      responsePayload: null,
+    });
+    deps.sapOrderAdapter.addContactEmployeesIfNeeded.mockResolvedValue({
+      created: true,
+      internalCodes: [{ contact: { hs_object_id: 'contact-1' }, internalCode: 'IC1' }],
+      results: [],
+      requestPayload: [],
+      responsePayload: [],
+      updateResults: [],
+    });
+    const useCase = new ProcessHubspotCreateQuotation(deps);
+
+    const event = {
+      ...baseEvent,
+      payload: {
+        ...baseEvent.payload,
+        contact: { hs_object_id: 'contact-1', firstname: 'Juan' },
+      },
+    };
+
+    await useCase.execute({ event, tenantModels });
+
+    // businessPartnerResult.created === true makes shouldSyncBusinessPartnerIds true, so
+    // getAccessToken is already called once for updateBusinessPartnerIds; the write-back
+    // block must reuse that resolved token instead of calling getAccessToken a second time.
+    expect(deps.hubspotWebhookAdapter.getAccessToken).toHaveBeenCalledTimes(1);
+    expect(deps.hubspotWebhookAdapter.updateContactEmployeeCodes).toHaveBeenCalledWith(
+      expect.objectContaining({ token: 'token' })
+    );
   });
 
   it('skips the ContactEmployee PATCH when the fullMapped strategy already included them in the create payload', async () => {

@@ -120,6 +120,9 @@ export function buildWebhookSapAudit(auditTrail) {
     const payloadSap = serializeAuditObject(auditTrail?.payload_SAP ?? null);
     const responseSap = serializeAuditObject(auditTrail?.response_SAP ?? null);
     const responseHubspot = serializeLogValue(auditTrail?.response_hubspot ?? null);
+    const responseHubspotContactEmployees = serializeLogValue(
+      auditTrail?.response_hubspot_contactEmployees ?? null
+    );
 
     if (isEmptyAuditValue(payloadSap) && isEmptyAuditValue(responseSap) && isEmptyAuditValue(responseHubspot)) {
       return null;
@@ -129,6 +132,7 @@ export function buildWebhookSapAudit(auditTrail) {
       payloadSap,
       responseSap,
       responseHubspot,
+      responseHubspotContactEmployees,
       capturedAt: new Date().toISOString(),
     };
   } catch {

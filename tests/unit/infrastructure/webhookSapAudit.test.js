@@ -47,9 +47,38 @@ describe('buildWebhookSapAudit', () => {
         order: { DocEntry: 10, DocNum: 20 },
       },
       responseHubspot: { deal: { ok: true } },
+      responseHubspotContactEmployees: null,
       capturedAt: expect.any(String),
     });
     expect(() => new Date(result.capturedAt).toISOString()).not.toThrow();
+  });
+
+  it('captures the ContactEmployee write-back response under responseHubspotContactEmployees', () => {
+    const auditTrail = {
+      payload_Hubspot: { deal: { hs_object_id: '1' } },
+      payload_SAP: {
+        businessPartner: { CardCode: 'CL001' },
+        contactEmployee: null,
+        order: null,
+      },
+      response_hubspot: { deal: { ok: true } },
+      response_hubspot_contactEmployees: [
+        { id: '10' },
+        { id: '20' },
+      ],
+      response_SAP: {
+        businessPartner: { CardCode: 'CL001' },
+        contactEmployee: null,
+        order: null,
+      },
+    };
+
+    const result = buildWebhookSapAudit(auditTrail);
+
+    expect(result.responseHubspotContactEmployees).toEqual([
+      { id: '10' },
+      { id: '20' },
+    ]);
   });
 
   it('omits keys that do not apply to this event type instead of inventing them', () => {
