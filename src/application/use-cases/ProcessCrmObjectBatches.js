@@ -668,10 +668,7 @@ export class ProcessCrmObjectBatches {
         tenantModels,
         getToken,
       });
-      return;
-    }
-
-    if (objectType === 'company') {
+    } else if (objectType === 'company') {
       await this.associateWithRegistry({
         processed,
         targetObjectType: 'contact',
@@ -682,19 +679,26 @@ export class ProcessCrmObjectBatches {
         tenantModels,
         getToken,
       });
+    } else {
+      return;
+    }
 
-      if (this.syncCompanyContactsInBatches) {
-        const { contactErrors } = await this.syncCompanyContactsInBatches.execute({
-          companies: processed,
-          clientConfig,
-          tenantModels,
-          getToken,
-          syncLogId,
-        });
+    // Los ContactEmployees de un BusinessPartner van a HubSpot como contactos
+    // asociados al BP, sea el BP una company (jurídico) o un contact (persona).
+    // Antes esto vivía dentro de la rama de company y la de contact retornaba
+    // temprano, así que un BP persona nunca sincronizaba sus hijos.
+    if (this.syncCompanyContactsInBatches) {
+      const { contactErrors } = await this.syncCompanyContactsInBatches.execute({
+        companies: processed,
+        clientConfig,
+        tenantModels,
+        getToken,
+        syncLogId,
+        parentObjectType: objectType,
+      });
 
-        if (Array.isArray(contactErrors) && contactErrors.length > 0) {
-          stats.errors.push(...contactErrors);
-        }
+      if (Array.isArray(contactErrors) && contactErrors.length > 0) {
+        stats.errors.push(...contactErrors);
       }
     }
   }

@@ -502,7 +502,13 @@ describe('ProcessCrmObjectBatches', () => {
     expect(useCase.crmBatchClient.batchAssociateDefault).toHaveBeenCalledWith(
       'token-1', 'contact', 'company', [{ fromId: 'hs-0', toId: 'hs-co-1' }]
     );
-    expect(useCase.syncCompanyContactsInBatches.execute).not.toHaveBeenCalled();
+    // A BusinessPartner shaped as a HubSpot contact still owns ContactEmployee
+    // children (a person BP can have dependents). Before this task the
+    // contact branch returned early and never called this at all, so a
+    // contact-shaped BP's children were silently never synced.
+    expect(useCase.syncCompanyContactsInBatches.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ parentObjectType: 'contact' })
+    );
   });
 
   it('retries a 429 in the per-pair association fallback', async () => {

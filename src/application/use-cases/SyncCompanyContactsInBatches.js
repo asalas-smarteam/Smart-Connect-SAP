@@ -116,7 +116,7 @@ export class SyncCompanyContactsInBatches {
     return entry.sapInternalCode ? [entry.sapInternalCode] : [];
   }
 
-  async execute({ companies, clientConfig, tenantModels, getToken, syncLogId = null }) {
+  async execute({ companies, clientConfig, tenantModels, getToken, syncLogId = null, parentObjectType = 'company' }) {
     const contactErrors = [];
     const clientConfigId = clientConfig?.id ?? clientConfig?._id ?? null;
     const withContacts = (Array.isArray(companies) ? companies : [])
@@ -318,7 +318,7 @@ export class SyncCompanyContactsInBatches {
 
     await this.createContactBatches({ createEntries, hubspotIdByKey, sapIdsByKey, index, fallbackProperty, writableProperties, clientConfig, tenantModels, getToken, contactErrors });
     await this.updateContactBatches({ updateEntries, writableProperties, clientConfig, tenantModels, getToken, contactErrors });
-    await this.associateContactBatches({ entries, hubspotIdByKey, clientConfig, getToken, contactErrors });
+    await this.associateContactBatches({ entries, hubspotIdByKey, clientConfig, getToken, contactErrors, parentObjectType });
 
     return { contactErrors };
   }
@@ -847,7 +847,7 @@ export class SyncCompanyContactsInBatches {
     }
   }
 
-  async associateContactBatches({ entries, hubspotIdByKey, clientConfig, getToken, contactErrors }) {
+  async associateContactBatches({ entries, hubspotIdByKey, clientConfig, getToken, contactErrors, parentObjectType = 'company' }) {
     const pairs = [];
     const seen = new Set();
 
@@ -855,6 +855,20 @@ export class SyncCompanyContactsInBatches {
       const contactHubspotId = entry.key ? hubspotIdByKey.get(entry.key) : entry.hubspotId;
 
       if (!contactHubspotId) {
+        continue;
+      }
+
+      // Guarda de auto-asociación: con un padre contact, un ContactEmployee
+      // puede resolver al MISMO contacto de HubSpot (mismo email). Con un
+      // padre company esa comparación es pura coincidencia numérica entre dos
+      // espacios de ids distintos (company vs contact) y NUNCA debe descartar
+      // una asociación legítima.
+      if (parentObjectType === 'contact' && String(contactHubspotId) === String(entry.company.hubspotId)) {
+        this.logger.warn?.('Se descarta la auto-asociacion de un contacto consigo mismo', {
+          parentObjectType,
+          hubspotId: contactHubspotId,
+          sapContactId: entry.sapInternalCode ?? null,
+        });
         continue;
       }
 
@@ -875,7 +889,7 @@ export class SyncCompanyContactsInBatches {
           const response = await this.retry(() =>
             this.crmBatchClient.batchAssociateDefault(
               token,
-              'company',
+              parentObjectType,
               'contact',
               pairChunk.map(({ fromId, toId }) => ({ fromId, toId }))
             )
@@ -886,7 +900,7 @@ export class SyncCompanyContactsInBatches {
           const { errors } = summarizeBatchResponse(response, pairChunk.length);
           for (const batchError of errors) {
             this.logger.error?.('Batch association partial failure', {
-              fromObjectType: 'company',
+              fromObjectType: parentObjectType,
               toObjectType: 'contact',
               error: batchError,
             });
@@ -897,7 +911,7 @@ export class SyncCompanyContactsInBatches {
             try {
               const token = await getToken();
               await this.retry(() =>
-                this.crmBatchClient.associateObjectsDefault(token, 'company', fromId, 'contact', toId)
+                this.crmBatchClient.associateObjectsDefault(token, parentObjectType, fromId, 'contact', toId)
               );
             } catch (associationError) {
               this.logger.error?.('Company contact sync error:', associationError);
