@@ -59,12 +59,22 @@ async function importCompositionWithMocks({
     buildSendMappedItemsToHubspot: () => ({ execute: jest.fn() }),
   }));
 
-  return import('../../../src/composition/sap-sync.composition.js');
+  const composition = await import('../../../src/composition/sap-sync.composition.js');
+  // El logger real se importa DESPUÉS de la composición y dentro de la misma
+  // ventana de registro de módulos (post-resetModules) para que sea exactamente
+  // la misma instancia que resolvió la composición. Un import estático al tope
+  // del archivo pertenecería a otro registro y rompería el toBe por identidad
+  // de módulo ESM, no por un cableado mal hecho.
+  const { default: realLogger } = await import(
+    '../../../src/infrastructure/logger/logger.adapter.js'
+  );
+
+  return { ...composition, realLogger };
 }
 
 describe('sap-sync composition', () => {
   it('builds the SAP sync use case when all adapters satisfy their ports', async () => {
-    const { buildSyncSapConfigToHubspot } = await importCompositionWithMocks();
+    const { buildSyncSapConfigToHubspot, realLogger } = await importCompositionWithMocks();
 
     const useCase = buildSyncSapConfigToHubspot();
 
@@ -94,7 +104,22 @@ describe('sap-sync composition', () => {
       businessPartnerCreationConfigRepository: expect.objectContaining({
         getPropertiesFlagsConfig: expect.any(Function),
       }),
+      // Tarea 9 (y revisión final): estas dos props se agregaron DESPUÉS de que
+      // se escribió el guard de arriba, así que quedaron sin cubrir — el mismo
+      // hueco que el guard existe para evitar. Ambas defaultean a algo truthy o
+      // a null en el constructor, así que sin aserción propia borrar su
+      // cableado no rompe ningún test.
+      addressSyncConfigRepository: expect.objectContaining({
+        getAddressSyncConfig: expect.any(Function),
+      }),
     }));
+
+    // `logger` NO se puede afirmar con objectContaining({ warn, error }): el
+    // default del constructor es `console`, que también tiene warn y error, así
+    // que ese matcher pasaría con el cableado borrado. Se afirma identidad con
+    // la instancia real de winston, que es la aserción más fuerte y barata.
+    expect(useCase.logger).toBe(realLogger);
+    expect(useCase.logger).not.toBe(console);
   });
 
   it('fails clearly when an adapter misses a required port method', async () => {

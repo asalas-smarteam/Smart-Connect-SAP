@@ -114,6 +114,10 @@ export function buildSyncSapConfigToHubspot() {
       SapRecordEnricherPort
     ),
     addressSyncConfigRepository: new AddressSyncConfigRepository(),
+    // El constructor defaultea `logger` a `console`. Sin esta línea los warnings
+    // de las tareas 6 y 9 (PropertiesN sin flavor B1, ADDRESS_SYNC_NOT_IMPLEMENTED)
+    // salen por stdout crudo en vez del logger winston que revisan los operadores.
+    logger,
   });
 }
 
