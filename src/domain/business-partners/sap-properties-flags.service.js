@@ -102,9 +102,46 @@ export function listSapPropertiesFieldNames(config) {
   return names;
 }
 
+// Los 64 campos PropertiesN no pueden tener filas de FieldMapping propias (son
+// N campos de SAP -> 1 propiedad de HubSpot, y el índice único del modelo es por
+// sourceField), así que sin esto nunca llegarían al $select. Mismo molde que
+// withDynamicDescriptionSelectFields (dynamic-description.service.js:288-315):
+// entradas sintéticas con targetField null, que solo sirven para armar el
+// request a SAP. No contaminan el mapeo porque mapRecords vuelve a consultar los
+// mappings desde Mongo por su cuenta.
+export function withPropertiesFlagsSelectFields(mappings, config, { objectType, sourceContext } = {}) {
+  const baseMappings = Array.isArray(mappings) ? mappings : [];
+  const requiredFields = listSapPropertiesFieldNames(config);
+
+  if (requiredFields.length === 0) {
+    return Array.isArray(mappings) ? mappings : baseMappings;
+  }
+
+  const alreadySelected = new Set(
+    baseMappings
+      .filter((mapping) => mapping?.includeInServiceLayerSelect !== false)
+      .map((mapping) => String(mapping?.sourceField ?? '').trim())
+      .filter(Boolean)
+  );
+
+  const missing = requiredFields
+    .filter((field) => !alreadySelected.has(field))
+    .map((field) => ({
+      sourceField: field,
+      targetField: null,
+      objectType: objectType ?? null,
+      sourceContext: sourceContext ?? null,
+      includeInServiceLayerSelect: true,
+      isActive: true,
+    }));
+
+  return missing.length > 0 ? [...baseMappings, ...missing] : mappings;
+}
+
 export default {
   parseSelectedPropertyNumbers,
   buildSapPropertiesFlags,
   readSapPropertiesFlags,
   listSapPropertiesFieldNames,
+  withPropertiesFlagsSelectFields,
 };
