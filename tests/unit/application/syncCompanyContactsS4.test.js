@@ -10,7 +10,7 @@ function buildHandler({ bypassEmail = true } = {}) {
     create: jest.fn(async ({ item }) => ({ id: `hs-${item.properties.internalcode}` })),
     update: jest.fn(async () => ({})),
   };
-  const associationService = { associateCompanyWithContacts: jest.fn(async () => ({})) };
+  const associationService = { associateObjectsBySapId: jest.fn(async () => ({})) };
   const associationRegistry = { registerBaseObjectMapping: jest.fn(async () => ({})) };
 
   const fieldMappingService = {
@@ -106,8 +106,8 @@ describe('syncCompanyContacts (S/4 path)', () => {
     }));
 
     // Associated to the company using the person's BusinessPartner id as sapId.
-    expect(associationService.associateCompanyWithContacts).toHaveBeenCalledWith(
-      'tok', 'cred-1', 'hs-company-1',
+    expect(associationService.associateObjectsBySapId).toHaveBeenCalledWith(
+      'tok', 'cred-1', 'company', 'hs-company-1', 'contact',
       [{ hubspotId: 'hs-100000', sapId: '100000' }],
       tenantModels
     );
@@ -145,7 +145,7 @@ describe('syncCompanyContacts (S/4 path)', () => {
     });
 
     expect(contactHandler.create).not.toHaveBeenCalled();
-    expect(associationService.associateCompanyWithContacts).not.toHaveBeenCalled();
+    expect(associationService.associateObjectsBySapId).not.toHaveBeenCalled();
   });
 
   it('does nothing when there are no contacts to sync', async () => {
@@ -239,8 +239,8 @@ describe('syncCompanyContacts error reporting', () => {
 
     // The failure of the first contact does not abort the second one.
     expect(contactHandler.create).toHaveBeenCalledTimes(2);
-    expect(associationService.associateCompanyWithContacts).toHaveBeenCalledWith(
-      'tok', 'cred-1', 'hs-company-9',
+    expect(associationService.associateObjectsBySapId).toHaveBeenCalledWith(
+      'tok', 'cred-1', 'company', 'hs-company-9', 'contact',
       [{ hubspotId: 'hs-100001', sapId: '100001' }],
       tenantModels
     );

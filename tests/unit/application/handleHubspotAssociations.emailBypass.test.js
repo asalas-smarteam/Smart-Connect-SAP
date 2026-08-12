@@ -10,7 +10,7 @@ function buildUseCase(overrides = {}) {
       registerBaseObjectMapping: jest.fn().mockResolvedValue(null),
     },
     associationService: {
-      associateCompanyWithContacts: jest.fn().mockResolvedValue(null),
+      associateObjectsBySapId: jest.fn().mockResolvedValue(null),
     },
     fieldMappingService: {
       getMappingsByObjectType: jest.fn().mockResolvedValue([

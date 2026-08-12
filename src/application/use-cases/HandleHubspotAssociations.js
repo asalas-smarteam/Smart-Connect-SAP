@@ -114,8 +114,16 @@ export class HandleHubspotAssociations {
     }
 
     if (objectType === 'contact') {
-      await this.handleContactAssociations({ token, item, clientConfig, tenantModels, hubspotId });
-      return;
+      // Devuelve { contactErrors } para que los fallos de contactEmployee lleguen
+      // al SyncLog, igual que la rama de company.
+      return this.handleContactAssociations({
+        token,
+        item,
+        clientConfig,
+        tenantModels,
+        hubspotId,
+        syncLogId,
+      });
     }
 
     if (objectType === 'company') {
@@ -211,12 +219,16 @@ export class HandleHubspotAssociations {
     return resolved;
   }
 
+  // El padre puede ser una company (BusinessPartner jurídico) o un contact
+  // (BusinessPartner persona). El nombre del método se mantiene por compatibilidad
+  // de imports; parentObjectType es lo que decide el tipo real.
   async syncCompanyContacts({
     token,
     item,
     clientConfig,
     tenantModels,
     companyHubspotId,
+    parentObjectType = 'company',
     syncLogId = null,
   }) {
     const contactErrors = [];
@@ -382,11 +394,25 @@ export class HandleHubspotAssociations {
 
         const contactHubspotId = existingContact?.id ?? createdContact?.id;
 
-        if (contactHubspotId) {
-          await this.associationService.associateCompanyWithContacts(
+        // Guarda de auto-asociación: cuando el padre es un contact, un
+        // ContactEmployee puede resolver al MISMO contacto de HubSpot (mismo
+        // email). Asociar un contacto consigo mismo es basura. Caso imposible
+        // mientras el padre fuera siempre una company.
+        if (contactHubspotId && String(contactHubspotId) === String(companyHubspotId)) {
+          this.logger.warn?.('Se descarta la auto-asociacion de un contacto consigo mismo', {
+            parentObjectType,
+            hubspotId: contactHubspotId,
+            sapInternalCode,
+          });
+        } else if (contactHubspotId) {
+          // associateObjectsBySapId ya recibe fromObjectType como parámetro, así
+          // que sirve para los dos tipos de padre sin envoltorio nuevo.
+          await this.associationService.associateObjectsBySapId(
             token,
             clientConfig.hubspotCredentialId,
+            parentObjectType,
             companyHubspotId,
+            'contact',
             [{ hubspotId: contactHubspotId, sapId: sapInternalCode }],
             tenantModels
           );
@@ -406,7 +432,7 @@ export class HandleHubspotAssociations {
     return { contactErrors };
   }
 
-  async handleContactAssociations({ token, item, clientConfig, tenantModels, hubspotId }) {
+  async handleContactAssociations({ token, item, clientConfig, tenantModels, hubspotId, syncLogId = null }) {
     const associationsRoot = item?.properties?.associations || {};
     let associatedCompanies = associationsRoot.companies || [];
 
@@ -432,6 +458,19 @@ export class HandleHubspotAssociations {
       companyAssociations,
       tenantModels
     );
+
+    // Simétrico con handleCompanyAssociations: un BusinessPartner persona
+    // también tiene ContactEmployees, y van como contactos asociados a este
+    // contacto.
+    return this.syncCompanyContacts({
+      token,
+      item,
+      clientConfig,
+      tenantModels,
+      companyHubspotId: hubspotId,
+      parentObjectType: 'contact',
+      syncLogId,
+    });
   }
 
   async handleCompanyAssociations({ token, item, clientConfig, tenantModels, hubspotId, syncLogId = null }) {
