@@ -30,7 +30,15 @@ Si falta alguno, detenete y ejecutá primero el plan hermano. **Y volvé a leer 
 
 ## Global Constraints
 
-- **Cero regresión.** Con `propertiesFlags` ausente y sin pasar `parentObjectType`, la URL del `$select`, las propiedades enviadas y los pares de asociación deben ser idénticos a los de hoy. **Única excepción deliberada:** la Tarea 1 cambia la URL de las asociaciones de a una (ver su justificación).
+- **Cero regresión** en lo que es configurable: con `propertiesFlags` ausente, las propiedades enviadas son idénticas a las de hoy.
+- **Excepciones deliberadas al cero-regresión** (tres, no una — corregido tras la revisión final de la rama; la redacción original decía que la Tarea 1 era la única y no era exacta). Las tres cambian el comportamiento de **todo tenant que ya sincroniza registros de `objectType: contact` desde SAP**, sin ninguna bandera de config que las compuerte:
+  1. **Tarea 1** cambia la URL de las asociaciones de a una (ver su justificación).
+  2. **Tareas 2+4** inyectan `ContactEmployees` en el `$select` de la sincronización de contactos de forma **incondicional**. La URL de SAP para un sync de contactos deja de ser la de hoy.
+  3. **Tareas 7+8** ejecutan la sincronización de hijos para BPs contact-shaped de forma **incondicional**. En cuanto esta rama entre a producción, en el siguiente sync de contactos, cualquier tenant que ya tenga mappings de `contactEmployee` configurados —es decir, cualquier tenant que ya sincronice companies, porque esos mappings son compartidos— **empezará a crear/actualizar contactos de HubSpot por cada ContactEmployee de SAP y a asociarlos**. No hay bandera que lo apague.
+
+  Esto es una decisión de diseño intencional, no un descuido: el spec razona por qué no se agrega compuerta (la maquinaria de hijos ya es idempotente, `internalcode` aborta en vez de degradar si no es escribible, y una bandera nueva sería una config que nadie prendería). Pero el resumen de "qué cambia" de este plan tiene que decirlo explícitamente, porque el volumen de objetos creados en HubSpot puede ser grande y no es reversible con un flag.
+
+- **Recomendación de rollout.** Antes de habilitar esto por primera vez en el sync de contactos de un tenant de producción después de que esta rama caiga: corré un sync de `objectType: contact` en un **tenant de prueba** primero y **contá los contactos de HubSpot recién creados**. Compará ese número contra los `ContactEmployees` que esperabas. Recién ahí pasá a producción.
 - **Solo SAP B1 (`SERVICE_LAYER`)** para `Properties1..64`. El camino de contactos de S/4 (`_s4Contacts`, `S4ContactEnrichmentAdapter`) no se toca.
 - **Alias de import obligatorios** (`package.json` → `imports`): `#application/*`, `#domain/*`, `#infrastructure/*`, `#shared/*`, `#composition/*`. Dentro de `src/application/ports/` se usan rutas relativas (`../port-validator.js`).
 - **Los tests importan con rutas relativas**, no con alias: `import X from '../../../src/domain/...'`.
@@ -1103,6 +1111,8 @@ const businessPartnerCreationConfigRepository = new BusinessPartnerCreationConfi
 
 > `businessPartnerCreationConfigRepository` se pasa **también** suelto porque la Tarea 4 lo usa para la inyección al `$select`. Es la misma instancia: una sola lectura de config por corrida.
 
+> **Sobre la compuerta de flavor de `propertiesFlags`** (agregada durante la ejecución, dentro de `getPropertiesFlagsConfig`, para que un tenant que no sea B1 resuelva la config a "apagado" en el origen en vez de depender de la comprobación de flavor del enricher): como vive en el **repositorio** y no en el enricher, protege silenciosamente a un consumidor **aparte** del que motivó el cambio — el camino de creación HubSpot→SAP por webhook (`TenantWebhookRuntimeRepository.resolvePropertiesFlagsConfig` → `ProcessHubspotWebhookEvent.js` / `webhookQuotationSupport.js`), que con esa compuerta ya nunca puede escribir campos `PropertiesN` en un payload de creación de BusinessPartner de S/4, algo que `A_BusinessPartner` no soporta. Es la corrección de un bug latente como efecto secundario, no una regresión, pero vale documentarlo.
+
 - [ ] **Step 5: Corre la suite completa**
 
 Run: `npm test`
@@ -1282,8 +1292,13 @@ Reemplaza el bloque de las líneas 383-393 por:
         // Guarda de auto-asociación: cuando el padre es un contact, un
         // ContactEmployee puede resolver al MISMO contacto de HubSpot (mismo
         // email). Asociar un contacto consigo mismo es basura. Caso imposible
-        // mientras el padre fuera siempre una company.
-        if (contactHubspotId && String(contactHubspotId) === String(companyHubspotId)) {
+        // mientras el padre fuera siempre una company. La comparación de ids
+        // SOLO tiene sentido cuando ambos lados viven en el mismo espacio de
+        // ids (contact<->contact): con un padre company, un id de company que
+        // coincida numéricamente con un id de contact es pura coincidencia
+        // (son tipos de objeto distintos en HubSpot) y NO debe descartar la
+        // asociación.
+        if (parentObjectType === 'contact' && contactHubspotId && String(contactHubspotId) === String(companyHubspotId)) {
           this.logger.warn?.('Se descarta la auto-asociacion de un contacto consigo mismo', {
             parentObjectType,
             hubspotId: contactHubspotId,
@@ -1303,6 +1318,17 @@ Reemplaza el bloque de las líneas 383-393 por:
           );
         }
 ```
+
+> **Por qué el prefijo `parentObjectType === 'contact'` es obligatorio** (corregido
+> respecto a la versión original de este plan, que lo omitía y fue detectado como bug
+> Critical durante la ejecución): el id de HubSpot de una company y el id de HubSpot de
+> un contact viven en **espacios de ids de tipos de objeto distintos**, así que pueden
+> coincidir numéricamente por pura casualidad. Sin la compuerta, esa coincidencia
+> descartaría en silencio una asociación company→contact perfectamente legítima que ya
+> funcionaba antes de esta tarea. La comparación de ids sólo significa "es el mismo
+> objeto" cuando ambos lados son del mismo tipo, es decir contact↔contact. El código
+> que se envió lleva la compuerta; ésta es la condición real, copiada verbatim de
+> `src/application/use-cases/HandleHubspotAssociations.js`.
 
 - [ ] **Step 5: Llama a `syncCompanyContacts` desde el camino de contacto**
 
@@ -1495,8 +1521,11 @@ En `src/application/use-cases/SyncCompanyContactsInBatches.js`, reemplaza la fir
       }
 
       // Guarda de auto-asociación: con un padre contact, un ContactEmployee
-      // puede resolver al MISMO contacto de HubSpot. Imposible con padre company.
-      if (String(contactHubspotId) === String(entry.company.hubspotId)) {
+      // puede resolver al MISMO contacto de HubSpot (mismo email). Con un
+      // padre company esa comparación es pura coincidencia numérica entre dos
+      // espacios de ids distintos (company vs contact) y NUNCA debe descartar
+      // una asociación legítima.
+      if (parentObjectType === 'contact' && String(contactHubspotId) === String(entry.company.hubspotId)) {
         this.logger.warn?.('Se descarta la auto-asociacion de un contacto consigo mismo', {
           parentObjectType,
           hubspotId: contactHubspotId,
@@ -1513,6 +1542,18 @@ En `src/application/use-cases/SyncCompanyContactsInBatches.js`, reemplaza la fir
       pairs.push({ fromId: entry.company.hubspotId, toId: contactHubspotId, entry });
     }
 ```
+
+> **Por qué el prefijo `parentObjectType === 'contact'` es obligatorio también aquí**
+> (corregido respecto a la versión original de este plan, que lo omitía en los dos
+> caminos y fue detectado como bug Critical durante la ejecución): el id de HubSpot de
+> una company y el id de HubSpot de un contact pertenecen a **espacios de ids de tipos
+> de objeto distintos**, así que una coincidencia numérica entre ellos no significa nada.
+> Sin la compuerta, el camino batch descartaría en silencio una asociación
+> company→contact legítima cada vez que los dos ids coincidieran por casualidad — y en
+> el camino batch el daño es peor, porque se pierde el par entero de la ola sin que
+> nada quede registrado como error. La comparación sólo significa "es el mismo objeto"
+> cuando el padre es contact-shaped. Ésta es la condición real, copiada verbatim de
+> `src/application/use-cases/SyncCompanyContactsInBatches.js`.
 
 Y en el cuerpo de `runInWaves`, reemplaza los tres literales `'company'` (líneas 878, 889, 900) por `parentObjectType`, y `associateObjects` por `associateObjectsDefault`:
 
