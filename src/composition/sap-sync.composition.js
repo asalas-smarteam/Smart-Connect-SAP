@@ -14,6 +14,7 @@ import WarehouseStockStrategyFactory from '#domain/warehouses/warehouse-stock-st
 import B1ItemWarehouseStrategy from '#domain/warehouses/strategies/b1-item-warehouse.strategy.js';
 import S4PlantStorageLocationStrategy from '#domain/warehouses/strategies/s4-plant-storage-location.strategy.js';
 import { SapRecordEnricherPort } from '#application/ports/sap/sap-record-enricher.port.js';
+import AddressSyncConfigRepository from '#infrastructure/config/AddressSyncConfigRepository.js';
 import BusinessPartnerCreationConfigRepository from '#infrastructure/config/BusinessPartnerCreationConfigRepository.js';
 import ProductSyncStrategyConfigRepository from '#infrastructure/config/ProductSyncStrategyConfigRepository.js';
 import WarehouseStockConfigRepository from '#infrastructure/config/WarehouseStockConfigRepository.js';
@@ -112,6 +113,7 @@ export function buildSyncSapConfigToHubspot() {
       }),
       SapRecordEnricherPort
     ),
+    addressSyncConfigRepository: new AddressSyncConfigRepository(),
   });
 }
 

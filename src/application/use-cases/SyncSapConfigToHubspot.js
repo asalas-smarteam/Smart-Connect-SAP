@@ -156,6 +156,24 @@ export class SyncSapConfigToHubspot {
       }
 
       const objectType = activeConfig.objectType;
+
+      // La sincronización de direcciones SAP -> HubSpot no está implementada: el
+      // destino correcto es un custom object de HubSpot (spec aparte). Si un
+      // tenant la activó, que quede constancia en vez de fallar en silencio.
+      if (this.addressSyncConfigRepository && (objectType === 'company' || objectType === 'contact')) {
+        const { required } = await this.addressSyncConfigRepository.getAddressSyncConfig({
+          tenantModels: tenantContext?.tenantModels,
+        });
+
+        if (required) {
+          this.logger?.warn?.({
+            msg: 'requireAddress esta activo pero la sincronizacion de direcciones no esta implementada',
+            code: 'ADDRESS_SYNC_NOT_IMPLEMENTED',
+            objectType,
+          });
+        }
+      }
+
       const mappedRecords = await this.mappingRepository.mapRecords({
         sapRecords: rawData,
         hubspotCredentialId: activeConfig.hubspotCredentialId,

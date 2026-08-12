@@ -32,6 +32,7 @@ import {
   BUSINESS_PARTNER_CREATION_CONFIG_KEY,
   PROPERTIES_FLAGS_CONFIG_KEY,
 } from '#domain/business-partners/business-partner-creation.constants.js';
+import { REQUIRE_ADDRESS_CONFIG_KEY } from '#infrastructure/config/AddressSyncConfigRepository.js';
 
 function slugifyCompanyName(companyName) {
   return sanitizeMongoCollectionName(companyName);
@@ -191,6 +192,19 @@ export async function ensureTenantConfigurations({ Configuration }, { sapFlavor 
           max: 64,
           trueValue: 'tYES',
         },
+      },
+    },
+    { upsert: true }
+  );
+  // Sembrada apagada: la sincronización de direcciones SAP -> HubSpot no está
+  // implementada todavía. El documento existe para que sea visible en el admin.
+  await Configuration.updateOne(
+    { key: REQUIRE_ADDRESS_CONFIG_KEY },
+    {
+      $setOnInsert: {
+        key: REQUIRE_ADDRESS_CONFIG_KEY,
+        userUpdated: 'admin',
+        value: { required: false },
       },
     },
     { upsert: true }
