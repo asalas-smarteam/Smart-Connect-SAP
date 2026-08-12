@@ -3,6 +3,7 @@ import { resolveDiscount } from '#domain/products/discount-resolver.service.js';
 import { withDynamicDescriptionSelectFields } from '#domain/sync/dynamic-description.service.js';
 import { withPropertiesFlagsSelectFields } from '#domain/business-partners/sap-properties-flags.service.js';
 import { withContactEmployeesSelectField } from '#domain/business-partners/contact-employees-select.service.js';
+import { ADDRESS_SYNC_NOT_IMPLEMENTED } from '#domain/business-partners/address-sync.constants.js';
 
 export class SyncSapConfigToHubspot {
   constructor({
@@ -168,7 +169,7 @@ export class SyncSapConfigToHubspot {
         if (required) {
           this.logger?.warn?.({
             msg: 'requireAddress esta activo pero la sincronizacion de direcciones no esta implementada',
-            code: 'ADDRESS_SYNC_NOT_IMPLEMENTED',
+            code: ADDRESS_SYNC_NOT_IMPLEMENTED,
             objectType,
           });
         }

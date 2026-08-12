@@ -1,11 +1,12 @@
-// Compuerta de la sincronización de direcciones SAP -> HubSpot. Hoy siempre
-// apagada: un BusinessPartner de SAP tiene N direcciones y una company de
-// HubSpot un solo juego de propiedades de dirección, así que el destino correcto
-// es un custom object de HubSpot y eso es un spec aparte. La clave existe para
-// declarar la intención y para que un tenant no active algo que no está hecho
-// sin enterarse.
-export const REQUIRE_ADDRESS_CONFIG_KEY = 'requireAddress';
-export const ADDRESS_SYNC_NOT_IMPLEMENTED = 'ADDRESS_SYNC_NOT_IMPLEMENTED';
+// Las constantes viven en el dominio (ver el comentario de diseño allá). Se
+// re-exportan acá para no romper a quien ya las importa desde este módulo
+// (`tenantProvisioning.js` usa REQUIRE_ADDRESS_CONFIG_KEY).
+import {
+  REQUIRE_ADDRESS_CONFIG_KEY,
+  ADDRESS_SYNC_NOT_IMPLEMENTED,
+} from '#domain/business-partners/address-sync.constants.js';
+
+export { REQUIRE_ADDRESS_CONFIG_KEY, ADDRESS_SYNC_NOT_IMPLEMENTED };
 
 async function readConfiguration(Configuration, key) {
   if (typeof Configuration?.findOne !== 'function') {

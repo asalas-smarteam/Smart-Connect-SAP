@@ -15,7 +15,11 @@ describe('associateContactBatches — tipo de padre parametrizable', () => {
       },
       fieldMappingService: { getMappingsByObjectType: jest.fn(), mapRecords: jest.fn() },
       associationRegistry: { registerBaseObjectMappings: jest.fn() },
-      bypassEmailConfigRepository: { getBypassEmail: jest.fn().mockResolvedValue(false) },
+      // El metodo real del puerto es isBypassEmailEnabled (ver
+      // src/application/services/bypassEmail.service.js). Este test no ejercita
+      // hoy el camino que lo llama, pero un mock con el nombre equivocado es una
+      // trampa para el proximo que si lo ejercite.
+      bypassEmailConfigRepository: { isBypassEmailEnabled: jest.fn().mockResolvedValue(false) },
       identityProperty: 'internalcode',
       logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
     });

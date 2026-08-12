@@ -377,9 +377,10 @@ export class SendMappedItemsToHubspot {
         syncLogId,
       });
 
-      // Company syncs return the failures of their contactEmployee children so
-      // they can be surfaced in the SyncLog (the company itself still counts as
-      // sent).
+      // Company AND contact syncs both return the failures of their
+      // contactEmployee children so they can be surfaced in the SyncLog (the
+      // parent itself still counts as sent). The contact branch gained this when
+      // handleContactAssociations started returning { contactErrors } too.
       return {
         ok: true,
         ...resultMetrics,

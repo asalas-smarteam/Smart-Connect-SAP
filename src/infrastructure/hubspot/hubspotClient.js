@@ -400,9 +400,13 @@ export async function batchUpdate(token, dataArray) {
 // esa espera al menos un {associationCategory, associationTypeId} y la versión
 // anterior de esta función le mandaba `[]`, sin verificar nunca que funcionara.
 //
-// Enrutada por hubspotRequest y no por axios crudo para que también respete el
-// rate limit: es el fallback por par del batch de asociaciones, o sea corre
-// justo en los bucles apretados que más lo necesitan.
+// Es la ruta de asociación verificada de propósito general: se usa como llamada
+// PRIMARIA (el camino secuencial de a un par de `HandleHubspotAssociations.js`,
+// el par deal<->line_item de `associationService.js`, el par note<->deal de
+// `webhookFailureNotifier.service.js`) y TAMBIÉN como el fallback por par del
+// batch de asociaciones. Enrutada por hubspotRequest y no por axios crudo para
+// que respete el rate limit en los dos usos: en el fallback corre justo en los
+// bucles apretados que más lo necesitan.
 export async function associateObjectsDefault(token, fromType, fromId, toType, toId) {
   return hubspotRequest(
     'put',
