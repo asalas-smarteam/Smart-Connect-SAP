@@ -123,4 +123,85 @@ describe('addContactEmployeesIfNeeded', () => {
     expect(result.created).toBe(false);
     expect(result.internalCodes).toEqual([]);
   });
+
+  it('agrega updateResults en paralelo a results, uno por contacto', async () => {
+    const adapter = new SapWebhookOrderAdapter();
+    const updateResultAna = { updated: true, requestPayload: { Name: 'Ana' }, responsePayload: {} };
+    const updateResultLuis = { updated: false, requestPayload: null, responsePayload: null };
+    adapter.addContactEmployeeIfNeeded = jest.fn()
+      .mockResolvedValueOnce({
+        created: false, internalCode: 11, requestPayload: null, responsePayload: {}, updateResult: updateResultAna,
+      })
+      .mockResolvedValueOnce({
+        created: false, internalCode: 12, requestPayload: null, responsePayload: {}, updateResult: updateResultLuis,
+      });
+
+    const contacts = [{ firstname: 'Ana' }, { firstname: 'Luis' }];
+    const result = await adapter.addContactEmployeesIfNeeded({
+      sapConfig: {}, cardCode: 'CL999', businessPartner: { CardCode: 'CL999' },
+      contacts, contactEmployeeMappings: [], upsertConfig: null,
+    });
+
+    expect(result.updateResults).toEqual([updateResultAna, updateResultLuis]);
+  });
+});
+
+describe('addContactEmployeesIfNeeded — anti-clobber threading (real addContactEmployeeIfNeeded)', () => {
+  const contactEmployeeMappings = [
+    { sourceField: 'E_Mail', targetField: 'email', sourceContext: 'contactEmployee' },
+    { sourceField: 'Name', targetField: 'firstname', sourceContext: 'contactEmployee' },
+  ];
+
+  it('el segundo PATCH conserva al primer contacto agregado (no lo borra)', async () => {
+    const adapter = new SapWebhookOrderAdapter();
+    let getCallCount = 0;
+
+    // Modela sapWebhookOrderAdapter.contactEmployee.test.js: patch responde {},
+    // y el re-GET posterior (findBusinessPartnerByCardCode) devuelve el estado
+    // ya actualizado en SAP tras ese patch.
+    const requestSpy = jest.spyOn(adapter, 'request').mockImplementation(async (sapConfig, options) => {
+      if (options.method === 'patch') {
+        return {};
+      }
+      getCallCount += 1;
+      if (getCallCount === 1) {
+        return { ContactEmployees: [{ InternalCode: 11, Name: 'Ana', E_Mail: 'ana@example.com' }] };
+      }
+      return {
+        ContactEmployees: [
+          { InternalCode: 11, Name: 'Ana', E_Mail: 'ana@example.com' },
+          { InternalCode: 12, Name: 'Luis', E_Mail: 'luis@example.com' },
+        ],
+      };
+    });
+
+    const businessPartner = { CardCode: 'CL999', ContactEmployees: [] };
+    const contacts = [
+      { email: 'ana@example.com', firstname: 'Ana' },
+      { email: 'luis@example.com', firstname: 'Luis' },
+    ];
+
+    const result = await adapter.addContactEmployeesIfNeeded({
+      sapConfig: {},
+      cardCode: 'CL999',
+      businessPartner,
+      contacts,
+      contactEmployeeMappings,
+      upsertConfig: null,
+    });
+
+    const patchCalls = requestSpy.mock.calls.filter(([, options]) => options.method === 'patch');
+    expect(patchCalls).toHaveLength(2);
+
+    // Sin el threading de la BP recargada, este segundo PATCH mandaría solo
+    // a Luis (porque currentEmployees seguiría siendo el array vacío
+    // original) y el PATCH real de B1 borraría a Ana de ContactEmployees.
+    const secondPatchData = patchCalls[1][1].data;
+    expect(secondPatchData.ContactEmployees.map((employee) => employee.Name)).toEqual(['Ana', 'Luis']);
+
+    expect(result.internalCodes).toEqual([
+      { contact: contacts[0], internalCode: 11 },
+      { contact: contacts[1], internalCode: 12 },
+    ]);
+  });
 });

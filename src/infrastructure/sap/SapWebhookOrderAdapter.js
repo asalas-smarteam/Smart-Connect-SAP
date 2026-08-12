@@ -519,7 +519,14 @@ export class SapWebhookOrderAdapter {
       }
     }
 
-    return { created, internalCodes, results, requestPayload, responsePayload };
+    // Paralelo a `results`/`internalCodes`: un entry por contacto procesado
+    // (o `undefined` si esa llamada no trajo updateResult), para que quien
+    // arma el audit trail de upsert (ProcessHubspotWebhookEvent,
+    // webhookQuotationSupport) pueda leerlo igual que hoy lee
+    // singleContactResult.updateResult.
+    const updateResults = results.map((result) => result?.updateResult);
+
+    return { created, internalCodes, results, requestPayload, responsePayload, updateResults };
   }
 
   async createOrder({ sapConfig, orderPayload }) {
