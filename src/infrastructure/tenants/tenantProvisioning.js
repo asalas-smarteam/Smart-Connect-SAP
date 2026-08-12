@@ -28,6 +28,10 @@ import {
   DEFAULT_DYNAMIC_DESCRIPTION_CONFIG,
 } from '#domain/sync/dynamic-description.constants.js';
 import { replicateDefaultSapFilters } from './replicateDefaultSapFilters.js';
+import {
+  BUSINESS_PARTNER_CREATION_CONFIG_KEY,
+  PROPERTIES_FLAGS_CONFIG_KEY,
+} from '#domain/business-partners/business-partner-creation.constants.js';
 
 function slugifyCompanyName(companyName) {
   return sanitizeMongoCollectionName(companyName);
@@ -80,7 +84,7 @@ async function ensureIntegrationModes({ IntegrationMode }) {
   );
 }
 
-async function ensureTenantConfigurations({ Configuration }, { sapFlavor = DEFAULT_SAP_FLAVOR } = {}) {
+export async function ensureTenantConfigurations({ Configuration }, { sapFlavor = DEFAULT_SAP_FLAVOR } = {}) {
   if (typeof Configuration?.updateOne !== 'function') {
     return;
   }
@@ -151,6 +155,42 @@ async function ensureTenantConfigurations({ Configuration }, { sapFlavor = DEFAU
         key: UPSERT_DATA_SAP_CONFIG_KEY,
         userUpdated: 'admin',
         value: { ...DEFAULT_UPSERT_DATA_SAP_CONFIG },
+      },
+    },
+    { upsert: true }
+  );
+  // Sembradas apagadas (legacyWhitelist / none) para que el documento sea
+  // visible en el admin sin cambiar la conducta de ningún tenant. Un cliente
+  // las activa cambiando payloadStrategy y llenando addresses.byName.
+  await Configuration.updateOne(
+    { key: BUSINESS_PARTNER_CREATION_CONFIG_KEY },
+    {
+      $setOnInsert: {
+        key: BUSINESS_PARTNER_CREATION_CONFIG_KEY,
+        userUpdated: 'admin',
+        value: {
+          payloadStrategy: 'legacyWhitelist',
+          contactEmployeeSource: 'dealContact',
+          defaults: { BusinessPartner: {}, ContactEmployee: {}, BPAddress: {} },
+          addresses: { strategy: 'none', byName: {}, required: [] },
+        },
+      },
+    },
+    { upsert: true }
+  );
+  await Configuration.updateOne(
+    { key: PROPERTIES_FLAGS_CONFIG_KEY },
+    {
+      $setOnInsert: {
+        key: PROPERTIES_FLAGS_CONFIG_KEY,
+        userUpdated: 'admin',
+        value: {
+          strategy: 'none',
+          hubspotProperty: null,
+          min: 1,
+          max: 64,
+          trueValue: 'tYES',
+        },
       },
     },
     { upsert: true }
