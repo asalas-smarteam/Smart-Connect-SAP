@@ -287,9 +287,17 @@ export class SapWebhookOrderAdapter {
     const phone1 = toNonEmptyString(mappedCompany?.Phone1 || mappedContact?.Phone1);
 
     // mapHubspotToSapFields ya descarta null/undefined/'', así que una llave
-    // solo existe en mappedCompany cuando tiene valor real. Por eso este
-    // spread equivale exactamente al `mappedCompany?.X || mappedContact?.X`
-    // que usaba el código anterior campo por campo.
+    // solo existe en mappedCompany cuando tiene algún valor. OJO: el spread NO
+    // es equivalente en general al `mappedCompany?.X || mappedContact?.X` que
+    // usaba el código campo por campo: para un falsy-pero-presente que sí pasa
+    // el filtro (0, false) el spread se queda con el de la company mientras que
+    // el OR caía al del contact. Solo equivale para los valores que
+    // mapHubspotToSapFields puede llegar a emitir en estos campos, donde ese
+    // fallback por campo no hace falta por separado. Phone1 es justo el campo
+    // donde sí importaba (un teléfono 0 debe caer al del contacto), y por eso se
+    // resuelve aparte, arriba, y viaja en `resolved` en vez de leerse del merge.
+    // Ver la guardia de regresión en
+    // tests/unit/domain/businessPartnerPayloadStrategies.test.js.
     const mappedBusinessPartner = { ...mappedContact, ...mappedCompany };
 
     const payload = payloadStrategy.buildCreatePayload({

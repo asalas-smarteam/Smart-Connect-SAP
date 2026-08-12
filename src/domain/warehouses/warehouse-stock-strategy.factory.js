@@ -18,8 +18,14 @@ export class WarehouseStockStrategyFactory {
   getStrategy(strategyName) {
     const normalizedStrategyName = String(strategyName ?? '').trim();
 
-    if (Object.hasOwn(this.strategies, normalizedStrategyName)) {
-      return this.strategies[normalizedStrategyName];
+    // Mismo par de condiciones que BusinessPartnerPayloadStrategyFactory: hasOwn
+    // para no resolver 'constructor'/'toString' por la cadena de prototipos, y el
+    // truthy para no devolver undefined si la strategy no se inyectó.
+    const strategy = Object.hasOwn(this.strategies, normalizedStrategyName)
+      && this.strategies[normalizedStrategyName];
+
+    if (strategy) {
+      return strategy;
     }
 
     this.logger.error?.({

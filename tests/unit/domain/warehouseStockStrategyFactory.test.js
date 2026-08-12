@@ -39,4 +39,28 @@ describe('WarehouseStockStrategyFactory', () => {
       validStrategies: Object.values(WAREHOUSE_STOCK_STRATEGIES),
     }));
   });
+
+  // Mismo guardia que en BusinessPartnerPayloadStrategyFactory: ni la cadena de
+  // prototipos ni una strategy sin inyectar pueden pasar por una strategy valida.
+  it.each(['constructor', 'toString', '__proto__'])('throws for %s instead of resolving a prototype value', (strategyName) => {
+    const factory = new WarehouseStockStrategyFactory({
+      b1ItemWarehouseStrategy,
+      s4PlantStorageLocationStrategy,
+      logger: { error: jest.fn() },
+    });
+
+    expect(() => factory.getStrategy(strategyName))
+      .toThrow(`Warehouse stock strategy not supported: ${strategyName}`);
+  });
+
+  it('throws when the key exists but the strategy was not injected', () => {
+    const factory = new WarehouseStockStrategyFactory({
+      b1ItemWarehouseStrategy,
+      s4PlantStorageLocationStrategy: undefined,
+      logger: { error: jest.fn() },
+    });
+
+    expect(() => factory.getStrategy(WAREHOUSE_STOCK_STRATEGIES.S4_PLANT_STORAGE_LOCATION))
+      .toThrow(`Warehouse stock strategy not supported: ${WAREHOUSE_STOCK_STRATEGIES.S4_PLANT_STORAGE_LOCATION}`);
+  });
 });

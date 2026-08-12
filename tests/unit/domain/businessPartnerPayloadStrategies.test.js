@@ -165,4 +165,32 @@ describe('BusinessPartnerPayloadStrategyFactory', () => {
       validStrategies: Object.values(BP_PAYLOAD_STRATEGIES),
     }));
   });
+
+  // Un lookup por indice sin hasOwn resuelve 'constructor'/'toString' contra la
+  // cadena de prototipos de Object, asi que getStrategy devolveria una funcion en
+  // vez de lanzar y el flujo escribiria a SAP con una strategy inexistente.
+  it.each(['constructor', 'toString', 'valueOf', '__proto__'])(
+    'lanza ante %s en vez de resolver por la cadena de prototipos',
+    (strategyName) => {
+      const factory = new BusinessPartnerPayloadStrategyFactory({
+        legacyStrategy,
+        fullMappedStrategy,
+        logger: { error: jest.fn() },
+      });
+
+      expect(() => factory.getStrategy(strategyName))
+        .toThrow(`BusinessPartner payload strategy not supported: ${strategyName}`);
+    }
+  );
+
+  it('lanza cuando la llave existe pero la strategy no se inyecto', () => {
+    const factory = new BusinessPartnerPayloadStrategyFactory({
+      legacyStrategy,
+      fullMappedStrategy: undefined,
+      logger: { error: jest.fn() },
+    });
+
+    expect(() => factory.getStrategy(BP_PAYLOAD_STRATEGIES.FULL_MAPPED))
+      .toThrow(`BusinessPartner payload strategy not supported: ${BP_PAYLOAD_STRATEGIES.FULL_MAPPED}`);
+  });
 });

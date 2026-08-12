@@ -17,7 +17,11 @@ export class BusinessPartnerPayloadStrategyFactory {
   // de que el webhook escriba nada en SAP, no a mitad del flujo.
   getStrategy(strategyName) {
     const normalizedStrategyName = String(strategyName ?? '').trim();
-    const strategy = this.strategies[normalizedStrategyName];
+    // hasOwn evita que 'constructor' o 'toString' resuelvan a un valor de la
+    // cadena de prototipos en vez de lanzar; el truthy evita devolver undefined
+    // cuando la llave existe pero la strategy no se inyectó.
+    const strategy = Object.hasOwn(this.strategies, normalizedStrategyName)
+      && this.strategies[normalizedStrategyName];
 
     if (strategy) {
       return strategy;
