@@ -397,8 +397,13 @@ export class HandleHubspotAssociations {
         // Guarda de auto-asociación: cuando el padre es un contact, un
         // ContactEmployee puede resolver al MISMO contacto de HubSpot (mismo
         // email). Asociar un contacto consigo mismo es basura. Caso imposible
-        // mientras el padre fuera siempre una company.
-        if (contactHubspotId && String(contactHubspotId) === String(companyHubspotId)) {
+        // mientras el padre fuera siempre una company. La comparación de ids
+        // SOLO tiene sentido cuando ambos lados viven en el mismo espacio de
+        // ids (contact<->contact): con un padre company, un id de company que
+        // coincida numéricamente con un id de contact es pura coincidencia
+        // (son tipos de objeto distintos en HubSpot) y NO debe descartar la
+        // asociación.
+        if (parentObjectType === 'contact' && contactHubspotId && String(contactHubspotId) === String(companyHubspotId)) {
           this.logger.warn?.('Se descarta la auto-asociacion de un contacto consigo mismo', {
             parentObjectType,
             hubspotId: contactHubspotId,

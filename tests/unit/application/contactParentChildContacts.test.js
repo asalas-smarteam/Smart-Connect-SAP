@@ -26,7 +26,7 @@ function buildHandler() {
       create: jest.fn().mockResolvedValue({ id: '900' }),
     },
     fallbackEmailGenerator: (parentEmail, sapId) => `sap-${sapId}@example.com`,
-    bypassEmailConfigRepository: { getBypassEmail: jest.fn().mockResolvedValue(false) },
+    bypassEmailConfigRepository: { isBypassEmailEnabled: jest.fn().mockResolvedValue(false) },
     syncWarningRepository: { record: jest.fn().mockResolvedValue(null) },
     logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
   });
@@ -91,7 +91,36 @@ describe('padre contacto -> contactos hijo', () => {
     });
 
     expect(associateObjectsBySapId).not.toHaveBeenCalled();
-    expect(handler.logger.warn).toHaveBeenCalled();
+    expect(handler.logger.warn).toHaveBeenCalledWith(
+      'Se descarta la auto-asociacion de un contacto consigo mismo',
+      expect.objectContaining({ parentObjectType: 'contact', hubspotId: '100', sapInternalCode: 11 })
+    );
+  });
+
+  // REGRESION: con un padre company, un id de contact que coincida
+  // numericamente con el id de la company es pura coincidencia (son espacios
+  // de ids de HubSpot distintos: company vs contact). La guarda NO debe
+  // dispararse aqui, o se perderia una asociacion legitima que existia antes
+  // de esta tarea.
+  it('NO descarta el par cuando el padre es company aunque el id del hijo coincida numericamente', async () => {
+    const { handler, associateObjectsBySapId } = buildHandler();
+    handler.contactHandler.find = jest.fn().mockResolvedValue({ id: '100' }); // coincide con el id de la company, pero son tipos distintos
+
+    const item = {
+      properties: { idsap: 'C1' },
+      rawSapData: { CardCode: 'C1', ContactEmployees: [{ InternalCode: 11, Name: 'Ana', E_Mail: 'ana@x.com' }] },
+    };
+
+    await handler.execute({
+      objectType: 'company', token: 'tok', item, clientConfig: CLIENT_CONFIG,
+      tenantModels: {}, hubspotId: '100', syncLogId: 'log1',
+    });
+
+    expect(associateObjectsBySapId).toHaveBeenCalledWith(
+      'tok', 'cred1', 'company', '100', 'contact',
+      [{ hubspotId: '100', sapId: 11 }],
+      {}
+    );
   });
 
   it('sin ContactEmployees no toca HubSpot', async () => {
