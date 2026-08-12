@@ -231,8 +231,12 @@ export class ProcessHubspotWebhookEvent {
 
       auditTrail.payload_SAP.contactEmployee = contactEmployeeResult.requestPayload;
       auditTrail.response_SAP.contactEmployee = contactEmployeeResult.responsePayload;
-      auditTrail.payload_SAP.contactEmployeeUpdate = contactEmployeeResult.updateResult?.requestPayload ?? null;
-      auditTrail.response_SAP.contactEmployeeUpdate = contactEmployeeResult.updateResult?.responsePayload ?? null;
+      // addContactEmployeesIfNeeded (plural) returns updateResults as an array, one entry per
+      // contact processed. Only the first contact's upsert audit record is surfaced here; the
+      // plan doesn't specify richer multi-contact audit handling, and default config only ever
+      // produces a single ContactEmployee, so [0] preserves today's exact behavior.
+      auditTrail.payload_SAP.contactEmployeeUpdate = contactEmployeeResult.updateResults?.[0]?.requestPayload ?? null;
+      auditTrail.response_SAP.contactEmployeeUpdate = contactEmployeeResult.updateResults?.[0]?.responsePayload ?? null;
 
       const documentLines = mapDocumentLines({
         lineItems,
@@ -294,7 +298,7 @@ export class ProcessHubspotWebhookEvent {
         cardCode,
         syncCompany: false,
         syncContact: contactExists && contactEmployeeResult.created,
-        contactEmployeeCode: contactEmployeeResult.internalCode,
+        contactEmployeeCode: contactEmployeeResult.internalCodes?.[0]?.internalCode,
       });
       auditTrail.response_hubspot = this.mergeHubspotResponses(
         auditTrail.response_hubspot,

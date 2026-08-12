@@ -190,7 +190,7 @@ export class ProcessHubspotInventoryTransferRequest {
         cardCode,
         syncCompany: false,
         syncContact: contactExists && contactEmployeeResult.created,
-        contactEmployeeCode: contactEmployeeResult.internalCode,
+        contactEmployeeCode: contactEmployeeResult.internalCodes?.[0]?.internalCode,
       });
       auditTrail.response_hubspot = mergeHubspotResponses(
         auditTrail.response_hubspot,

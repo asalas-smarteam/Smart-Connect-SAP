@@ -281,6 +281,80 @@ describe('ProcessHubspotCreateQuotation', () => {
     expect(sapError.sapAudit.auditTrail.payload_SAP.quotation).toMatchObject({ CardCode: 'CL00129' });
     expect(sapError.sapAudit.auditTrail.response_SAP.quotation).toBeNull();
   });
+
+  it('forwards the full BusinessPartner payload-strategy inputs and PATCHes ContactEmployees via the plural adapter method when the BP already existed', async () => {
+    const deps = buildDeps();
+    deps.runtimeRepository.resolveBusinessPartnerCreationConfig.mockResolvedValue({
+      payloadStrategy: 'fullMapped',
+      contactEmployeeSource: 'dealContact',
+      defaults: { BusinessPartner: {}, ContactEmployee: {}, BPAddress: {} },
+      addresses: { strategy: 'none', byName: {}, required: [] },
+    });
+    deps.sapOrderAdapter.addContactEmployeesIfNeeded.mockResolvedValue({
+      created: true,
+      internalCodes: [{ contact: { hs_object_id: 'contact-1' }, internalCode: 'IC1' }],
+      results: [],
+      requestPayload: [],
+      responsePayload: [],
+      updateResults: [],
+    });
+    const useCase = new ProcessHubspotCreateQuotation(deps);
+
+    const event = {
+      ...baseEvent,
+      payload: {
+        ...baseEvent.payload,
+        contact: { hs_object_id: 'contact-1', firstname: 'Juan' },
+      },
+    };
+
+    await useCase.execute({ event, tenantModels });
+
+    expect(deps.sapOrderAdapter.findOrCreateBusinessPartner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payloadStrategy: expect.anything(),
+        bpAddresses: expect.anything(),
+        mappedContactEmployees: expect.anything(),
+        propertiesFlags: expect.anything(),
+      })
+    );
+    expect(deps.sapOrderAdapter.addContactEmployeesIfNeeded).toHaveBeenCalledWith(
+      expect.objectContaining({ contacts: [event.payload.contact] })
+    );
+    expect(deps.sapOrderAdapter.addContactEmployeeIfNeeded).not.toHaveBeenCalled();
+  });
+
+  it('skips the ContactEmployee PATCH when the fullMapped strategy already included them in the create payload', async () => {
+    const deps = buildDeps();
+    deps.runtimeRepository.resolveBusinessPartnerCreationConfig.mockResolvedValue({
+      payloadStrategy: 'fullMapped',
+      contactEmployeeSource: 'dealContact',
+      defaults: { BusinessPartner: {}, ContactEmployee: {}, BPAddress: {} },
+      addresses: { strategy: 'none', byName: {}, required: [] },
+    });
+    deps.sapOrderAdapter.findOrCreateBusinessPartner.mockResolvedValue({
+      cardCode: 'CL00130',
+      created: true,
+      matchedBy: null,
+      businessPartner: { CardCode: 'CL00130' },
+      requestPayload: {},
+      responsePayload: {},
+    });
+    const useCase = new ProcessHubspotCreateQuotation(deps);
+
+    const event = {
+      ...baseEvent,
+      payload: {
+        ...baseEvent.payload,
+        contact: { hs_object_id: 'contact-1', firstname: 'Juan' },
+      },
+    };
+
+    await useCase.execute({ event, tenantModels });
+
+    expect(deps.sapOrderAdapter.addContactEmployeesIfNeeded).not.toHaveBeenCalled();
+    expect(deps.sapOrderAdapter.addContactEmployeeIfNeeded).not.toHaveBeenCalled();
+  });
 });
 
 describe('ProcessHubspotUpdateQuotation', () => {

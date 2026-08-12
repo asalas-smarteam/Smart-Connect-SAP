@@ -227,6 +227,7 @@ export async function resolveBusinessPartnerForDocument({
     internalCodes: [],
     requestPayload: null,
     responsePayload: null,
+    updateResults: [],
   };
 
   if (syncPlan.shouldSyncBusinessPartnerIds) {
@@ -283,8 +284,12 @@ export async function resolveBusinessPartnerForDocument({
 
   auditTrail.payload_SAP.contactEmployee = contactEmployeeResult.requestPayload;
   auditTrail.response_SAP.contactEmployee = contactEmployeeResult.responsePayload;
-  auditTrail.payload_SAP.contactEmployeeUpdate = contactEmployeeResult.updateResult?.requestPayload ?? null;
-  auditTrail.response_SAP.contactEmployeeUpdate = contactEmployeeResult.updateResult?.responsePayload ?? null;
+  // addContactEmployeesIfNeeded (plural) returns updateResults as an array, one entry per
+  // contact processed. Only the first contact's upsert audit record is surfaced here; the
+  // plan doesn't specify richer multi-contact audit handling, and default config only ever
+  // produces a single ContactEmployee, so [0] preserves today's exact behavior.
+  auditTrail.payload_SAP.contactEmployeeUpdate = contactEmployeeResult.updateResults?.[0]?.requestPayload ?? null;
+  auditTrail.response_SAP.contactEmployeeUpdate = contactEmployeeResult.updateResults?.[0]?.responsePayload ?? null;
 
   return {
     cardCode,
