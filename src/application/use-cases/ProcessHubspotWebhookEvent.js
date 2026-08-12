@@ -8,7 +8,23 @@ import {
   resolveEventPayload,
   resolveHubspotSapId,
 } from '../services/webhook-payload.service.js';
+import { resolveBusinessPartnerAndContactEmployees } from '#domain/business-partners/contact-employee-source.service.js';
+import { buildBpAddresses } from '#domain/business-partners/bp-addresses.service.js';
+import { buildSapPropertiesFlags } from '#domain/business-partners/sap-properties-flags.service.js';
+import { BusinessPartnerPayloadStrategyFactory } from '#domain/business-partners/business-partner-payload.factory.js';
+import LegacyWhitelistBusinessPartnerPayloadStrategy from '#domain/business-partners/strategies/legacy-whitelist-bp-payload.strategy.js';
+import FullMappedBusinessPartnerPayloadStrategy from '#domain/business-partners/strategies/full-mapped-bp-payload.strategy.js';
 import { toNonEmptyString } from '#shared/utils/string.utils.js';
+
+// Task 12 wires the real, composition-built factory into every use case. Until then (and for
+// any test that constructs these classes directly without it) this keeps the payload byte-for-byte
+// identical to what the adapter built before payload strategies existed.
+function createDefaultBusinessPartnerPayloadStrategyFactory() {
+  return new BusinessPartnerPayloadStrategyFactory({
+    legacyStrategy: new LegacyWhitelistBusinessPartnerPayloadStrategy(),
+    fullMappedStrategy: new FullMappedBusinessPartnerPayloadStrategy(),
+  });
+}
 
 export class ProcessHubspotWebhookEvent {
   constructor({
@@ -17,6 +33,7 @@ export class ProcessHubspotWebhookEvent {
     hubspotWebhookAdapter,
     webhookReferenceRepository,
     webhookEventProgressRepository,
+    businessPartnerPayloadStrategyFactory = createDefaultBusinessPartnerPayloadStrategyFactory(),
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
     buildWebhookSapAudit,
@@ -27,6 +44,7 @@ export class ProcessHubspotWebhookEvent {
     this.hubspotWebhookAdapter = hubspotWebhookAdapter;
     this.webhookReferenceRepository = webhookReferenceRepository;
     this.webhookEventProgressRepository = webhookEventProgressRepository;
+    this.businessPartnerPayloadStrategyFactory = businessPartnerPayloadStrategyFactory;
     this.buildWebhookSyncErrorEntry = buildWebhookSyncErrorEntry;
     this.buildErrorResponseSnapshot = buildErrorResponseSnapshot;
     this.buildWebhookSapAudit = buildWebhookSapAudit;
@@ -34,7 +52,7 @@ export class ProcessHubspotWebhookEvent {
   }
 
   async execute({ event, tenantModels, tenantId, tenantKey, portalId }) {
-    const { payload, deal, company, contact, lineItems } = resolveEventPayload(event);
+    const { payload, deal, company, contact, lineItems, contactEmployees, bpAddress } = resolveEventPayload(event);
     const WebhookEvent = tenantModels?.WebhookEvent;
     const companyExists = Boolean(company);
     const contactExists = Boolean(contact);
@@ -64,6 +82,52 @@ export class ProcessHubspotWebhookEvent {
       // Resolved once per event (not a resolver-per-item like the others below) so
       // findOrCreateBusinessPartner/addContactEmployeeIfNeeded don't each trigger their own read.
       const upsertConfig = await this.runtimeRepository.resolveUpsertDataSap(tenantModels);
+      const creationConfig = await this.runtimeRepository.resolveBusinessPartnerCreationConfig(tenantModels);
+      const propertiesConfig = await this.runtimeRepository.resolvePropertiesFlagsConfig(tenantModels);
+
+      const businessPartnerShape = resolveBusinessPartnerAndContactEmployees({
+        company,
+        contact,
+        contactEmployees,
+        source: creationConfig.contactEmployeeSource,
+      });
+
+      for (const warning of businessPartnerShape.warnings) {
+        this.logger?.warn?.({ msg: 'BusinessPartner shape warning', ...warning });
+      }
+
+      // Cada entrada del array se mapea por separado, igual que line_items.
+      const { addresses: bpAddresses, warnings: addressWarnings } = buildBpAddresses({
+        mappedAddresses: bpAddress.map(
+          (entry) => mapHubspotToSapFields(entry, mappings.addressMappings)
+        ),
+        addressesConfig: creationConfig.addresses,
+        addressDefaults: creationConfig.defaults.BPAddress,
+      });
+
+      for (const warning of addressWarnings) {
+        this.logger?.warn?.({ msg: 'BPAddresses warning', ...warning });
+      }
+
+      const mappedContactEmployees = businessPartnerShape.contactEmployeeSources.map((source) => ({
+        ...creationConfig.defaults.ContactEmployee,
+        ...mapHubspotToSapFields(source, mappings.contactEmployeeMappings),
+      }));
+
+      const { flags: propertiesFlags, invalid: invalidProperties } = buildSapPropertiesFlags({
+        hubspotValue: propertiesConfig.hubspotProperty
+          ? businessPartnerShape.businessPartner?.[propertiesConfig.hubspotProperty]
+          : null,
+        config: propertiesConfig,
+      });
+
+      if (invalidProperties.length > 0) {
+        this.logger?.warn?.({ msg: 'PropertiesN values ignored', invalid: invalidProperties });
+      }
+
+      const payloadStrategy = this.businessPartnerPayloadStrategyFactory
+        .getStrategy(creationConfig.payloadStrategy);
+
       const businessPartnerResult = await this.sapOrderAdapter.findOrCreateBusinessPartner({
         sapConfig,
         tenantModels,
@@ -71,7 +135,7 @@ export class ProcessHubspotWebhookEvent {
         contact,
         mappedCompany,
         mappedContact,
-        companyExists: companyExists || !contactExists,
+        companyExists: businessPartnerShape.isCompanyBusinessPartner,
         resolveDefaultPriceListNum: (models) =>
           this.runtimeRepository.resolveDefaultPriceListNum(models),
         resolveRequireRandCardCode: (models) =>
@@ -83,6 +147,11 @@ export class ProcessHubspotWebhookEvent {
         resolveGroupCodeDefaults: (models) =>
           this.runtimeRepository.resolveGroupCodeDefaults(models),
         upsertConfig,
+        payloadStrategy,
+        bpAddresses,
+        mappedContactEmployees,
+        propertiesFlags,
+        creationDefaults: creationConfig.defaults,
       });
 
       auditTrail.payload_SAP.businessPartner = businessPartnerResult.requestPayload;
@@ -102,8 +171,10 @@ export class ProcessHubspotWebhookEvent {
       let contactEmployeeResult = {
         created: false,
         internalCode: null,
+        internalCodes: [],
         requestPayload: null,
         responsePayload: null,
+        updateResults: [],
       };
 
       if (syncPlan.shouldSyncBusinessPartnerIds) {
@@ -131,25 +202,30 @@ export class ProcessHubspotWebhookEvent {
         });
       }
 
-      if (companyExists && contactExists) {
-        contactEmployeeResult = await this.sapOrderAdapter.addContactEmployeeIfNeeded({
+      // Si la strategy ya mandó los ContactEmployees anidados en el POST, un
+      // PATCH posterior los duplicaría. Si el BP ya existía, se reconcilian.
+      const contactEmployeesWentInCreate = businessPartnerResult.created
+        && payloadStrategy.includesContactEmployeesInCreate();
+
+      if (!contactEmployeesWentInCreate && businessPartnerShape.contactEmployeeSources.length > 0) {
+        contactEmployeeResult = await this.sapOrderAdapter.addContactEmployeesIfNeeded({
           sapConfig,
           cardCode,
           businessPartner: businessPartnerResult.businessPartner,
-          contact,
+          contacts: businessPartnerShape.contactEmployeeSources,
           contactEmployeeMappings: mappings.contactEmployeeMappings,
           upsertConfig,
         });
       }
 
-      if (contactEmployeeResult.internalCode) {
+      if (contactEmployeeResult.internalCodes?.length > 0) {
         await this.webhookReferenceRepository.persistReferences({
           WebhookEvent,
           eventId: event?._id,
           payload,
           companyExists,
           contactExists,
-          contactEmployeeCode: contactEmployeeResult.internalCode,
+          contactEmployeeCode: contactEmployeeResult.internalCodes[0].internalCode,
         });
       }
 

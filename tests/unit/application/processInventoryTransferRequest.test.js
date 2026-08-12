@@ -13,6 +13,7 @@ function buildContext(overrides = {}) {
       companyMappings: [],
       contactBusinessPartnerMappings: [],
       contactEmployeeMappings: [],
+      addressMappings: [],
       productMappings: [
         { sourceField: 'ItemCode', targetField: 'hs_sku' },
         { sourceField: 'Quantity', targetField: 'quantity' },
@@ -56,6 +57,21 @@ function buildRuntimeRepository(context = buildContext()) {
       fieldsUpdated_BP: [],
       fieldsUpdated_CE: [],
     }),
+    // Task 10 wiring: resolved unconditionally by resolveBusinessPartnerForDocument, alongside
+    // resolveUpsertDataSap above. Not exercised by this suite's assertions, so plain defaults.
+    resolveBusinessPartnerCreationConfig: jest.fn().mockResolvedValue({
+      payloadStrategy: 'legacyWhitelist',
+      contactEmployeeSource: 'dealContact',
+      defaults: { BusinessPartner: {}, ContactEmployee: {}, BPAddress: {} },
+      addresses: { strategy: 'none', byName: {}, required: [] },
+    }),
+    resolvePropertiesFlagsConfig: jest.fn().mockResolvedValue({
+      strategy: 'none',
+      hubspotProperty: null,
+      min: 1,
+      max: 64,
+      trueValue: 'tYES',
+    }),
     findOwnerMappingByHubspotOwner: jest.fn().mockResolvedValue(null),
   };
 }
@@ -66,6 +82,10 @@ const baseEvent = {
   payload: {
     portalId: '50564010',
     deal: { hs_object_id: '59680314911', filler: 'B01', towhscode: 'B02' },
+    // A deal always has a company or a contact in production; resolveBusinessPartnerAndContactEmployees
+    // (wired in by Task 10) now enforces that invariant for real instead of it being silently
+    // absorbed by the fully-mocked findOrCreateBusinessPartner used throughout this suite.
+    contact: { hs_object_id: 'contact-1', firstname: 'Cliente Mostrador' },
     line_items: [
       { hubspot_id: 'li-1', hs_sku: 'A01', quantity: '3', filler: 'B01', towhscode: 'B02' },
     ],
@@ -88,6 +108,7 @@ describe('ProcessHubspotInventoryTransferRequest', () => {
           responsePayload: null,
         }),
         addContactEmployeeIfNeeded: jest.fn(),
+        addContactEmployeesIfNeeded: jest.fn(),
       },
       sapInventoryTransferRequestAdapter: {
         createInventoryTransferRequest: jest.fn().mockResolvedValue({

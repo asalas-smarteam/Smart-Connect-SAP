@@ -15,6 +15,7 @@ function buildContext(overrides = {}) {
       companyMappings: [],
       contactBusinessPartnerMappings: [],
       contactEmployeeMappings: [],
+      addressMappings: [],
       productMappings: [
         { sourceField: 'ItemCode', targetField: 'hs_sku' },
         { sourceField: 'Quantity', targetField: 'quantity' },
@@ -46,6 +47,21 @@ function buildRuntimeRepository(context = buildContext()) {
       required: false,
       fieldsUpdated_BP: [],
       fieldsUpdated_CE: [],
+    }),
+    // Task 10 wiring: resolved unconditionally by resolveBusinessPartnerForDocument, alongside
+    // resolveUpsertDataSap above. Not exercised by this suite's assertions, so plain defaults.
+    resolveBusinessPartnerCreationConfig: jest.fn().mockResolvedValue({
+      payloadStrategy: 'legacyWhitelist',
+      contactEmployeeSource: 'dealContact',
+      defaults: { BusinessPartner: {}, ContactEmployee: {}, BPAddress: {} },
+      addresses: { strategy: 'none', byName: {}, required: [] },
+    }),
+    resolvePropertiesFlagsConfig: jest.fn().mockResolvedValue({
+      strategy: 'none',
+      hubspotProperty: null,
+      min: 1,
+      max: 64,
+      trueValue: 'tYES',
     }),
     findOwnerMappingByHubspotOwner: jest.fn().mockResolvedValue(null),
   };
@@ -80,6 +96,7 @@ describe('ProcessHubspotCreateQuotation', () => {
           responsePayload: null,
         }),
         addContactEmployeeIfNeeded: jest.fn(),
+        addContactEmployeesIfNeeded: jest.fn(),
       },
       sapQuotationAdapter: {
         createQuotation: jest.fn().mockResolvedValue({

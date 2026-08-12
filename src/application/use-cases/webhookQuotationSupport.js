@@ -1,5 +1,8 @@
 import { mapHubspotToSapFields } from '#domain/orders/order-builder.service.js';
 import { resolveHubspotSapId } from '../services/webhook-payload.service.js';
+import { resolveBusinessPartnerAndContactEmployees } from '#domain/business-partners/contact-employee-source.service.js';
+import { buildBpAddresses } from '#domain/business-partners/bp-addresses.service.js';
+import { buildSapPropertiesFlags } from '#domain/business-partners/sap-properties-flags.service.js';
 import { normalizeNumber, toNonEmptyString } from '#shared/utils/string.utils.js';
 
 export function createDocumentAuditTrail(payload, documentKey) {
@@ -121,6 +124,10 @@ export async function resolveBusinessPartnerForDocument({
   contact,
   companyExists,
   contactExists,
+  contactEmployees = [],
+  bpAddress = [],
+  businessPartnerPayloadStrategyFactory,
+  logger = console,
   context,
   auditTrail,
 }) {
@@ -130,6 +137,53 @@ export async function resolveBusinessPartnerForDocument({
   // Resolved once per event (not a resolver-per-item like the others below) so
   // findOrCreateBusinessPartner/addContactEmployeeIfNeeded don't each trigger their own read.
   const upsertConfig = await runtimeRepository.resolveUpsertDataSap(context.tenantModels);
+  const creationConfig = await runtimeRepository
+    .resolveBusinessPartnerCreationConfig(context.tenantModels);
+  const propertiesConfig = await runtimeRepository
+    .resolvePropertiesFlagsConfig(context.tenantModels);
+
+  const businessPartnerShape = resolveBusinessPartnerAndContactEmployees({
+    company,
+    contact,
+    contactEmployees,
+    source: creationConfig.contactEmployeeSource,
+  });
+
+  for (const warning of businessPartnerShape.warnings) {
+    logger?.warn?.({ msg: 'BusinessPartner shape warning', ...warning });
+  }
+
+  // Cada entrada del array se mapea por separado, igual que line_items.
+  const { addresses: bpAddresses, warnings: addressWarnings } = buildBpAddresses({
+    mappedAddresses: bpAddress.map(
+      (entry) => mapHubspotToSapFields(entry, mappings.addressMappings)
+    ),
+    addressesConfig: creationConfig.addresses,
+    addressDefaults: creationConfig.defaults.BPAddress,
+  });
+
+  for (const warning of addressWarnings) {
+    logger?.warn?.({ msg: 'BPAddresses warning', ...warning });
+  }
+
+  const mappedContactEmployees = businessPartnerShape.contactEmployeeSources.map((source) => ({
+    ...creationConfig.defaults.ContactEmployee,
+    ...mapHubspotToSapFields(source, mappings.contactEmployeeMappings),
+  }));
+
+  const { flags: propertiesFlags, invalid: invalidProperties } = buildSapPropertiesFlags({
+    hubspotValue: propertiesConfig.hubspotProperty
+      ? businessPartnerShape.businessPartner?.[propertiesConfig.hubspotProperty]
+      : null,
+    config: propertiesConfig,
+  });
+
+  if (invalidProperties.length > 0) {
+    logger?.warn?.({ msg: 'PropertiesN values ignored', invalid: invalidProperties });
+  }
+
+  const payloadStrategy = businessPartnerPayloadStrategyFactory
+    .getStrategy(creationConfig.payloadStrategy);
 
   const businessPartnerResult = await sapOrderAdapter.findOrCreateBusinessPartner({
     sapConfig,
@@ -138,13 +192,18 @@ export async function resolveBusinessPartnerForDocument({
     contact,
     mappedCompany,
     mappedContact,
-    companyExists: companyExists || !contactExists,
+    companyExists: businessPartnerShape.isCompanyBusinessPartner,
     resolveDefaultPriceListNum: (models) => runtimeRepository.resolveDefaultPriceListNum(models),
     resolveRequireRandCardCode: (models) => runtimeRepository.resolveRequireRandCardCode(models),
     resolveDefaultSeries: (models) => runtimeRepository.resolveDefaultSeries(models),
     resolveDefaultFindSAP: (models) => runtimeRepository.resolveDefaultFindSAP(models),
     resolveGroupCodeDefaults: (models) => runtimeRepository.resolveGroupCodeDefaults(models),
     upsertConfig,
+    payloadStrategy,
+    bpAddresses,
+    mappedContactEmployees,
+    propertiesFlags,
+    creationDefaults: creationConfig.defaults,
   });
 
   auditTrail.payload_SAP.businessPartner = businessPartnerResult.requestPayload;
@@ -165,6 +224,7 @@ export async function resolveBusinessPartnerForDocument({
   let contactEmployeeResult = {
     created: false,
     internalCode: null,
+    internalCodes: [],
     requestPayload: null,
     responsePayload: null,
   };
@@ -194,26 +254,31 @@ export async function resolveBusinessPartnerForDocument({
     });
   }
 
-  if (companyExists && contactExists) {
-    contactEmployeeResult = await sapOrderAdapter.addContactEmployeeIfNeeded({
+  // Si la strategy ya mandó los ContactEmployees anidados en el POST, un PATCH
+  // posterior los duplicaría. Si el BP ya existía, se reconcilian.
+  const contactEmployeesWentInCreate = businessPartnerResult.created
+    && payloadStrategy.includesContactEmployeesInCreate();
+
+  if (!contactEmployeesWentInCreate && businessPartnerShape.contactEmployeeSources.length > 0) {
+    contactEmployeeResult = await sapOrderAdapter.addContactEmployeesIfNeeded({
       sapConfig,
       cardCode,
       businessPartner: businessPartnerResult.businessPartner,
-      contact,
+      contacts: businessPartnerShape.contactEmployeeSources,
       contactEmployeeMappings: mappings.contactEmployeeMappings,
       upsertConfig,
     });
+  }
 
-    if (contactEmployeeResult.internalCode) {
-      await webhookReferenceRepository.persistReferences({
-        WebhookEvent,
-        eventId,
-        payload,
-        companyExists,
-        contactExists,
-        contactEmployeeCode: contactEmployeeResult.internalCode,
-      });
-    }
+  if (contactEmployeeResult.internalCodes?.length > 0) {
+    await webhookReferenceRepository.persistReferences({
+      WebhookEvent,
+      eventId,
+      payload,
+      companyExists,
+      contactExists,
+      contactEmployeeCode: contactEmployeeResult.internalCodes[0].internalCode,
+    });
   }
 
   auditTrail.payload_SAP.contactEmployee = contactEmployeeResult.requestPayload;

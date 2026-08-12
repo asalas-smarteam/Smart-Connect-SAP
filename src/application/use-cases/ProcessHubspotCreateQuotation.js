@@ -13,7 +13,20 @@ import {
   resolveBusinessPartnerForDocument,
   resolveDocumentSlpCode,
 } from './webhookQuotationSupport.js';
+import { BusinessPartnerPayloadStrategyFactory } from '#domain/business-partners/business-partner-payload.factory.js';
+import LegacyWhitelistBusinessPartnerPayloadStrategy from '#domain/business-partners/strategies/legacy-whitelist-bp-payload.strategy.js';
+import FullMappedBusinessPartnerPayloadStrategy from '#domain/business-partners/strategies/full-mapped-bp-payload.strategy.js';
 import { toNonEmptyString } from '#shared/utils/string.utils.js';
+
+// Task 12 wires the real, composition-built factory into every use case. Until then (and for
+// any test that constructs this class directly without it) this keeps the payload byte-for-byte
+// identical to what the adapter built before payload strategies existed.
+function createDefaultBusinessPartnerPayloadStrategyFactory() {
+  return new BusinessPartnerPayloadStrategyFactory({
+    legacyStrategy: new LegacyWhitelistBusinessPartnerPayloadStrategy(),
+    fullMappedStrategy: new FullMappedBusinessPartnerPayloadStrategy(),
+  });
+}
 
 export class ProcessHubspotCreateQuotation {
   constructor({
@@ -23,6 +36,7 @@ export class ProcessHubspotCreateQuotation {
     hubspotWebhookAdapter,
     webhookReferenceRepository,
     sapDocumentLinkRepository,
+    businessPartnerPayloadStrategyFactory = createDefaultBusinessPartnerPayloadStrategyFactory(),
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
     buildWebhookSapAudit,
@@ -34,6 +48,7 @@ export class ProcessHubspotCreateQuotation {
     this.hubspotWebhookAdapter = hubspotWebhookAdapter;
     this.webhookReferenceRepository = webhookReferenceRepository;
     this.sapDocumentLinkRepository = sapDocumentLinkRepository;
+    this.businessPartnerPayloadStrategyFactory = businessPartnerPayloadStrategyFactory;
     this.buildWebhookSyncErrorEntry = buildWebhookSyncErrorEntry;
     this.buildErrorResponseSnapshot = buildErrorResponseSnapshot;
     this.buildWebhookSapAudit = buildWebhookSapAudit;
@@ -41,7 +56,7 @@ export class ProcessHubspotCreateQuotation {
   }
 
   async execute({ event, tenantModels, tenantId, tenantKey, portalId }) {
-    const { payload, deal, company, contact, lineItems } = resolveEventPayload(event);
+    const { payload, deal, company, contact, lineItems, contactEmployees, bpAddress } = resolveEventPayload(event);
     const WebhookEvent = tenantModels?.WebhookEvent;
     const SapDocumentLink = tenantModels?.SapDocumentLink;
     const companyExists = Boolean(company);
@@ -97,6 +112,10 @@ export class ProcessHubspotCreateQuotation {
         contact,
         companyExists,
         contactExists,
+        contactEmployees,
+        bpAddress,
+        businessPartnerPayloadStrategyFactory: this.businessPartnerPayloadStrategyFactory,
+        logger: this.logger,
         context,
         auditTrail,
       });
