@@ -78,8 +78,22 @@ describe('sap-sync composition', () => {
       // Tarea 6: sin esta aserción, borrar el cableado del enricher de
       // PropertiesN dejaría este test (y el de propertiesFlagsEnricherWiring,
       // que solo verifica el adapter en aislamiento) en verde igual.
-      propertiesFlagsEnricher: expect.any(Object),
-      businessPartnerCreationConfigRepository: expect.any(Object),
+      // `expect.any(Object)` NO alcanza aquí: typeof null === 'object', y el
+      // constructor de SyncSapConfigToHubspot defaultea estas dos props a
+      // null, así que `expect.any(Object)` las deja pasar aunque el cableado
+      // se borre por completo. objectContaining sí rechaza null (revisa
+      // `other === null` antes de mirar las keys), y verificar la forma real
+      // (un método que solo el objeto real tiene) evita además el problema de
+      // identidad de módulo ESM que tendría un toBeInstanceOf aquí: este
+      // archivo importa la composición de forma dinámica después de
+      // jest.resetModules(), así que una clase importada de forma estática al
+      // tope del archivo podría no ser el mismo registro de módulo.
+      propertiesFlagsEnricher: expect.objectContaining({
+        enrich: expect.any(Function),
+      }),
+      businessPartnerCreationConfigRepository: expect.objectContaining({
+        getPropertiesFlagsConfig: expect.any(Function),
+      }),
     }));
   });
 
