@@ -159,6 +159,18 @@ export class BusinessPartnerCreationConfigRepository {
         return buildPropertiesFlagsDefaults();
       }
 
+      // Properties1..64 son campos de la cabecera de BusinessPartners en SAP
+      // B1; A_BusinessPartner de S/4 no los tiene. Mismo degrade que
+      // getBusinessPartnerCreationConfig: se ignora en S/4 en vez de dejar que
+      // el enricher o el $select injection intenten usar campos que no
+      // existen para ese flavor.
+      const sapFlavor = await resolveSapFlavor({ tenantModels: { Configuration } });
+
+      if (sapFlavor !== SAP_FLAVORS.B1) {
+        console.warn('propertiesFlags ignorada: solo aplica a SAP B1', { sapFlavor });
+        return buildPropertiesFlagsDefaults();
+      }
+
       return {
         strategy: pickAllowed(
           raw.strategy,

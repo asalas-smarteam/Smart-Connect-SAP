@@ -1,6 +1,9 @@
 import { SAP_FLAVORS } from '#domain/sap/sap-flavor.constants.js';
 import { resolveSapFlavor } from '#infrastructure/config/SapFlavorConfigRepository.js';
-import { readSapPropertiesFlags } from '#domain/business-partners/sap-properties-flags.service.js';
+import {
+  readSapPropertiesFlags,
+  PROPERTIES_FLAGS_OBJECT_TYPES,
+} from '#domain/business-partners/sap-properties-flags.service.js';
 
 // Traduce las 64 banderas booleanas PropertiesN del BusinessPartner de SAP B1 a
 // UNA propiedad multi-select de HubSpot, unida por ';'. Mismo contrato que
@@ -10,7 +13,11 @@ import { readSapPropertiesFlags } from '#domain/business-partners/sap-properties
 //
 // No puede ser un FieldMapping: son N campos de SAP -> 1 propiedad de HubSpot, y
 // el índice único del modelo es por sourceField.
-const ENRICHED_OBJECT_TYPES = new Set(['company', 'contact']);
+//
+// Mismo set que withPropertiesFlagsSelectFields (sap-properties-flags.service.js)
+// usa para gatear el $select: una sola fuente de verdad para qué objectType
+// tiene PropertiesN.
+const ENRICHED_OBJECT_TYPES = PROPERTIES_FLAGS_OBJECT_TYPES;
 
 export class PropertiesFlagsEnrichmentAdapter {
   constructor({

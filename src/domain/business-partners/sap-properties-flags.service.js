@@ -1,6 +1,14 @@
 import { HUBSPOT_OPTION_VALUE_SEPARATOR } from '#domain/sync/dropdown-options.constants.js';
 import { PROPERTIES_FLAGS_STRATEGIES } from './business-partner-creation.constants.js';
 
+// Un BusinessPartner puede ser jurídico (company) o persona (contact); las
+// PropertiesN son campos de la cabecera del BP, así que solo existen para
+// estos dos objectType. product/deal nunca deben ver este $select: SAP no
+// tiene esos campos en Items, y para S/4 la config completa se apaga en
+// getPropertiesFlagsConfig (BusinessPartnerCreationConfigRepository). Fuente
+// única para PropertiesFlagsEnrichmentAdapter, que reusa este mismo set.
+export const PROPERTIES_FLAGS_OBJECT_TYPES = new Set(['company', 'contact']);
+
 function isEnabled(config) {
   return config?.strategy === PROPERTIES_FLAGS_STRATEGIES.NUMBERED_MULTI_SELECT;
 }
@@ -111,6 +119,15 @@ export function listSapPropertiesFieldNames(config) {
 // mappings desde Mongo por su cuenta.
 export function withPropertiesFlagsSelectFields(mappings, config, { objectType, sourceContext } = {}) {
   const baseMappings = Array.isArray(mappings) ? mappings : [];
+
+  // product/deal (y cualquier otro objectType futuro) no tienen PropertiesN en
+  // SAP: inyectarlas en su $select haría que el Service Layer rechace todo el
+  // request. Mismo patrón que withContactEmployeesSelectField
+  // (contact-employees-select.service.js:30) con su early-return por objectType.
+  if (!PROPERTIES_FLAGS_OBJECT_TYPES.has(objectType)) {
+    return Array.isArray(mappings) ? mappings : baseMappings;
+  }
+
   const requiredFields = listSapPropertiesFieldNames(config);
 
   if (requiredFields.length === 0) {

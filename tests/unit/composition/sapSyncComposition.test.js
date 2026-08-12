@@ -75,6 +75,11 @@ describe('sap-sync composition', () => {
       syncLogRepository: expect.any(Object),
       clientConfigRepository: expect.any(Object),
       hubspotCredentialRepository: expect.any(Object),
+      // Tarea 6: sin esta aserción, borrar el cableado del enricher de
+      // PropertiesN dejaría este test (y el de propertiesFlagsEnricherWiring,
+      // que solo verifica el adapter en aislamiento) en verde igual.
+      propertiesFlagsEnricher: expect.any(Object),
+      businessPartnerCreationConfigRepository: expect.any(Object),
     }));
   });
 

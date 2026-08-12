@@ -14,6 +14,7 @@ import WarehouseStockStrategyFactory from '#domain/warehouses/warehouse-stock-st
 import B1ItemWarehouseStrategy from '#domain/warehouses/strategies/b1-item-warehouse.strategy.js';
 import S4PlantStorageLocationStrategy from '#domain/warehouses/strategies/s4-plant-storage-location.strategy.js';
 import { SapRecordEnricherPort } from '#application/ports/sap/sap-record-enricher.port.js';
+import BusinessPartnerCreationConfigRepository from '#infrastructure/config/BusinessPartnerCreationConfigRepository.js';
 import ProductSyncStrategyConfigRepository from '#infrastructure/config/ProductSyncStrategyConfigRepository.js';
 import WarehouseStockConfigRepository from '#infrastructure/config/WarehouseStockConfigRepository.js';
 import MongooseClientConfigRepository from '#infrastructure/database/repositories/MongooseClientConfigRepository.js';
@@ -27,7 +28,6 @@ import MappingSyncRepository from '#infrastructure/repositories/MappingSyncRepos
 import SapSyncDataAdapter from '#infrastructure/sap/SapSyncDataAdapter.js';
 import S4ContactEnrichmentAdapter from '#infrastructure/sap/customers/S4ContactEnrichmentAdapter.js';
 import PropertiesFlagsEnrichmentAdapter from '#infrastructure/sap/customers/PropertiesFlagsEnrichmentAdapter.js';
-import BusinessPartnerCreationConfigRepository from '#infrastructure/config/BusinessPartnerCreationConfigRepository.js';
 import WarehouseStockEnrichmentAdapter from '#infrastructure/sap/products/WarehouseStockEnrichmentAdapter.js';
 import sapSyncAdminAdapter from '#infrastructure/scheduler/SapSyncAdminAdapter.js';
 import SapDiscountClient from '#infrastructure/external-services/SapDiscountClient.js';
@@ -76,7 +76,9 @@ export function buildSyncSapConfigToHubspot() {
 
   // Misma instancia inyectada dos veces abajo: el use-case la usa suelta para
   // inyectar Properties1..64/ContactEmployees en el $select, y el enricher la
-  // usa para resolver el valor ya mapeado. Una sola lectura de config por corrida.
+  // usa para resolver el valor ya mapeado. No hay memoización en el
+  // repositorio, así que esto ahorra una allocation, no una lectura de Mongo
+  // duplicada; cada consumidor sigue leyendo la config una vez por su cuenta.
   const businessPartnerCreationConfigRepository = new BusinessPartnerCreationConfigRepository();
 
   return new SyncSapConfigToHubspot({

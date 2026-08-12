@@ -133,6 +133,33 @@ describe('BusinessPartnerCreationConfigRepository', () => {
     });
   });
 
+  // Bug encontrado en review de Tarea 6: sin este gate, un tenant S/4 que
+  // prendiera la strategy hacia que el $select injection (withPropertiesFlagsSelectFields)
+  // inyectara PropertiesN contra A_BusinessPartner, que no tiene esos campos ->
+  // 400 del Service Layer. Mismo degrade que getBusinessPartnerCreationConfig.
+  it('propertiesFlags se apaga para un tenant S/4 aunque la strategy este prendida', async () => {
+    const tenantModels = {
+      Configuration: buildConfigurationModel({
+        sapFlavor: 'S4',
+        propertiesFlags: {
+          strategy: 'numberedMultiSelect',
+          hubspotProperty: 'groupname',
+          min: 1,
+          max: 64,
+          trueValue: 'tYES',
+        },
+      }),
+    };
+
+    expect(await repository.getPropertiesFlagsConfig({ tenantModels })).toEqual({
+      strategy: 'none',
+      hubspotProperty: null,
+      min: 1,
+      max: 64,
+      trueValue: 'tYES',
+    });
+  });
+
   it('usa el tenantContext para flavor guard cuando tenantModels no se pasa', async () => {
     const tenantContext = {
       tenantModels: {

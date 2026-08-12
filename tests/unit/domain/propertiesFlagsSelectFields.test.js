@@ -68,4 +68,21 @@ describe('withPropertiesFlagsSelectFields', () => {
     expect(withPropertiesFlagsSelectFields([], { ...ON, min: 1, max: 2 }, { objectType: 'company' }))
       .toHaveLength(2);
   });
+
+  // Bug encontrado en review de Tarea 6: sin este gate, un tenant con la
+  // strategy prendida inyectaba PropertiesN en el $select de CUALQUIER
+  // objectType, incluido product (Items no tiene esos campos en SAP -> 400
+  // del Service Layer). Mismo patrón que withContactEmployeesSelectField.
+  it.each(['product', 'deal', 'invoice'])(
+    'devuelve la misma referencia para objectType %s aunque la strategy este prendida',
+    (objectType) => {
+      expect(withPropertiesFlagsSelectFields(BASE, ON, { objectType })).toBe(BASE);
+    }
+  );
+
+  it('sirve igual para objectType contact', () => {
+    const result = withPropertiesFlagsSelectFields(BASE, ON, { objectType: 'contact', sourceContext: 'businessPartner' });
+
+    expect(result).toHaveLength(1 + 64);
+  });
 });
