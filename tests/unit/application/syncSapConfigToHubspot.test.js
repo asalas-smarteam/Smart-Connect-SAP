@@ -79,7 +79,20 @@ describe('SyncSapConfigToHubspot', () => {
       clientConfig: config,
       tenantContext,
       fetchOptions: expect.objectContaining({
-        mappings: [{ sourceField: 'CardCode', targetField: 'idsap' }],
+        // 'contact' siempre inyecta ContactEmployees en el $select (no depende
+        // de businessPartnerCreationConfigRepository, que este test no provee) —
+        // ver src/domain/business-partners/contact-employees-select.service.js.
+        mappings: [
+          { sourceField: 'CardCode', targetField: 'idsap' },
+          {
+            sourceField: 'ContactEmployees',
+            targetField: null,
+            objectType: 'contact',
+            sourceContext: 'businessPartner',
+            includeInServiceLayerSelect: true,
+            isActive: true,
+          },
+        ],
       }),
     }));
     expect(mappingRepository.mapRecords).toHaveBeenCalledWith({

@@ -1,6 +1,8 @@
 import { buildSapFetchOptions } from '../services/sap-sync-options.service.js';
 import { resolveDiscount } from '#domain/products/discount-resolver.service.js';
 import { withDynamicDescriptionSelectFields } from '#domain/sync/dynamic-description.service.js';
+import { withPropertiesFlagsSelectFields } from '#domain/business-partners/sap-properties-flags.service.js';
+import { withContactEmployeesSelectField } from '#domain/business-partners/contact-employees-select.service.js';
 
 export class SyncSapConfigToHubspot {
   constructor({
@@ -16,6 +18,12 @@ export class SyncSapConfigToHubspot {
     discountConfigRepository = null,
     s4ContactEnricher = null,
     warehouseStockEnricher = null,
+    propertiesFlagsEnricher = null,
+    businessPartnerCreationConfigRepository = null,
+    addressSyncConfigRepository = null,
+    // Este constructor no tenía logger. Las tareas 6 y 9 registran warnings, así
+    // que se agrega ahora con default console, igual que HandleHubspotAssociations.
+    logger = console,
     dateProvider = () => new Date(),
   }) {
     this.sapDataSource = sapDataSource;
@@ -30,6 +38,10 @@ export class SyncSapConfigToHubspot {
     this.discountConfigRepository = discountConfigRepository;
     this.s4ContactEnricher = s4ContactEnricher;
     this.warehouseStockEnricher = warehouseStockEnricher;
+    this.propertiesFlagsEnricher = propertiesFlagsEnricher;
+    this.businessPartnerCreationConfigRepository = businessPartnerCreationConfigRepository;
+    this.addressSyncConfigRepository = addressSyncConfigRepository;
+    this.logger = logger;
     this.dateProvider = dateProvider;
   }
 
@@ -85,12 +97,29 @@ export class SyncSapConfigToHubspot {
         ? await this.mappingRepository.getDynamicDescriptionConfig({ tenantContext })
         : null;
 
+      // Properties1..64 y ContactEmployees no pueden tener filas de FieldMapping
+      // propias, así que se inyectan como mappings sintéticos. Solo afectan el
+      // $select del request a SAP: mapRecords vuelve a consultar los mappings
+      // desde Mongo y nunca ve estos.
+      const propertiesFlagsConfig = this.businessPartnerCreationConfigRepository
+        ? await this.businessPartnerCreationConfigRepository.getPropertiesFlagsConfig({
+          tenantModels: tenantContext?.tenantModels,
+        })
+        : null;
+
       const fetchOptions = {
         ...buildSapFetchOptions(activeConfig, this.dateProvider),
-        mappings: withDynamicDescriptionSelectFields(sapMappings, dynamicDescriptionConfig, {
-          objectType: activeConfig.objectType,
-          sourceContext,
-        }),
+        mappings: withContactEmployeesSelectField(
+          withPropertiesFlagsSelectFields(
+            withDynamicDescriptionSelectFields(sapMappings, dynamicDescriptionConfig, {
+              objectType: activeConfig.objectType,
+              sourceContext,
+            }),
+            propertiesFlagsConfig,
+            { objectType: activeConfig.objectType, sourceContext }
+          ),
+          { objectType: activeConfig.objectType, sourceContext }
+        ),
       };
       const rawData = await this.sapDataSource.fetchData({
         clientConfigId,
