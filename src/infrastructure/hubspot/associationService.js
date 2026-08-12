@@ -56,7 +56,7 @@ async function associateDealWithProducts(
       const lineItemId = lineItem?.id;
       if (!lineItemId) continue;
 
-      await hubspotClient.associateObjects(
+      await hubspotClient.associateObjectsDefault(
         resolvedToken,
         'deal',
         dealId,
@@ -166,7 +166,7 @@ async function associateObjectsBySapId(
 
   for (const toHubspotId of toHubspotIds) {
     try {
-      await hubspotClient.associateObjects(
+      await hubspotClient.associateObjectsDefault(
         resolvedToken,
         fromObjectType,
         fromHubspotId,

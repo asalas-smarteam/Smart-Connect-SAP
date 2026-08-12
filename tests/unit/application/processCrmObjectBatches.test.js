@@ -19,7 +19,7 @@ function buildUseCase(overrides = {}) {
       })),
       batchUpdateObjects: jest.fn().mockResolvedValue({ results: [] }),
       batchAssociateDefault: jest.fn().mockResolvedValue({}),
-      associateObjects: jest.fn().mockResolvedValue({}),
+      associateObjectsDefault: jest.fn().mockResolvedValue({}),
     },
     associationRegistry: {
       findHubspotIdsForSapIds: jest.fn().mockResolvedValue(new Map()),
@@ -511,7 +511,7 @@ describe('ProcessCrmObjectBatches', () => {
     useCase.crmBatchClient.batchAssociateDefault.mockRejectedValue(new Error('batch associate down'));
     const rateLimited = new Error('rate limited');
     rateLimited.response = { status: 429 };
-    useCase.crmBatchClient.associateObjects
+    useCase.crmBatchClient.associateObjectsDefault
       .mockRejectedValueOnce(rateLimited)
       .mockResolvedValueOnce({});
 
@@ -527,7 +527,7 @@ describe('ProcessCrmObjectBatches', () => {
 
     await useCase.execute({ mappedItems, ...params });
 
-    expect(useCase.crmBatchClient.associateObjects).toHaveBeenCalledTimes(2);
+    expect(useCase.crmBatchClient.associateObjectsDefault).toHaveBeenCalledTimes(2);
     expect(useCase.sleeper).toHaveBeenCalled();
   });
 

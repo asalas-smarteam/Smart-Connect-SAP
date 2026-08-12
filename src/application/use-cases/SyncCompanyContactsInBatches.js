@@ -897,7 +897,7 @@ export class SyncCompanyContactsInBatches {
             try {
               const token = await getToken();
               await this.retry(() =>
-                this.crmBatchClient.associateObjects(token, 'company', fromId, 'contact', toId)
+                this.crmBatchClient.associateObjectsDefault(token, 'company', fromId, 'contact', toId)
               );
             } catch (associationError) {
               this.logger.error?.('Company contact sync error:', associationError);

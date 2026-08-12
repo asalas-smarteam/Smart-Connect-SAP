@@ -5,7 +5,7 @@ function buildDeps(overrides = {}) {
   return {
     hubspotClient: {
       createNote: jest.fn().mockResolvedValue({ id: 'note-1' }),
-      associateObjects: jest.fn().mockResolvedValue({}),
+      associateObjectsDefault: jest.fn().mockResolvedValue({}),
       updateDeal: jest.fn().mockResolvedValue({}),
     },
     hubspotWebhookAdapter: {
@@ -48,7 +48,7 @@ describe('notifyWebhookFailure', () => {
     await notifyWebhookFailure({ event, lastError: 'ItemCode is required', tenantModels: {}, portalId: 'p1' });
 
     expect(deps.hubspotClient.createNote).toHaveBeenCalledWith('token-1', { body: 'ItemCode is required' });
-    expect(deps.hubspotClient.associateObjects).toHaveBeenCalledWith('token-1', 'note', 'note-1', 'deal', 'deal-1');
+    expect(deps.hubspotClient.associateObjectsDefault).toHaveBeenCalledWith('token-1', 'note', 'note-1', 'deal', 'deal-1');
     expect(deps.hubspotClient.updateDeal).not.toHaveBeenCalled();
   });
 
@@ -116,7 +116,7 @@ describe('notifyWebhookFailure', () => {
     const deps = buildDeps({
       hubspotClient: {
         createNote: jest.fn().mockRejectedValue(new Error('HubSpot down')),
-        associateObjects: jest.fn(),
+        associateObjectsDefault: jest.fn(),
         updateDeal: jest.fn(),
       },
     });

@@ -1,5 +1,5 @@
 import {
-  associateObjects,
+  associateObjectsDefault,
   batchAssociateDefault,
   batchCreateObjects,
   batchUpdateObjects,
@@ -8,7 +8,7 @@ import {
 } from './hubspotClient.js';
 
 export const hubspotCrmBatchAdapter = Object.freeze({
-  associateObjects,
+  associateObjectsDefault,
   batchAssociateDefault,
   batchCreateObjects,
   batchUpdateObjects,

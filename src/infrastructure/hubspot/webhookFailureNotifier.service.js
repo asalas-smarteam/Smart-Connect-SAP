@@ -41,7 +41,7 @@ export function buildNotifyWebhookFailure({
       }
 
       const note = await hubspotClient.createNote(resolved.token, { body: lastError });
-      await hubspotClient.associateObjects(resolved.token, 'note', note.id, 'deal', dealId);
+      await hubspotClient.associateObjectsDefault(resolved.token, 'note', note.id, 'deal', dealId);
 
       if (config.requiereReturnStage && config.stageToReturned) {
         await hubspotClient.updateDeal(resolved.token, dealId, {

@@ -795,7 +795,7 @@ export class ProcessCrmObjectBatches {
             try {
               const token = await getToken();
               await this.retry(() =>
-                this.crmBatchClient.associateObjects(token, fromObjectType, fromId, toObjectType, toId)
+                this.crmBatchClient.associateObjectsDefault(token, fromObjectType, fromId, toObjectType, toId)
               );
             } catch (pairError) {
               this.logger.error?.('Failed to associate objects', {

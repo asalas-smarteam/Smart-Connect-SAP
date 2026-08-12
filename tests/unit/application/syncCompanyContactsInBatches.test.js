@@ -14,7 +14,7 @@ function buildUseCase(overrides = {}) {
       })),
       batchUpdateObjects: jest.fn().mockResolvedValue({ results: [] }),
       batchAssociateDefault: jest.fn().mockResolvedValue({}),
-      associateObjects: jest.fn().mockResolvedValue({}),
+      associateObjectsDefault: jest.fn().mockResolvedValue({}),
     },
     contactHandler: {
       getSearchProperties: jest.fn().mockResolvedValue(['email', 'firstname', 'phone', 'idsap', 'internalcode']),
@@ -838,7 +838,7 @@ describe('SyncCompanyContactsInBatches', () => {
     }));
     useCase.crmBatchClient.batchAssociateDefault.mockRejectedValue(new Error('associate down'));
     const rateLimited = Object.assign(new Error('rate limited'), { response: { status: 429 } });
-    useCase.crmBatchClient.associateObjects
+    useCase.crmBatchClient.associateObjectsDefault
       .mockRejectedValueOnce(rateLimited)
       .mockResolvedValueOnce({});
 
@@ -872,7 +872,7 @@ describe('SyncCompanyContactsInBatches', () => {
     // Per-pair fallback goes through retry(): the 429 is retried, not reported.
     // 2 pairs + 1 retry of the rate-limited one.
     expect(useCase.sleeper).toHaveBeenCalled();
-    expect(useCase.crmBatchClient.associateObjects).toHaveBeenCalledTimes(3);
+    expect(useCase.crmBatchClient.associateObjectsDefault).toHaveBeenCalledTimes(3);
   });
 
   it('registers a mapping for every SAP internal code sharing a deduped contact', async () => {

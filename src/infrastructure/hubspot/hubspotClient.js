@@ -391,15 +391,23 @@ export async function batchUpdate(token, dataArray) {
   );
 }
 
-// Routed through hubspotRequest rather than raw axios so it is rate limited too:
-// this is the per-pair fallback of the association batch, so it runs in exactly
-// the tight loops that need throttling most.
-export async function associateObjects(token, fromType, fromId, toType, toId) {
+// Ruta `default` de la API v4: sin cuerpo, HubSpot aplica el tipo sin etiqueta
+// del par. Verificada en vivo el 2026-08-11 para contact->contact (typeId 449,
+// HUBSPOT_DEFINED, label null), donde además crea LAS DOS direcciones en una
+// sola llamada -- nunca asocies el mismo par dos veces.
+//
+// Deliberadamente NO es la ruta `/associations/{to}/{id}` con cuerpo de tipos:
+// esa espera al menos un {associationCategory, associationTypeId} y la versión
+// anterior de esta función le mandaba `[]`, sin verificar nunca que funcionara.
+//
+// Enrutada por hubspotRequest y no por axios crudo para que también respete el
+// rate limit: es el fallback por par del batch de asociaciones, o sea corre
+// justo en los bucles apretados que más lo necesitan.
+export async function associateObjectsDefault(token, fromType, fromId, toType, toId) {
   return hubspotRequest(
     'put',
-    `/crm/v4/objects/${fromType}/${fromId}/associations/${toType}/${toId}`,
+    `/crm/v4/objects/${fromType}/${fromId}/associations/default/${toType}/${toId}`,
     token,
-    [],
   );
 }
 
