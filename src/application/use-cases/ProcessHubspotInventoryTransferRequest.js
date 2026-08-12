@@ -4,7 +4,10 @@ import {
   mapStockTransferLines,
 } from '#domain/inventory/inventory-transfer-request-builder.service.js';
 import { mapHubspotToSapFields } from '#domain/orders/order-builder.service.js';
-import { resolveEventPayload } from '../services/webhook-payload.service.js';
+import {
+  resolveDealContactEmployeeCode,
+  resolveEventPayload,
+} from '../services/webhook-payload.service.js';
 import {
   buildSapDocumentLinkLines,
   createDocumentAuditTrail,
@@ -17,9 +20,10 @@ import LegacyWhitelistBusinessPartnerPayloadStrategy from '#domain/business-part
 import FullMappedBusinessPartnerPayloadStrategy from '#domain/business-partners/strategies/full-mapped-bp-payload.strategy.js';
 import { toNonEmptyString } from '#shared/utils/string.utils.js';
 
-// Task 12 wires the real, composition-built factory into every use case. Until then (and for
-// any test that constructs this class directly without it) this keeps the payload byte-for-byte
-// identical to what the adapter built before payload strategies existed.
+// Dead in production since composition always passes an explicit factory (see
+// webhook-processing.composition.js). Kept only as a defensive default for direct
+// construction, e.g. tests that don't go through composition: it keeps the payload
+// byte-for-byte identical to what the adapter built before payload strategies existed.
 function createDefaultBusinessPartnerPayloadStrategyFactory() {
   return new BusinessPartnerPayloadStrategyFactory({
     legacyStrategy: new LegacyWhitelistBusinessPartnerPayloadStrategy(),
@@ -119,7 +123,11 @@ export class ProcessHubspotInventoryTransferRequest {
         auditTrail,
       });
       cardCode = businessPartner.cardCode;
-      const { contactEmployeeResult, hubspotToken } = businessPartner;
+      const {
+        contactEmployeeResult,
+        hubspotToken,
+        dealContactIsContactEmployee,
+      } = businessPartner;
 
       const mappedDeal = mapHubspotToSapFields(deal || {}, mappings.dealInventoryTransferRequestMappings);
       const stockTransferLines = mapStockTransferLines({
@@ -190,7 +198,10 @@ export class ProcessHubspotInventoryTransferRequest {
         cardCode,
         syncCompany: false,
         syncContact: contactExists && contactEmployeeResult.created,
-        contactEmployeeCode: contactEmployeeResult.internalCodes?.[0]?.internalCode,
+        contactEmployeeCode: resolveDealContactEmployeeCode({
+          dealContactIsContactEmployee,
+          internalCodes: contactEmployeeResult.internalCodes,
+        }),
       });
       auditTrail.response_hubspot = mergeHubspotResponses(
         auditTrail.response_hubspot,

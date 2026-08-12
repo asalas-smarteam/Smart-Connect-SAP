@@ -279,6 +279,7 @@ export async function resolveBusinessPartnerForDocument({
       companyExists,
       contactExists,
       contactEmployeeCode: contactEmployeeResult.internalCodes[0].internalCode,
+      dealContactIsContactEmployee: businessPartnerShape.dealContactIsContactEmployee,
     });
   }
 
@@ -309,6 +310,9 @@ export async function resolveBusinessPartnerForDocument({
     businessPartnerResult,
     contactEmployeeResult,
     hubspotToken,
+    // Lo consumen los llamadores para decidir si el write-back legacy de
+    // updateAfterSap puede escribirle internalcode al contact del deal.
+    dealContactIsContactEmployee: businessPartnerShape.dealContactIsContactEmployee,
   };
 }
 

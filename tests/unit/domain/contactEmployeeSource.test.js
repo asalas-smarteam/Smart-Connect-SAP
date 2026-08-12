@@ -15,6 +15,9 @@ describe('resolveBusinessPartnerAndContactEmployees — dealContact (conducta ac
     expect(result.businessPartner).toBe(company);
     expect(result.isCompanyBusinessPartner).toBe(true);
     expect(result.contactEmployeeSources).toEqual([contact]);
+    // El write-back legacy de internalcode al contact del deal solo es correcto
+    // en este caso: aqui ese contact SI es el ContactEmployee real.
+    expect(result.dealContactIsContactEmployee).toBe(true);
   });
 
   it('solo contact: BP es el contact y no hay CE', () => {
@@ -23,6 +26,7 @@ describe('resolveBusinessPartnerAndContactEmployees — dealContact (conducta ac
     expect(result.businessPartnerSource).toBe('contact');
     expect(result.isCompanyBusinessPartner).toBe(false);
     expect(result.contactEmployeeSources).toEqual([]);
+    expect(result.dealContactIsContactEmployee).toBe(false);
   });
 
   it('solo company: BP es la company y no hay CE', () => {
@@ -31,6 +35,7 @@ describe('resolveBusinessPartnerAndContactEmployees — dealContact (conducta ac
     expect(result.businessPartnerSource).toBe('company');
     expect(result.isCompanyBusinessPartner).toBe(true);
     expect(result.contactEmployeeSources).toEqual([]);
+    expect(result.dealContactIsContactEmployee).toBe(false);
   });
 
   it('ignora payload.contactEmployees', () => {
@@ -54,6 +59,9 @@ describe('resolveBusinessPartnerAndContactEmployees — payloadArray (nuevo)', (
     expect(result.contactEmployeeSources).toEqual(employees);
     expect(result.contactEmployeeSources).not.toContain(contact);
     expect(result.warnings).toEqual([]);
+    // Clave para el write-back: el contact del deal NO es ContactEmployee, asi
+    // que nadie puede escribirle un internalCode de esta lista.
+    expect(result.dealContactIsContactEmployee).toBe(false);
   });
 
   it('solo contact: BP es el contact y los CE son el array', () => {

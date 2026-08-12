@@ -35,6 +35,13 @@ export function resolveBusinessPartnerAndContactEmployees({
   const businessPartnerSource = companyExists ? 'company' : 'contact';
   const warnings = [];
   let contactEmployeeSources = [];
+  // Solo en modo dealContact el contact del deal ES el (único) ContactEmployee
+  // real. Con payloadArray los CE salen de payload.contactEmployees y el contact
+  // del deal explícitamente NO es uno de ellos, así que cualquier write-back que
+  // le estampe un InternalCode (la vía legacy de updateAfterSap y del snapshot
+  // en WebhookEvent) tiene que ir condicionado a esta bandera: si no, escribe el
+  // código SAP de otra persona en un registro de HubSpot que no le corresponde.
+  let dealContactIsContactEmployee = false;
 
   if (source === CONTACT_EMPLOYEE_SOURCES.PAYLOAD_ARRAY) {
     contactEmployeeSources = toObjectList(contactEmployees);
@@ -46,6 +53,7 @@ export function resolveBusinessPartnerAndContactEmployees({
     }
   } else if (companyExists && contactExists) {
     contactEmployeeSources = [contact];
+    dealContactIsContactEmployee = true;
   }
 
   return {
@@ -55,6 +63,7 @@ export function resolveBusinessPartnerAndContactEmployees({
     // que los use-cases pasaban como `companyExists` al adapter.
     isCompanyBusinessPartner: businessPartnerSource === 'company',
     contactEmployeeSources,
+    dealContactIsContactEmployee,
     warnings,
   };
 }

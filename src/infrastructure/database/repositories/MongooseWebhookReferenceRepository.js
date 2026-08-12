@@ -9,6 +9,10 @@ export class MongooseWebhookReferenceRepository {
     contactExists,
     cardCode = null,
     contactEmployeeCode = null,
+    // Solo tiene sentido escribir internalCode al contact del deal cuando ese
+    // contact es el ContactEmployee real (modo dealContact). Ver
+    // buildWebhookEventReferenceUpdates.
+    dealContactIsContactEmployee = false,
   }) {
     if (!WebhookEvent || !eventId || !payload) {
       return;
@@ -20,6 +24,7 @@ export class MongooseWebhookReferenceRepository {
       contactExists,
       cardCode,
       contactEmployeeCode,
+      dealContactIsContactEmployee,
     });
 
     if (!Object.keys(updates).length) {

@@ -282,4 +282,72 @@ describe('ProcessHubspotInventoryTransferRequest', () => {
 
     expect(deps.runtimeRepository.resolveGroupCodeDefaults).not.toHaveBeenCalled();
   });
+
+  // El write-back legacy de internalcode le escribe al contact del deal. Solo es
+  // correcto en modo dealContact, donde ese contact ES el ContactEmployee real.
+  describe('internalcode al contact del deal', () => {
+    const eventWithCompany = {
+      ...baseEvent,
+      payload: {
+        ...baseEvent.payload,
+        company: { hs_object_id: 'company-1', name: 'ACME' },
+      },
+    };
+
+    function buildDepsWithContactEmployees(internalCodes) {
+      const deps = buildDeps();
+      deps.hubspotWebhookAdapter.updateContactEmployeeCodes = jest.fn().mockResolvedValue([]);
+      deps.sapOrderAdapter.addContactEmployeesIfNeeded.mockResolvedValue({
+        created: true,
+        internalCodes,
+        results: [],
+        requestPayload: [],
+        responsePayload: [],
+        updateResults: [],
+      });
+      return deps;
+    }
+
+    it('dealContact: le escribe su propio internalcode (conducta historica)', async () => {
+      const deps = buildDepsWithContactEmployees([
+        { contact: eventWithCompany.payload.contact, internalCode: 501 },
+      ]);
+      const useCase = new ProcessHubspotInventoryTransferRequest(deps);
+
+      await useCase.execute({ event: eventWithCompany, tenantModels });
+
+      expect(deps.hubspotWebhookAdapter.updateAfterSap).toHaveBeenCalledWith(
+        expect.objectContaining({ contactEmployeeCode: 501 })
+      );
+    });
+
+    it('payloadArray: no le escribe el internalcode de otro ContactEmployee', async () => {
+      const deps = buildDepsWithContactEmployees([
+        { contact: { hs_object_id: 'contact-ana' }, internalCode: 601 },
+      ]);
+      deps.runtimeRepository.resolveBusinessPartnerCreationConfig.mockResolvedValue({
+        payloadStrategy: 'legacyWhitelist',
+        contactEmployeeSource: 'payloadArray',
+        defaults: { BusinessPartner: {}, ContactEmployee: {}, BPAddress: {} },
+        addresses: { strategy: 'none', byName: {}, required: [] },
+      });
+      const useCase = new ProcessHubspotInventoryTransferRequest(deps);
+
+      await useCase.execute({
+        event: {
+          ...eventWithCompany,
+          payload: { ...eventWithCompany.payload, contactEmployees: [{ firstname: 'Ana' }] },
+        },
+        tenantModels,
+      });
+
+      const [args] = deps.hubspotWebhookAdapter.updateAfterSap.mock.calls[0];
+      expect(args.contactEmployeeCode).toBeUndefined();
+      expect(deps.hubspotWebhookAdapter.updateContactEmployeeCodes).toHaveBeenCalledWith(
+        expect.objectContaining({
+          internalCodes: [{ contact: { hs_object_id: 'contact-ana' }, internalCode: 601 }],
+        })
+      );
+    });
+  });
 });
