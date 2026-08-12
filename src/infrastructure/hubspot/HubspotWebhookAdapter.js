@@ -134,6 +134,30 @@ export class HubspotWebhookAdapter {
 
     return hubspotResponses;
   }
+
+  // Escribe el InternalCode de SAP en cada contacto de HubSpot que sí quedó
+  // como ContactEmployee. Secuencial para no disparar el rate limit de
+  // HubSpot con una empresa que tenga muchos contactos asociados.
+  async updateContactEmployeeCodes({ token, internalCodes }) {
+    const entries = Array.isArray(internalCodes) ? internalCodes : [];
+    const responses = [];
+
+    for (const entry of entries) {
+      const contactObjectId = toNonEmptyString(entry?.contact?.hs_object_id);
+
+      if (!contactObjectId || !entry?.internalCode) {
+        continue;
+      }
+
+      responses.push(await hubspotClient.updateContact(token, contactObjectId, {
+        // La propiedad de HubSpot es minúscula. No la confundas con la llave
+        // internalCode del snapshot que se guarda en WebhookEvent.
+        properties: { internalcode: String(entry.internalCode) },
+      }));
+    }
+
+    return responses;
+  }
 }
 
 export function mergeHubspotResponses(current, next) {

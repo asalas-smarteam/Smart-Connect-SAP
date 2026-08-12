@@ -229,6 +229,19 @@ export class ProcessHubspotWebhookEvent {
         });
       }
 
+      if (contactEmployeeResult.internalCodes?.length > 0) {
+        const tokenForContactEmployees = hubspotToken || await this.hubspotWebhookAdapter.getAccessToken({
+          tenantModels,
+          hubspotCredentials,
+        });
+
+        auditTrail.response_hubspot_contactEmployees = await this.hubspotWebhookAdapter
+          .updateContactEmployeeCodes({
+            token: tokenForContactEmployees,
+            internalCodes: contactEmployeeResult.internalCodes,
+          });
+      }
+
       auditTrail.payload_SAP.contactEmployee = contactEmployeeResult.requestPayload;
       auditTrail.response_SAP.contactEmployee = contactEmployeeResult.responsePayload;
       // addContactEmployeesIfNeeded (plural) returns updateResults as an array, one entry per

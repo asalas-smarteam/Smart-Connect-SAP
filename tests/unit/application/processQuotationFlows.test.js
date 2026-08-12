@@ -109,6 +109,8 @@ describe('ProcessHubspotCreateQuotation', () => {
         getAccessToken: jest.fn().mockResolvedValue('token'),
         updateBusinessPartnerIds: jest.fn(),
         updateAfterSap: jest.fn().mockResolvedValue({ deal: { ok: true } }),
+        // Task 11: write-back of SAP InternalCode to every real ContactEmployee contact.
+        updateContactEmployeeCodes: jest.fn().mockResolvedValue([]),
       },
       webhookReferenceRepository: { persistReferences: jest.fn() },
       sapDocumentLinkRepository: {
