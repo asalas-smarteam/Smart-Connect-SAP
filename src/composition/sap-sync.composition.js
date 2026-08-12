@@ -26,6 +26,8 @@ import TenantSapSyncLockAdapter from '#infrastructure/locks/TenantSapSyncLockAda
 import MappingSyncRepository from '#infrastructure/repositories/MappingSyncRepository.js';
 import SapSyncDataAdapter from '#infrastructure/sap/SapSyncDataAdapter.js';
 import S4ContactEnrichmentAdapter from '#infrastructure/sap/customers/S4ContactEnrichmentAdapter.js';
+import PropertiesFlagsEnrichmentAdapter from '#infrastructure/sap/customers/PropertiesFlagsEnrichmentAdapter.js';
+import BusinessPartnerCreationConfigRepository from '#infrastructure/config/BusinessPartnerCreationConfigRepository.js';
 import WarehouseStockEnrichmentAdapter from '#infrastructure/sap/products/WarehouseStockEnrichmentAdapter.js';
 import sapSyncAdminAdapter from '#infrastructure/scheduler/SapSyncAdminAdapter.js';
 import SapDiscountClient from '#infrastructure/external-services/SapDiscountClient.js';
@@ -72,6 +74,11 @@ export function buildSyncSapConfigToHubspot() {
     logger,
   });
 
+  // Misma instancia inyectada dos veces abajo: el use-case la usa suelta para
+  // inyectar Properties1..64/ContactEmployees en el $select, y el enricher la
+  // usa para resolver el valor ya mapeado. Una sola lectura de config por corrida.
+  const businessPartnerCreationConfigRepository = new BusinessPartnerCreationConfigRepository();
+
   return new SyncSapConfigToHubspot({
     sapDataSource,
     mappingRepository,
@@ -91,6 +98,14 @@ export function buildSyncSapConfigToHubspot() {
       new WarehouseStockEnrichmentAdapter({
         strategyFactory: warehouseStockStrategyFactory,
         configRepository: new WarehouseStockConfigRepository(),
+        logger,
+      }),
+      SapRecordEnricherPort
+    ),
+    businessPartnerCreationConfigRepository,
+    propertiesFlagsEnricher: assertPort(
+      new PropertiesFlagsEnrichmentAdapter({
+        configRepository: businessPartnerCreationConfigRepository,
         logger,
       }),
       SapRecordEnricherPort

@@ -196,6 +196,18 @@ export class SyncSapConfigToHubspot {
         });
       }
 
+      // Traduce las banderas PropertiesN de SAP a la propiedad multi-select de
+      // HubSpot (no-op para product/deal y para tenants S/4). Corre después de
+      // mapRecords porque necesita rawSapData, y antes de sendMappedRecords para
+      // que sanitizeProperties vea el valor ya resuelto.
+      if (this.propertiesFlagsEnricher) {
+        await this.propertiesFlagsEnricher.enrich({
+          mappedRecords: mappedRecordsWithRawSap,
+          objectType,
+          tenantModels: tenantContext?.tenantModels,
+        });
+      }
+
       const hubspotResult = await this.sendMappedRecords({
         mappedRecords: mappedRecordsWithRawSap,
         config: activeConfig,
