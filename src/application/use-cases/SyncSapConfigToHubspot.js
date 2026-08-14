@@ -20,6 +20,7 @@ export class SyncSapConfigToHubspot {
     s4ContactEnricher = null,
     warehouseStockEnricher = null,
     propertiesFlagsEnricher = null,
+    batchExpiryEnricher = null,
     businessPartnerCreationConfigRepository = null,
     addressSyncConfigRepository = null,
     // Este constructor no tenía logger. Las tareas 6 y 9 registran warnings, así
@@ -40,6 +41,7 @@ export class SyncSapConfigToHubspot {
     this.s4ContactEnricher = s4ContactEnricher;
     this.warehouseStockEnricher = warehouseStockEnricher;
     this.propertiesFlagsEnricher = propertiesFlagsEnricher;
+    this.batchExpiryEnricher = batchExpiryEnricher;
     this.businessPartnerCreationConfigRepository = businessPartnerCreationConfigRepository;
     this.addressSyncConfigRepository = addressSyncConfigRepository;
     this.logger = logger;
@@ -209,6 +211,18 @@ export class SyncSapConfigToHubspot {
       // finds it already resolved.
       if (this.warehouseStockEnricher) {
         await this.warehouseStockEnricher.enrich({
+          mappedRecords: mappedRecordsWithRawSap,
+          objectType,
+          tenantModels: tenantContext?.tenantModels,
+        });
+      }
+
+      // Adjunta los lotes y sus fechas de caducidad (no-op salvo en tenants con
+      // batchExpiryStrategy configurada). Va despues del de stock porque ambos
+      // leen rawSapData y son independientes, y antes de sendMappedRecords para
+      // que product.handler.js encuentre la clave ya resuelta.
+      if (this.batchExpiryEnricher) {
+        await this.batchExpiryEnricher.enrich({
           mappedRecords: mappedRecordsWithRawSap,
           objectType,
           tenantModels: tenantContext?.tenantModels,

@@ -1,4 +1,6 @@
 import { jest } from '@jest/globals';
+import fs from 'node:fs';
+import path from 'node:path';
 
 async function importCompositionWithMocks({
   SapSyncDataAdapter = class {
@@ -130,5 +132,39 @@ describe('sap-sync composition', () => {
     expect(() => buildSyncSapConfigToHubspot()).toThrow(
       'SapDataSourcePort missing methods: fetchData'
     );
+  });
+});
+
+// Verificacion textual a proposito: un parametro del constructor puede quedar
+// sin cablear en composicion y TODOS los tests unitarios siguen verdes, porque
+// cada uno inyecta su propio doble. Ya paso tres veces en este repo. Aserciones
+// como expect.any(Object) no lo detectan; leer el archivo si.
+// La ruta se resuelve contra la ubicacion de ESTE archivo, no contra
+// process.cwd(): jest.config.js no fija rootDir, asi que correr jest desde un
+// subdirectorio hacia fallar el import con un "archivo inexistente" enganoso.
+const source = fs.readFileSync(
+  path.resolve(import.meta.dirname, '../../../src/composition/sap-sync.composition.js'),
+  'utf8'
+);
+
+describe('sap-sync composition (verificacion textual del cableado)', () => {
+  it('inyecta batchExpiryEnricher en SyncSapConfigToHubspot', () => {
+    expect(source).toMatch(/batchExpiryEnricher:\s*assertPort\(/);
+  });
+
+  it('construye el adaptador con AMBAS factories y el repositorio de config', () => {
+    expect(source).toContain('new BatchExpiryEnrichmentAdapter({');
+    expect(source).toMatch(/sourceFactory:\s*batchSourceStrategyFactory/);
+    expect(source).toMatch(/projectionFactory:\s*batchProjectionStrategyFactory/);
+    expect(source).toMatch(/configRepository:\s*new BatchExpiryConfigRepository\(\)/);
+  });
+
+  it('registra la estrategia s4 Y la none en la factory de fuente', () => {
+    expect(source).toMatch(/noneStrategy:\s*new NoneBatchSourceStrategy\(\)/);
+    expect(source).toMatch(/s4BatchMasterStrategy:\s*new S4BatchMasterStrategy\(\)/);
+  });
+
+  it('valida el adaptador contra SapRecordEnricherPort', () => {
+    expect(source).toMatch(/BatchExpiryEnrichmentAdapter[\s\S]{0,400}?SapRecordEnricherPort/);
   });
 });

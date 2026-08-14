@@ -167,9 +167,10 @@ function roundQuantity(value) {
 // Raw A_MatlStkInAcctMod rows -> Map<Material, [{plant, storageLocation, stockType, quantity}]>.
 // Discards rows with no material, with a non-blank InventorySpecialStockType
 // (consignment/subcontracting -- not the tenant's own stock), and rows under
-// an excluded warehouse. Sums duplicates that only differ by Batch/Supplier/
-// Customer (fields deliberately left out of the $select) into one entry per
-// (Plant, StorageLocation, InventoryStockType).
+// an excluded warehouse. Sums duplicates that only differ by Batch (which IS in
+// the $select -- the batch-expiry strategy needs it -- but is deliberately
+// ignored here) or by Supplier/Customer (left out of the $select) into one
+// entry per (Plant, StorageLocation, InventoryStockType).
 export function buildS4StockIndex(rows, { exclusions = [] } = {}) {
   const byMaterial = new Map();
 

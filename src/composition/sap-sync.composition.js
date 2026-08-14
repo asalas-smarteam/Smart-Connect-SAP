@@ -13,8 +13,14 @@ import OneToOneProductStrategy from '#domain/products/strategies/one-to-one-prod
 import WarehouseStockStrategyFactory from '#domain/warehouses/warehouse-stock-strategy.factory.js';
 import B1ItemWarehouseStrategy from '#domain/warehouses/strategies/b1-item-warehouse.strategy.js';
 import S4PlantStorageLocationStrategy from '#domain/warehouses/strategies/s4-plant-storage-location.strategy.js';
+import BatchSourceStrategyFactory from '#domain/batches/batch-source-strategy.factory.js';
+import BatchProjectionStrategyFactory from '#domain/batches/batch-projection-strategy.factory.js';
+import NoneBatchSourceStrategy from '#domain/batches/sources/none.strategy.js';
+import S4BatchMasterStrategy from '#domain/batches/sources/s4-batch-master.strategy.js';
+import ProductPropertiesProjection from '#domain/batches/projections/product-properties.projection.js';
 import { SapRecordEnricherPort } from '#application/ports/sap/sap-record-enricher.port.js';
 import AddressSyncConfigRepository from '#infrastructure/config/AddressSyncConfigRepository.js';
+import BatchExpiryConfigRepository from '#infrastructure/config/BatchExpiryConfigRepository.js';
 import BusinessPartnerCreationConfigRepository from '#infrastructure/config/BusinessPartnerCreationConfigRepository.js';
 import ProductSyncStrategyConfigRepository from '#infrastructure/config/ProductSyncStrategyConfigRepository.js';
 import WarehouseStockConfigRepository from '#infrastructure/config/WarehouseStockConfigRepository.js';
@@ -30,6 +36,7 @@ import SapSyncDataAdapter from '#infrastructure/sap/SapSyncDataAdapter.js';
 import S4ContactEnrichmentAdapter from '#infrastructure/sap/customers/S4ContactEnrichmentAdapter.js';
 import PropertiesFlagsEnrichmentAdapter from '#infrastructure/sap/customers/PropertiesFlagsEnrichmentAdapter.js';
 import WarehouseStockEnrichmentAdapter from '#infrastructure/sap/products/WarehouseStockEnrichmentAdapter.js';
+import BatchExpiryEnrichmentAdapter from '#infrastructure/sap/products/BatchExpiryEnrichmentAdapter.js';
 import sapSyncAdminAdapter from '#infrastructure/scheduler/SapSyncAdminAdapter.js';
 import SapDiscountClient from '#infrastructure/external-services/SapDiscountClient.js';
 import TenantLineItemPriceConfigRepository from '#infrastructure/repositories/TenantLineItemPriceConfigRepository.js';
@@ -75,6 +82,17 @@ export function buildSyncSapConfigToHubspot() {
     logger,
   });
 
+  const batchSourceStrategyFactory = new BatchSourceStrategyFactory({
+    noneStrategy: new NoneBatchSourceStrategy(),
+    s4BatchMasterStrategy: new S4BatchMasterStrategy(),
+    logger,
+  });
+
+  const batchProjectionStrategyFactory = new BatchProjectionStrategyFactory({
+    productPropertiesProjection: new ProductPropertiesProjection(),
+    logger,
+  });
+
   // Misma instancia inyectada dos veces abajo: el use-case la usa suelta para
   // inyectar Properties1..64/ContactEmployees en el $select, y el enricher la
   // usa para resolver el valor ya mapeado. No hay memoización en el
@@ -101,6 +119,15 @@ export function buildSyncSapConfigToHubspot() {
       new WarehouseStockEnrichmentAdapter({
         strategyFactory: warehouseStockStrategyFactory,
         configRepository: new WarehouseStockConfigRepository(),
+        logger,
+      }),
+      SapRecordEnricherPort
+    ),
+    batchExpiryEnricher: assertPort(
+      new BatchExpiryEnrichmentAdapter({
+        sourceFactory: batchSourceStrategyFactory,
+        projectionFactory: batchProjectionStrategyFactory,
+        configRepository: new BatchExpiryConfigRepository(),
         logger,
       }),
       SapRecordEnricherPort

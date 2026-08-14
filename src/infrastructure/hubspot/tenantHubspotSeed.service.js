@@ -2,6 +2,7 @@ import {
   DEFAULT_SAP_FLAVOR,
   SAP_FLAVORS,
 } from '#domain/sap/sap-flavor.constants.js';
+import { BATCH_PRODUCT_PROPERTIES } from '#domain/batches/projections/product-properties.projection.js';
 import {
   ensureObjectProperty,
   fetchDealPipelines,
@@ -192,6 +193,13 @@ export async function seedCreateFieldsHubspot({ hubspotCredential, sapFlavor = D
       // that map to_Description.ProductDescription/BaseUnit need this.
       { objectType: 'products', label: 'Unidad de medida', name: 'unidad_medida' }
     );
+
+    // Las siete propiedades de lote/caducidad, tomadas de la propia proyeccion
+    // para que exista una sola fuente de verdad. Se importa la implementacion
+    // directo en vez de resolverla por la factory porque el seed corre en
+    // aprovisionamiento, sin config de tenant todavia. Cuando exista una segunda
+    // proyeccion (custom object), este servicio pasa a recibir la factory.
+    fieldsToEnsure.push(...BATCH_PRODUCT_PROPERTIES);
   }
 
   const results = [];
