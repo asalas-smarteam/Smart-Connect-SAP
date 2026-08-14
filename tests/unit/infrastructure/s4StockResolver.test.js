@@ -87,4 +87,37 @@ describe('S4StockResolver', () => {
 
     expect(transport.fetchAll).not.toHaveBeenCalled();
   });
+
+  // "bodegas vacias = todas" de la config de lotes llega hasta aca: un target
+  // marcado allPlants pide el stock de TODOS los centros en una sola consulta.
+  // Medido contra el S/4 de QA el 2026-08-13: 10,125 filas en ~1 s.
+  it('renders a Plant-less filter for an explicit all-plants target', async () => {
+    const transport = { fetchAll: jest.fn(async () => []) };
+    const resolver = new S4StockResolver({ transport });
+
+    await resolver.fetchStockRows([{ plant: null, storageLocations: null, allPlants: true }]);
+
+    expect(transport.fetchAll).toHaveBeenCalledTimes(1);
+    const call = transport.fetchAll.mock.calls[0][0];
+    expect(decodeURIComponent(call.query.$filter)).toBe('MatlWrhsStkQtyInMatlBaseUnit gt 0');
+    expect(decodeURIComponent(call.query.$filter)).not.toContain('Plant');
+    expect(call.path).toBe(MATERIAL_STOCK_PATH);
+    expect(call.query.$select).toBe(MATERIAL_STOCK_SELECT);
+  });
+
+  // El marcador es explicito a proposito: "sin plant" NO significa "todos".
+  // Confundirlos convertiria cualquier config malformada del feature de stock
+  // por bodega en un escaneo completo de A_MatlStkInAcctMod.
+  it('still ignores plant-less targets that do not carry the all-plants marker', async () => {
+    const transport = { fetchAll: jest.fn(async () => []) };
+    const resolver = new S4StockResolver({ transport });
+
+    await resolver.fetchStockRows([
+      { plant: null, storageLocations: null },
+      { plant: '', storageLocations: null, allPlants: false },
+      { storageLocations: ['0008'] },
+    ]);
+
+    expect(transport.fetchAll).not.toHaveBeenCalled();
+  });
 });

@@ -105,6 +105,12 @@ Aclaraciones que evitan sorpresas al leer el resultado:
 - **`warehouses: []` significa todas las bodegas**, no ninguna. Es lo que hace que esta config sea
   autónoma de `fieldsWareHouseHS`: un tenant puede querer fechas de caducidad sin haber
   configurado ni una propiedad de stock por bodega (decisión D8).
+  **Lo que cuesta:** con la lista vacía, `buildBatchQueryTargets` emite **un solo** target explícito
+  de todos los centros (`{ allPlants: true }`) y el resolver lanza **una única** consulta a
+  `A_MatlStkInAcctMod` sin cláusula `Plant`, filtrando solo por
+  `MatlWrhsStkQtyInMatlBaseUnit gt 0`. Medido contra el S/4 de QA el **2026-08-13: 10,125 filas en
+  ~1 s** — más barato que particionar por centro, y despreciable frente a los ~319 s del maestro de
+  lotes (sección 4). Con bodegas configuradas se vuelve a una consulta por centro, como antes.
 - El **stock especial** (consignación, subcontratación, stock de cliente —
   `InventorySpecialStockType` no vacío) se descarta siempre, sin config. No es inventario propio.
 - `lote_proximo_vencer` y `fecha_vencimiento_proxima` **nunca** apuntan a un lote vencido, aunque
@@ -139,9 +145,10 @@ forma de enterarse.
 ## 4. Nota de performance
 
 La corrida de productos agrega **~319 s (~5.3 min)** por traer el maestro de lotes completo
-(74,277 filas, medido contra el S/4 de QA). El stock aporta ~1.8 s. Las dos lecturas van en
-paralelo y **una sola vez** por corrida, antes de lotear los productos de a 100, así que el costo
-es fijo y no escala con la cantidad de productos.
+(74,277 filas, medido contra el S/4 de QA). El stock aporta ~1–2 s: con la config recomendada
+(`warehouses: []`) es **una sola** consulta sin filtro de centro, 10,125 filas en ~1 s medidos el
+2026-08-13. Las dos lecturas van en paralelo y **una sola vez** por corrida, antes de lotear los
+productos de a 100, así que el costo es fijo y no escala con la cantidad de productos.
 
 Si ese tiempo molesta, la palanca es filtrar por `ShelfLifeExpirationDate ge <hoy>` en
 `S4BatchResolver`: baja a 21,397 filas (~90 s). **El costo de esa palanca es perder
@@ -180,7 +187,11 @@ curl -s -k -u 'smarteam:Multiquimica.600' "https://vhmldqs4ci.hec.multidomsa.com
 
 Resultado — 87 lotes, **`BatchIdentifyingPlant` vacío en todos**: la suposición de que el lote es
 único a nivel material (y por lo tanto que el join `Material + Batch` no necesita centro) sigue
-en pie. Los tres lotes que importan:
+en pie. Esa suposición ya no es tácita: `S4BatchResolver` audita el campo y emite **un warn por
+corrida** (no uno por fila) si alguna fila lo trae no vacío, con el conteo de filas afectadas. Si
+ese warn aparece en el log, el join pasó a ser ambiguo y las fechas de vencimiento pueden estar
+tomándose de un centro arbitrario — hay que rediseñar el join antes de confiar en el resultado.
+Los tres lotes que importan:
 
 | Lote | `ShelfLifeExpirationDate` | Estado al 2026-08-13 |
 |---|---|---|

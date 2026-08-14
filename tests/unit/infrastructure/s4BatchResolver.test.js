@@ -39,4 +39,44 @@ describe('S4BatchResolver', () => {
     const transport = { fetchAll: jest.fn(async () => [null, { Material: 'X', Batch: 'L' }]) };
     expect(await new S4BatchResolver({ transport }).fetchBatchRows()).toEqual([{ Material: 'X', Batch: 'L' }]);
   });
+
+  // El $select pide BatchIdentifyingPlant justamente para poder avisar: si deja
+  // de ser vacio, el join Material+Batch se vuelve ambiguo y buildBatchIndex
+  // (last-row-wins sobre `material|batch`) tomaria la fecha de un centro
+  // arbitrario en silencio. Sin este warn, pedir el campo no servia de nada.
+  it('avisa UNA sola vez por corrida si aparece un BatchIdentifyingPlant no vacio', async () => {
+    const logger = { warn: jest.fn() };
+    const transport = {
+      fetchAll: jest.fn(async () => [
+        { Material: 'X', Batch: 'L1', BatchIdentifyingPlant: 'DPDO' },
+        { Material: 'X', Batch: 'L1', BatchIdentifyingPlant: 'MQDO' },
+        { Material: 'Y', Batch: 'L2', BatchIdentifyingPlant: '' },
+      ]),
+    };
+
+    const rows = await new S4BatchResolver({ transport, logger }).fetchBatchRows();
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn.mock.calls[0][1]).toEqual(expect.objectContaining({
+      rowsWithPlant: 2,
+      totalRows: 3,
+    }));
+    // El warn es una senal, no un filtro: las filas se devuelven completas.
+    expect(rows).toHaveLength(3);
+  });
+
+  it('no avisa cuando BatchIdentifyingPlant viene vacio o ausente en todas las filas', async () => {
+    const logger = { warn: jest.fn() };
+    const transport = {
+      fetchAll: jest.fn(async () => [
+        { Material: 'X', Batch: 'L1', BatchIdentifyingPlant: '' },
+        { Material: 'Y', Batch: 'L2', BatchIdentifyingPlant: '   ' },
+        { Material: 'Z', Batch: 'L3' },
+      ]),
+    };
+
+    await new S4BatchResolver({ transport, logger }).fetchBatchRows();
+
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
 });

@@ -72,6 +72,14 @@ function isWarehouseInScope(warehouses, { plant, storageLocation }) {
 
 // Agrupa por centro para que el resolver haga exactamente un fetchAll por Plant,
 // nunca uno por material. Mismo criterio que buildS4StockQueryTargets.
+//
+// Sin bodegas configuradas devuelve UN target explicito de todos los centros
+// ({ allPlants: true }), no []. Es la mitad de "bodegas vacias = todas" que le
+// toca al fetch: devolver [] hacia que el resolver no hiciera ni una llamada,
+// el indice saliera vacio y la proyeccion escribiera las siete propiedades en
+// blanco sobre los 8,080 productos -- justo lo contrario de lo que promete la
+// config recomendada. El marcador es explicito a proposito: "target sin plant"
+// sigue significando configuracion malformada, no "todos los centros".
 export function buildBatchQueryTargets(config) {
   const byPlant = new Map();
 
@@ -87,6 +95,10 @@ export function buildBatchQueryTargets(config) {
     } else {
       target.locations.add(scope.storageLocation);
     }
+  }
+
+  if (byPlant.size === 0) {
+    return [{ plant: null, storageLocations: null, allPlants: true }];
   }
 
   return [...byPlant.entries()].map(([plant, target]) => ({

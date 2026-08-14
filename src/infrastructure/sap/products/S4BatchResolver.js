@@ -13,9 +13,10 @@ export const BATCH_MASTER_PATH = '/API_BATCH_SRV/Batch';
 export const BATCH_MASTER_SELECT = [
   'Material',
   // Se pide aunque hoy sea siempre "": el dia que activen lotes a nivel centro,
-  // este campo deja de ser vacio y el join Material+Batch pasa a ser ambiguo.
-  // Traerlo permite detectarlo en los logs en vez de sumar lotes de centros
-  // distintos en silencio.
+  // este campo deja de ser vacio y el join Material+Batch pasa a ser ambiguo
+  // (buildBatchIndex indexa por `material|batch` y gana la ultima fila, o sea
+  // que se quedaria con la fecha de un centro arbitrario, en silencio).
+  // fetchBatchRows lo audita y emite UN warn por corrida si aparece no vacio.
   'BatchIdentifyingPlant',
   'Batch',
   'ShelfLifeExpirationDate',
@@ -23,11 +24,12 @@ export const BATCH_MASTER_SELECT = [
 ].join(',');
 
 export class S4BatchResolver {
-  constructor({ transport }) {
+  constructor({ transport, logger = console }) {
     if (!transport) {
       throw new Error('transport is required for S4BatchResolver');
     }
     this.transport = transport;
+    this.logger = logger;
   }
 
   async fetchBatchRows() {
@@ -36,7 +38,33 @@ export class S4BatchResolver {
       query: { $select: BATCH_MASTER_SELECT },
     });
 
-    return (Array.isArray(rows) ? rows : []).filter(Boolean);
+    const batchRows = (Array.isArray(rows) ? rows : []).filter(Boolean);
+
+    // UN warn por corrida, no uno por fila: son ~74k filas y el dato que
+    // importa es que la suposicion del join dejo de valer, no cual fila lo
+    // delata. Se corre sobre el set completo porque fetchBatchRows se invoca
+    // una sola vez por sync.
+    const plantScopedRows = batchRows.filter(
+      (row) => String(row?.BatchIdentifyingPlant ?? '').trim()
+    );
+
+    if (plantScopedRows.length > 0) {
+      const [sample] = plantScopedRows;
+      this.logger?.warn?.(
+        'Batch master rows carry a BatchIdentifyingPlant: the Material+Batch join is now ambiguous and expiry dates may be taken from an arbitrary plant',
+        {
+          rowsWithPlant: plantScopedRows.length,
+          totalRows: batchRows.length,
+          sample: {
+            material: sample?.Material,
+            batch: sample?.Batch,
+            plant: sample?.BatchIdentifyingPlant,
+          },
+        }
+      );
+    }
+
+    return batchRows;
   }
 }
 

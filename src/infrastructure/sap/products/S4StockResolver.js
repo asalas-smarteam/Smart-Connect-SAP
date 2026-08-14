@@ -24,11 +24,23 @@ function escapeODataLiteral(value) {
   return String(value).replace(/'/g, "''");
 }
 
-// Plant is always present (a query target only exists because some field
-// references that Plant); StorageLocation is only added when the target is
-// not a whole-Plant wildcard, rendered as an OR group when there are several.
+// An EXPLICIT all-plants target: `{ allPlants: true }`. It is the only way to
+// ask for every centre, and it is a deliberate marker rather than an inference
+// -- a target that merely lacks a plant stays a malformed configuration and is
+// still ignored (see fetchStockRows). Measured live against S/4 QA on
+// 2026-08-13: the unfiltered query returns 10,125 rows in about one second.
+export function isAllPlantsTarget(target) {
+  return target?.allPlants === true;
+}
+
+// Plant is present on every warehouse-stock target (a query target only exists
+// because some field references that Plant) and absent only on the explicit
+// all-plants marker; StorageLocation is only added when the target is not a
+// whole-Plant wildcard, rendered as an OR group when there are several.
 function buildFilter(target) {
-  const conditions = [`Plant eq '${escapeODataLiteral(target.plant)}'`];
+  const conditions = isAllPlantsTarget(target)
+    ? []
+    : [`Plant eq '${escapeODataLiteral(target.plant)}'`];
 
   if (Array.isArray(target.storageLocations) && target.storageLocations.length > 0) {
     const members = target.storageLocations.map(
@@ -52,9 +64,11 @@ export class S4StockResolver {
 
   // targets: [{ plant, storageLocations: string[] | null }] -> flat row[].
   // One fetchAll per target (each already auto-paginates), run concurrently
-  // since the targets are independent Plants.
+  // since the targets are independent Plants. A target with neither a plant nor
+  // the explicit all-plants marker is a malformed configuration and is dropped.
   async fetchStockRows(targets) {
-    const validTargets = (Array.isArray(targets) ? targets : []).filter((target) => target?.plant);
+    const validTargets = (Array.isArray(targets) ? targets : [])
+      .filter((target) => target?.plant || isAllPlantsTarget(target));
 
     if (validTargets.length === 0) {
       return [];

@@ -139,12 +139,15 @@ describe('sap-sync composition', () => {
 // sin cablear en composicion y TODOS los tests unitarios siguen verdes, porque
 // cada uno inyecta su propio doble. Ya paso tres veces en este repo. Aserciones
 // como expect.any(Object) no lo detectan; leer el archivo si.
+// La ruta se resuelve contra la ubicacion de ESTE archivo, no contra
+// process.cwd(): jest.config.js no fija rootDir, asi que correr jest desde un
+// subdirectorio hacia fallar el import con un "archivo inexistente" enganoso.
 const source = fs.readFileSync(
-  path.resolve('src/composition/sap-sync.composition.js'),
+  path.resolve(import.meta.dirname, '../../../src/composition/sap-sync.composition.js'),
   'utf8'
 );
 
-describe('sap-sync.composition', () => {
+describe('sap-sync composition (verificacion textual del cableado)', () => {
   it('inyecta batchExpiryEnricher en SyncSapConfigToHubspot', () => {
     expect(source).toMatch(/batchExpiryEnricher:\s*assertPort\(/);
   });

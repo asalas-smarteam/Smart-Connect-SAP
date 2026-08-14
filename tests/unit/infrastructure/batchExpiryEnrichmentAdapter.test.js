@@ -123,6 +123,32 @@ describe('BatchExpiryEnrichmentAdapter', () => {
     await expect(adapter.enrich({ mappedRecords: [null, {}], objectType: 'product', tenantModels })).resolves.toBeUndefined();
   });
 
+  // Defensa en profundidad del hallazgo C1: sin targets no hay filas, y sin
+  // filas la proyeccion escribiria las siete propiedades en blanco sobre TODOS
+  // los productos. Nunca vaciar HubSpot por una config que no pide nada.
+  it('sin query targets NO llama a SAP, loguea error y NO escribe la clave', async () => {
+    const stockResolver = { fetchStockRows: jest.fn(async () => STOCK_ROWS) };
+    const batchResolver = { fetchBatchRows: jest.fn(async () => BATCH_ROWS) };
+    const strategy = {
+      normalizeConfig: jest.fn(() => ({})),
+      requiresRemoteFetch: jest.fn(() => true),
+      buildQueryTargets: jest.fn(() => []),
+      buildIndex: jest.fn(),
+      resolveBatches: jest.fn(() => []),
+    };
+    const { adapter, tenantModels, logger } = buildAdapter({ strategy, stockResolver, batchResolver });
+    const records = buildRecords();
+
+    await adapter.enrich({ mappedRecords: records, objectType: 'product', tenantModels });
+
+    expect(stockResolver.fetchStockRows).not.toHaveBeenCalled();
+    expect(batchResolver.fetchBatchRows).not.toHaveBeenCalled();
+    expect(strategy.buildIndex).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('no query targets'));
+    expect(records[0].rawSapData).not.toHaveProperty(BATCH_EXPIRY_KEY);
+    expect(records[1].rawSapData).not.toHaveProperty(BATCH_EXPIRY_KEY);
+  });
+
   it('pide el stock UNA vez y el maestro UNA vez para todo el lote de productos', async () => {
     const stockResolver = { fetchStockRows: jest.fn(async () => STOCK_ROWS) };
     const batchResolver = { fetchBatchRows: jest.fn(async () => BATCH_ROWS) };

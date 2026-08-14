@@ -82,8 +82,25 @@ describe('S4BatchMasterStrategy.buildQueryTargets', () => {
     expect(strategy.buildQueryTargets(config)).toEqual([{ plant: 'DPDO', storageLocations: null }]);
   });
 
-  it('sin bodegas configuradas devuelve [] (el resolver traera todos los centros)', () => {
-    expect(strategy.buildQueryTargets(strategy.normalizeConfig({}))).toEqual([]);
+  // REGRESION: antes devolvia [], y con [] el resolver no hacia NINGUNA llamada
+  // -- el indice salia vacio y la proyeccion escribia las siete propiedades en
+  // blanco sobre los 8,080 productos. "Bodegas vacias = todas" tiene que llegar
+  // hasta el fetch, no quedarse en el filtro de dominio.
+  it('sin bodegas configuradas devuelve UN target explicito de todos los centros', () => {
+    expect(strategy.buildQueryTargets(strategy.normalizeConfig({}))).toEqual([
+      { plant: null, storageLocations: null, allPlants: true },
+    ]);
+  });
+
+  it('nunca devuelve [] para una config sin bodegas (ni con warehouses basura)', () => {
+    expect(strategy.buildQueryTargets(strategy.normalizeConfig({ warehouses: [] }))).toHaveLength(1);
+    expect(strategy.buildQueryTargets(strategy.normalizeConfig({ warehouses: ['basura/a/b'] })))
+      .toHaveLength(1);
+  });
+
+  it('con bodegas configuradas NO marca allPlants en ningun target', () => {
+    const config = strategy.normalizeConfig({ warehouses: ['DPDO/*'] });
+    expect(strategy.buildQueryTargets(config).some((t) => t.allPlants)).toBe(false);
   });
 });
 

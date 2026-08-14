@@ -34,6 +34,7 @@ export class BatchExpiryEnrichmentAdapter {
     this.batchResolverFactory = batchResolverFactory
       || ((config) => new S4BatchResolver({
         transport: createSapTransport({ sapFlavor: SAP_FLAVORS.S4, config }),
+        logger,
       }));
     this.logger = logger;
   }
@@ -60,6 +61,21 @@ export class BatchExpiryEnrichmentAdapter {
       let index = new Map();
 
       if (strategy.requiresRemoteFetch()) {
+        // Defensa en profundidad. Una fuente que necesita red y no produce ni
+        // un target no puede traer filas, y sin filas la proyeccion escribiria
+        // las siete propiedades en blanco sobre TODOS los productos. Con la
+        // estrategia s4 esto ya es inalcanzable (bodegas vacias produce el
+        // target explicito de todos los centros), y ese es justamente el punto:
+        // una configuracion futura mal armada degrada a "no tocar HubSpot".
+        const queryTargets = strategy.buildQueryTargets(config);
+
+        if (!Array.isArray(queryTargets) || queryTargets.length === 0) {
+          this.logger.error?.(
+            'Batch expiry enrichment skipped: the source requires a remote fetch but produced no query targets'
+          );
+          return;
+        }
+
         const sapCredentialsList = typeof tenantModels.SapCredentials?.find === 'function'
           ? await tenantModels.SapCredentials.find().lean()
           : [];
@@ -76,8 +92,7 @@ export class BatchExpiryEnrichmentAdapter {
         // que processProductBatches lotee de a 100: un solo indice sirve a
         // todos los lotes.
         const [stockRows, batchRows] = await Promise.all([
-          this.stockResolverFactory(sapCredentials)
-            .fetchStockRows(strategy.buildQueryTargets(config)),
+          this.stockResolverFactory(sapCredentials).fetchStockRows(queryTargets),
           this.batchResolverFactory(sapCredentials).fetchBatchRows(),
         ]);
 
