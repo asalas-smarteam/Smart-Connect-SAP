@@ -95,6 +95,82 @@ describe('SapWebhookOrderAdapter.addContactEmployeeIfNeeded matching por Interna
     expect(requestSpy).not.toHaveBeenCalled();
   });
 
+  it('si el InternalCode no matchea a nadie, cae al fallback por email y no intenta crear un duplicado', async () => {
+    // Reproduce el caso real: HubSpot trae un internalcode viejo/desactualizado
+    // (91845) que ya no corresponde a nadie en SAP, pero el email sí coincide
+    // con un ContactEmployee que ya existe (91896, reasignado en SAP).
+    const adapter = new SapWebhookOrderAdapter();
+    const requestSpy = jest.spyOn(adapter, 'request');
+
+    const businessPartner = {
+      ContactEmployees: [
+        { InternalCode: 91896, Name: 'Emerson Flores', E_Mail: 'operadorcc1@grupoprinter.com' },
+        { InternalCode: 91838, Name: 'LUIS DAVILA', E_Mail: 'soporte@top50.com.gt' },
+      ],
+    };
+    const contact = {
+      email: 'operadorcc1@grupoprinter.com',
+      firstname: 'Emerson',
+      lastname: 'Flores',
+      internalcode: '91845',
+    };
+
+    const result = await adapter.addContactEmployeeIfNeeded({
+      sapConfig: {},
+      cardCode: 'CLO061620',
+      businessPartner,
+      contact,
+      contactEmployeeMappings: mappingsWithInternalCode,
+    });
+
+    expect(result.created).toBe(false);
+    expect(result.internalCode).toBe(91896);
+    // Nunca debe llegar a intentar el PATCH de alta: eso es lo que SAP rechazaba
+    // con "This entry already exists" (ODBC -2035).
+    expect(requestSpy).not.toHaveBeenCalled();
+  });
+
+  it('si SAP rechaza el alta (Name duplicado no detectado por el matching), no lanza y reporta el error', async () => {
+    const adapter = new SapWebhookOrderAdapter();
+    const sapError = Object.assign(new Error('This entry already exists in the following tables (ODBC -2035)'), {
+      response: { status: 400 },
+    });
+    jest.spyOn(adapter, 'request').mockRejectedValue(sapError);
+
+    const businessPartner = { ContactEmployees: [] };
+    const contact = { email: 'nuevo@example.com', firstname: 'Nuevo' };
+
+    const result = await adapter.addContactEmployeeIfNeeded({
+      sapConfig: {},
+      cardCode: 'CLO061620',
+      businessPartner,
+      contact,
+      contactEmployeeMappings: mappingsWithInternalCode,
+    });
+
+    expect(result.created).toBe(false);
+    expect(result.error).toBe(sapError);
+  });
+
+  it('addContactEmployeesIfNeeded sigue con el resto de contactos aunque uno falle en SAP', async () => {
+    const adapter = new SapWebhookOrderAdapter();
+    const sapError = new Error('This entry already exists in the following tables (ODBC -2035)');
+    adapter.addContactEmployeeIfNeeded = jest.fn()
+      .mockResolvedValueOnce({ created: false, internalCode: null, requestPayload: {}, responsePayload: null, error: sapError })
+      .mockResolvedValueOnce({ created: true, internalCode: 999, requestPayload: {}, responsePayload: {} });
+
+    const result = await adapter.addContactEmployeesIfNeeded({
+      sapConfig: {},
+      cardCode: 'CLO061620',
+      businessPartner: { ContactEmployees: [] },
+      contacts: [{ email: 'uno@example.com' }, { email: 'dos@example.com' }],
+      contactEmployeeMappings: mappingsWithInternalCode,
+    });
+
+    expect(adapter.addContactEmployeeIfNeeded).toHaveBeenCalledTimes(2);
+    expect(result.internalCodes).toEqual([{ contact: { email: 'dos@example.com' }, internalCode: 999 }]);
+  });
+
   it('nunca manda InternalCode de vuelta al crear un ContactEmployee nuevo', async () => {
     const adapter = new SapWebhookOrderAdapter();
     const requestSpy = jest.spyOn(adapter, 'request').mockImplementation(async (sapConfig, { method }) => {

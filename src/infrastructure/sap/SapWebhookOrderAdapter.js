@@ -52,18 +52,7 @@ function resolveContactEmployeePayload(contact, contactEmployeeMappings) {
   return { payload, internalCode };
 }
 
-// InternalCode es el ID único que SAP le asigna a cada ContactEmployee. Si el
-// contacto ya lo trae (porque se sincronizó antes y HubSpot lo tiene guardado
-// en la propiedad "internalcode"), es la fuente de verdad y gana sobre
-// email/nombre, que pueden repetirse entre contactos o cambiar entre syncs.
-// Solo cuando no hay InternalCode se cae al fallback por email/nombre.
-function findExistingContactEmployee(currentEmployees, { internalCode, email, name }) {
-  if (internalCode) {
-    return currentEmployees.find(
-      (employee) => toNonEmptyString(employee?.InternalCode) === internalCode
-    );
-  }
-
+function matchContactEmployeeByEmailOrName(currentEmployees, { email, name }) {
   return currentEmployees.find((employee) => {
     const sameEmail = email
       && toNonEmptyString(employee?.E_Mail || employee?.EmailAddress)?.toLowerCase() === email.toLowerCase();
@@ -71,6 +60,30 @@ function findExistingContactEmployee(currentEmployees, { internalCode, email, na
       && toNonEmptyString(employee?.Name)?.toLowerCase() === name.toLowerCase();
     return sameEmail || sameName;
   });
+}
+
+// InternalCode es el ID único que SAP le asigna a cada ContactEmployee. Si el
+// contacto ya lo trae (porque se sincronizó antes y HubSpot lo tiene guardado
+// en la propiedad "internalcode"), se intenta primero por ser la fuente de
+// verdad. Pero ese valor puede quedar desactualizado (datos de prueba
+// recreados en SAP, un InternalCode reasignado, etc.): si no matchea a nadie
+// NUNCA se asume "no existe" solo por eso — se cae al fallback por
+// email/nombre antes de decidir que hay que crear uno nuevo. Sin este
+// fallback, un internalcode viejo hace que se intente crear un
+// ContactEmployee que en realidad ya existe, y SAP lo rechaza con
+// "This entry already exists" (ODBC -2035), bloqueando todo el negocio.
+function findExistingContactEmployee(currentEmployees, { internalCode, email, name }) {
+  if (internalCode) {
+    const matchByInternalCode = currentEmployees.find(
+      (employee) => toNonEmptyString(employee?.InternalCode) === internalCode
+    );
+
+    if (matchByInternalCode) {
+      return matchByInternalCode;
+    }
+  }
+
+  return matchContactEmployeeByEmailOrName(currentEmployees, { email, name });
 }
 
 export class SapWebhookOrderAdapter {
@@ -470,25 +483,29 @@ export class SapWebhookOrderAdapter {
       };
     }
 
-    await this.request(sapConfig, {
-      method: 'patch',
-      path: `/BusinessPartners('${encodeURIComponent(String(cardCode))}')`,
-      data: {
-        ContactEmployees: [...currentEmployees, nextEmployee],
-      },
-    });
+    // Nunca debe bloquear la creación del documento SAP: si el alta choca con
+    // algo que el matching de arriba no detectó (p.ej. un Name duplicado en
+    // SAP que ninguna de las dos búsquedas encontró), se registra el error y
+    // se sigue sin ContactEmployee en vez de tumbar todo el negocio.
+    try {
+      await this.request(sapConfig, {
+        method: 'patch',
+        path: `/BusinessPartners('${encodeURIComponent(String(cardCode))}')`,
+        data: {
+          ContactEmployees: [...currentEmployees, nextEmployee],
+        },
+      });
+    } catch (error) {
+      return {
+        created: false, internalCode: null, requestPayload: nextEmployee, responsePayload: null, error,
+      };
+    }
 
     const refreshedBusinessPartner = await this.findBusinessPartnerByCardCode(sapConfig, cardCode);
     const refreshedEmployees = Array.isArray(refreshedBusinessPartner?.ContactEmployees)
       ? refreshedBusinessPartner.ContactEmployees
       : [];
-    const refreshed = refreshedEmployees.find((employee) => {
-      const sameEmail = email
-        && toNonEmptyString(employee?.E_Mail || employee?.EmailAddress)?.toLowerCase() === email.toLowerCase();
-      const sameName = name
-        && toNonEmptyString(employee?.Name)?.toLowerCase() === name.toLowerCase();
-      return sameEmail || sameName;
-    });
+    const refreshed = matchContactEmployeeByEmailOrName(refreshedEmployees, { email, name });
 
     return {
       created: true,
