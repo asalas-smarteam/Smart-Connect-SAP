@@ -22,6 +22,7 @@ import logger from '#infrastructure/logger/logger.adapter.js';
 import MongooseWebhookEventRepository from '#infrastructure/repositories/MongooseWebhookEventRepository.js';
 import SapWebhookInventoryTransferRequestAdapter from '#infrastructure/sap/SapWebhookInventoryTransferRequestAdapter.js';
 import SapWebhookOrderAdapter from '#infrastructure/sap/SapWebhookOrderAdapter.js';
+import { createSapCallRecorder } from '#infrastructure/sap/sapCallRecorder.js';
 import SapWebhookQuotationAdapter from '#infrastructure/sap/SapWebhookQuotationAdapter.js';
 import { PermanentWebhookError } from '#shared/errors/index.js';
 import {
@@ -61,6 +62,7 @@ export function buildProcessHubspotWebhookEventUseCase() {
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
     buildWebhookSapAudit,
+    createSapCallRecorder,
     logger,
   });
 }
@@ -77,6 +79,7 @@ export function buildProcessHubspotCreateQuotationUseCase() {
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
     buildWebhookSapAudit,
+    createSapCallRecorder,
     logger,
   });
 }
@@ -89,6 +92,7 @@ export function buildProcessHubspotUpdateQuotationUseCase() {
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
     buildWebhookSapAudit,
+    createSapCallRecorder,
     logger,
   });
 }
@@ -102,6 +106,7 @@ export function buildProcessHubspotConvertQuotationToOrderUseCase() {
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
     buildWebhookSapAudit,
+    createSapCallRecorder,
     logger,
   });
 }
@@ -118,6 +123,7 @@ export function buildProcessHubspotInventoryTransferRequestUseCase() {
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
     buildWebhookSapAudit,
+    createSapCallRecorder,
     logger,
   });
 }
@@ -156,7 +162,7 @@ export function buildWebhookEventDispatcher({
 }
 
 export function buildWebhookEventRepository({ WebhookEvent, batchSize }) {
-  return new MongooseWebhookEventRepository({ WebhookEvent, batchSize });
+  return new MongooseWebhookEventRepository({ WebhookEvent, batchSize, logger });
 }
 
 export function buildProcessWebhookDealEventBatch({

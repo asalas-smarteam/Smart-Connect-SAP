@@ -134,6 +134,100 @@ describe('MongooseWebhookEventRepository', () => {
     expect($set.sapAudit).toEqual(sapAudit);
   });
 
+  // EL FALLO REAL: Mongo rechazo el $set entero por una clave del audit
+  // ("The dollar ($) prefixed field '$select' in 'sapAudit.sapCalls.0.params.$select' is not
+  // valid for storage"), asi que se perdio tambien el status y el lastError del evento: dos
+  // eventos quedaron colgados en 'sap_order_created' con la orden ya creada en SAP. La
+  // auditoria es soporte y nunca puede impedir que se guarde el estado.
+  describe('cuando Mongo rechaza el $set por culpa del sapAudit', () => {
+    function buildRejectingUpdateOne() {
+      return jest.fn()
+        .mockRejectedValueOnce(new Error(
+          "The dollar ($) prefixed field '$select' in 'sapAudit.sapCalls.0.params.$select' is not valid for storage."
+        ))
+        .mockResolvedValue({});
+    }
+
+    it('markFailed reintenta sin sapAudit para no perder status ni lastError', async () => {
+      const updateOne = buildRejectingUpdateOne();
+      const logger = { error: jest.fn() };
+      const repository = new MongooseWebhookEventRepository({
+        WebhookEvent: { updateOne },
+        batchSize: 1,
+        logger,
+      });
+
+      await repository.markFailed({ _id: 'event-1' }, {
+        status: 'waiting',
+        retries: 1,
+        lastError: 'SP - ERROR',
+        sapAudit: { sapCalls: [{ params: { $select: 'CardCode' } }] },
+      });
+
+      expect(updateOne).toHaveBeenCalledTimes(2);
+      const [, { $set }] = updateOne.mock.calls[1];
+      expect(Object.keys($set)).not.toContain('sapAudit');
+      expect($set).toMatchObject({ status: 'waiting', retries: 1, lastError: 'SP - ERROR' });
+      expect(logger.error).toHaveBeenCalled();
+    });
+
+    it('markCompleted reintenta sin sapAudit para no dejar el evento sin cerrar', async () => {
+      const updateOne = buildRejectingUpdateOne();
+      const repository = new MongooseWebhookEventRepository({
+        WebhookEvent: { updateOne },
+        batchSize: 1,
+      });
+
+      await repository.markCompleted({ _id: 'event-1' }, {
+        docEntry: 10,
+        docNum: 20,
+        cardCode: 'CL001',
+        sapAudit: { sapCalls: [{ params: { $top: 1 } }] },
+      });
+
+      expect(updateOne).toHaveBeenCalledTimes(2);
+      const [, { $set }] = updateOne.mock.calls[1];
+      expect(Object.keys($set)).not.toContain('sapAudit');
+      expect($set.status).toBe('completed');
+    });
+
+    // Si el rechazo no viene del audit, el reintento sin audit fallaria igual: el error
+    // tiene que propagarse para que el batch lo maneje, no tragarse en un bucle inutil.
+    it('propaga el error cuando el reintento sin sapAudit tambien falla', async () => {
+      const updateOne = jest.fn().mockRejectedValue(new Error('Mongo down'));
+      const repository = new MongooseWebhookEventRepository({
+        WebhookEvent: { updateOne },
+        batchSize: 1,
+      });
+
+      await expect(
+        repository.markFailed({ _id: 'event-1' }, {
+          status: 'waiting',
+          retries: 1,
+          lastError: 'SP - ERROR',
+          sapAudit: { sapCalls: [] },
+        })
+      ).rejects.toThrow('Mongo down');
+    });
+
+    it('no reintenta cuando no habia sapAudit en el $set', async () => {
+      const updateOne = jest.fn().mockRejectedValue(new Error('Mongo down'));
+      const repository = new MongooseWebhookEventRepository({
+        WebhookEvent: { updateOne },
+        batchSize: 1,
+      });
+
+      await expect(
+        repository.markFailed({ _id: 'event-1' }, {
+          status: 'waiting',
+          retries: 1,
+          lastError: 'SP - ERROR',
+        })
+      ).rejects.toThrow('Mongo down');
+      expect(updateOne).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('markFailed no longer writes payload.payloadSAP even when failure.payloadSap is given', async () => {
     const updateOne = jest.fn().mockResolvedValue({});
     const WebhookEvent = { updateOne };

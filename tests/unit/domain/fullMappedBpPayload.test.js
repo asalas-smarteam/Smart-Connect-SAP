@@ -84,15 +84,15 @@ describe('FullMappedBusinessPartnerPayloadStrategy', () => {
     });
   });
 
-  it('el valor mapeado gana sobre el default de config', () => {
+  it('el default de config gana sobre el valor mapeado, sin importar que traiga HubSpot', () => {
     const payload = strategy.buildCreatePayload({
       mappedBusinessPartner: { PriceListNum: 7, CardType: 'cSupplier' },
       defaults: DEFAULTS,
       resolved: RESOLVED,
     });
 
-    expect(payload.PriceListNum).toBe(7);
-    expect(payload.CardType).toBe('cSupplier');
+    expect(payload.PriceListNum).toBe(1);
+    expect(payload.CardType).toBe('cCustomer');
   });
 
   it('cae al default de config cuando no hay valor mapeado', () => {

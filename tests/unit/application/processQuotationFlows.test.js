@@ -244,6 +244,34 @@ describe('ProcessHubspotCreateQuotation', () => {
     expect(quotationPayload).not.toHaveProperty('PaymentGroupCode');
   });
 
+  it('forwards deal.comments as the quotation Comments when provided', async () => {
+    const deps = buildDeps();
+    const useCase = new ProcessHubspotCreateQuotation(deps);
+
+    const event = {
+      ...baseEvent,
+      payload: {
+        ...baseEvent.payload,
+        deal: { hs_object_id: '59680314911', comments: 'Comentario para el comprador y prueba' },
+      },
+    };
+
+    await useCase.execute({ event, tenantModels });
+
+    const { quotationPayload } = deps.sapQuotationAdapter.createQuotation.mock.calls[0][0];
+    expect(quotationPayload.Comments).toBe('Comentario para el comprador y prueba');
+  });
+
+  it('omits Comments on the quotation when the deal has no comments', async () => {
+    const deps = buildDeps();
+    const useCase = new ProcessHubspotCreateQuotation(deps);
+
+    await useCase.execute({ event: baseEvent, tenantModels });
+
+    const { quotationPayload } = deps.sapQuotationAdapter.createQuotation.mock.calls[0][0];
+    expect(quotationPayload).not.toHaveProperty('Comments');
+  });
+
   it('is idempotent: skips creation when a quotation link already exists', async () => {
     const deps = buildDeps();
     deps.sapDocumentLinkRepository.findByDeal.mockResolvedValue({
@@ -256,11 +284,33 @@ describe('ProcessHubspotCreateQuotation', () => {
     const result = await useCase.execute({ event: baseEvent, tenantModels });
 
     expect(deps.sapQuotationAdapter.createQuotation).not.toHaveBeenCalled();
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       cardCode: 'CL00129',
       docEntry: 12345,
       docNum: 8001,
       dealId: '59680314911',
+    });
+  });
+
+  // El atajo de idempotencia no manda NADA a SAP, asi que no hay trafico que auditar y el
+  // sapAudit quedaba en null -- indistinguible de "la auditoria esta rota", que es justo la
+  // confusion que se dio en produccion: 13 eventos completados con sapAudit null porque las
+  // cotizaciones ya existian de una corrida anterior. El documento tiene que decirlo.
+  it('is idempotent: deja constancia en sapAudit de que no se mando nada a SAP', async () => {
+    const deps = buildDeps();
+    deps.sapDocumentLinkRepository.findByDeal.mockResolvedValue({
+      cardCode: 'CL00129',
+      sapDocEntry: 12345,
+      sapDocNum: 8001,
+    });
+    const useCase = new ProcessHubspotCreateQuotation(deps);
+
+    const result = await useCase.execute({ event: baseEvent, tenantModels });
+
+    expect(result.sapAudit.auditTrail.skipped).toEqual({
+      reason: 'quotation_already_exists',
+      sapDocEntry: 12345,
+      sapDocNum: 8001,
     });
   });
 
@@ -525,9 +575,35 @@ describe('ProcessHubspotUpdateQuotation', () => {
     expect(patch.SalesPersonCode).toBe(61);
     expect(deps.sapDocumentLinkRepository.updateLines).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({ docEntry: 12345, docNum: 8001, dealId: '59680314911' });
-    expect(result.sapAudit.auditTrail.payload_SAP.quotation).toMatchObject({
-      Comments: 'Oferta actualizada por contrapropuesta desde HubSpot',
-    });
+  });
+
+  it('does not overwrite the existing SAP Comments when the deal has no comments', async () => {
+    const deps = buildDeps();
+    const useCase = new ProcessHubspotUpdateQuotation(deps);
+
+    const result = await useCase.execute({ event: updateEvent, tenantModels });
+
+    const patch = deps.sapQuotationAdapter.updateQuotation.mock.calls[0][0].patchPayload;
+    expect(patch).not.toHaveProperty('Comments');
+    expect(result.sapAudit.auditTrail.payload_SAP.quotation).not.toHaveProperty('Comments');
+  });
+
+  it('patches Comments with deal.comments when the deal provides one', async () => {
+    const deps = buildDeps();
+    const useCase = new ProcessHubspotUpdateQuotation(deps);
+
+    const event = {
+      ...updateEvent,
+      payload: {
+        ...updateEvent.payload,
+        deal: { ...updateEvent.payload.deal, comments: 'Comentario para el comprador y prueba' },
+      },
+    };
+
+    await useCase.execute({ event, tenantModels });
+
+    const patch = deps.sapQuotationAdapter.updateQuotation.mock.calls[0][0].patchPayload;
+    expect(patch.Comments).toBe('Comentario para el comprador y prueba');
   });
 
   it('fails in a controlled way when there is no quotation link for the deal', async () => {
@@ -629,6 +705,11 @@ describe('ProcessHubspotConvertQuotationToOrder', () => {
 
     expect(deps.sapOrderAdapter.createOrder).not.toHaveBeenCalled();
     expect(result).toMatchObject({ docEntry: 67890, docNum: 9001 });
+    expect(result.sapAudit.auditTrail.skipped).toEqual({
+      reason: 'order_already_exists',
+      sapDocEntry: 67890,
+      sapDocNum: 9001,
+    });
   });
 
   it('fails when there is no quotation to convert', async () => {

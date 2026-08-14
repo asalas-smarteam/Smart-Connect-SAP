@@ -24,6 +24,7 @@ function resolveContactEmployeePayload(contact, contactEmployeeMappings) {
   const mapped = mapHubspotToSapFields(contact || {}, contactEmployeeMappings);
   const name = toNonEmptyString(mapped?.Name || resolveContactDisplayName(contact));
   const email = toNonEmptyString(mapped?.E_Mail || mapped?.EmailAddress || contact?.email);
+  const internalCode = toNonEmptyString(mapped?.InternalCode);
 
   if (!name && !email) {
     return null;
@@ -44,8 +45,32 @@ function resolveContactEmployeePayload(contact, contactEmployeeMappings) {
   // ContactEmployee has no EmailAddress property in SAP B1 (only BusinessPartner does);
   // sending it makes the Service Layer reject the whole PATCH.
   delete payload.EmailAddress;
+  // InternalCode lo asigna SAP; solo sirve para matching (ver más abajo), nunca
+  // se manda de vuelta en el payload de alta/actualización.
+  delete payload.InternalCode;
 
-  return payload;
+  return { payload, internalCode };
+}
+
+// InternalCode es el ID único que SAP le asigna a cada ContactEmployee. Si el
+// contacto ya lo trae (porque se sincronizó antes y HubSpot lo tiene guardado
+// en la propiedad "internalcode"), es la fuente de verdad y gana sobre
+// email/nombre, que pueden repetirse entre contactos o cambiar entre syncs.
+// Solo cuando no hay InternalCode se cae al fallback por email/nombre.
+function findExistingContactEmployee(currentEmployees, { internalCode, email, name }) {
+  if (internalCode) {
+    return currentEmployees.find(
+      (employee) => toNonEmptyString(employee?.InternalCode) === internalCode
+    );
+  }
+
+  return currentEmployees.find((employee) => {
+    const sameEmail = email
+      && toNonEmptyString(employee?.E_Mail || employee?.EmailAddress)?.toLowerCase() === email.toLowerCase();
+    const sameName = name
+      && toNonEmptyString(employee?.Name)?.toLowerCase() === name.toLowerCase();
+    return sameEmail || sameName;
+  });
 }
 
 export class SapWebhookOrderAdapter {
@@ -398,10 +423,12 @@ export class SapWebhookOrderAdapter {
       return { created: false, internalCode: null, requestPayload: null, responsePayload: null };
     }
 
-    const nextEmployee = resolveContactEmployeePayload(contact, contactEmployeeMappings);
-    if (!nextEmployee) {
+    const resolved = resolveContactEmployeePayload(contact, contactEmployeeMappings);
+    if (!resolved) {
       return { created: false, internalCode: null, requestPayload: null, responsePayload: null };
     }
+
+    const { payload: nextEmployee, internalCode: incomingInternalCode } = resolved;
 
     const currentEmployees = Array.isArray(businessPartner?.ContactEmployees)
       ? businessPartner.ContactEmployees
@@ -409,12 +436,10 @@ export class SapWebhookOrderAdapter {
 
     const email = toNonEmptyString(nextEmployee.E_Mail || nextEmployee.EmailAddress);
     const name = toNonEmptyString(nextEmployee.Name);
-    const existing = currentEmployees.find((employee) => {
-      const sameEmail = email
-        && toNonEmptyString(employee?.E_Mail || employee?.EmailAddress)?.toLowerCase() === email.toLowerCase();
-      const sameName = name
-        && toNonEmptyString(employee?.Name)?.toLowerCase() === name.toLowerCase();
-      return sameEmail || sameName;
+    const existing = findExistingContactEmployee(currentEmployees, {
+      internalCode: incomingInternalCode,
+      email,
+      name,
     });
 
     if (existing) {

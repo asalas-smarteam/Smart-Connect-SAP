@@ -5,9 +5,12 @@ import { buildBpAddresses } from '#domain/business-partners/bp-addresses.service
 import { buildSapPropertiesFlags } from '#domain/business-partners/sap-properties-flags.service.js';
 import { normalizeNumber, toNonEmptyString } from '#shared/utils/string.utils.js';
 
-export function createDocumentAuditTrail(payload, documentKey) {
+// `sapCalls` es el array del grabador de tráfico (lo inyecta el use case): se comparte por
+// referencia para que el catch vea todas las llamadas, incluida la que falló.
+export function createDocumentAuditTrail(payload, documentKey, sapCalls = []) {
   return {
     payload_Hubspot: payload,
+    sapCalls,
     payload_SAP: {
       businessPartner: null,
       businessPartnerUpdate: null,
@@ -166,9 +169,12 @@ export async function resolveBusinessPartnerForDocument({
     logger?.warn?.({ msg: 'BPAddresses warning', ...warning });
   }
 
+  // Mismo orden de precedencia que BusinessPartner: el default configurado
+  // gana siempre, el valor mapeado de HubSpot solo llena lo que el default
+  // no cubre.
   const mappedContactEmployees = businessPartnerShape.contactEmployeeSources.map((source) => ({
-    ...creationConfig.defaults.ContactEmployee,
     ...mapHubspotToSapFields(source, mappings.contactEmployeeMappings),
+    ...creationConfig.defaults.ContactEmployee,
   }));
 
   const { flags: propertiesFlags, invalid: invalidProperties } = buildSapPropertiesFlags({

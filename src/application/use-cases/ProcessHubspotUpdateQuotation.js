@@ -1,5 +1,6 @@
 import { buildQuotationLineUpdates } from '#domain/orders/order-builder.service.js';
 import { PermanentWebhookError } from '#shared/errors/index.js';
+import { createNoopSapCallRecorder } from '../services/sap-call-audit.service.js';
 import { resolveEventPayload } from '../services/webhook-payload.service.js';
 import { createDocumentAuditTrail, resolveDocumentSlpCode } from './webhookQuotationSupport.js';
 import { normalizeNumber, toNonEmptyString } from '#shared/utils/string.utils.js';
@@ -37,8 +38,10 @@ export class ProcessHubspotUpdateQuotation {
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
     buildWebhookSapAudit,
+    createSapCallRecorder = createNoopSapCallRecorder,
     logger = { warn: () => {} },
   }) {
+    this.createSapCallRecorder = createSapCallRecorder;
     this.runtimeRepository = runtimeRepository;
     this.sapQuotationAdapter = sapQuotationAdapter;
     this.sapDocumentLinkRepository = sapDocumentLinkRepository;
@@ -52,7 +55,9 @@ export class ProcessHubspotUpdateQuotation {
     const { payload, deal, lineItems } = resolveEventPayload(event);
     const SapDocumentLink = tenantModels?.SapDocumentLink;
     const dealId = toNonEmptyString(deal?.hs_object_id);
-    const auditTrail = createDocumentAuditTrail(payload, 'quotation');
+    const sapCallRecorder = this.createSapCallRecorder();
+    const auditTrail = createDocumentAuditTrail(payload, 'quotation', sapCallRecorder.calls);
+    const sapQuotationAdapter = sapCallRecorder.wrap(this.sapQuotationAdapter);
 
     try {
       const context = await this.runtimeRepository.resolveRuntimeContext({
@@ -78,7 +83,7 @@ export class ProcessHubspotUpdateQuotation {
       }
 
       // Validate current quotation lines exist before patching.
-      await this.sapQuotationAdapter.getQuotation({
+      await sapQuotationAdapter.getQuotation({
         sapConfig,
         docEntry: link.sapDocEntry,
       });
@@ -94,9 +99,14 @@ export class ProcessHubspotUpdateQuotation {
       });
 
       const patchPayload = {
-        Comments: 'Oferta actualizada por contrapropuesta desde HubSpot',
         DocumentLines: lineUpdates,
       };
+
+      // Only overwrite SAP's existing Comments when HubSpot actually sent one.
+      const comments = toNonEmptyString(deal?.comments);
+      if (comments) {
+        patchPayload.Comments = comments;
+      }
 
       // Re-map the deal owner to its SAP salesperson in case it changed in HubSpot.
       const slpCode = await resolveDocumentSlpCode({
@@ -112,7 +122,7 @@ export class ProcessHubspotUpdateQuotation {
 
       auditTrail.payload_SAP.quotation = patchPayload;
 
-      const quotationResponse = await this.sapQuotationAdapter.updateQuotation({
+      const quotationResponse = await sapQuotationAdapter.updateQuotation({
         sapConfig,
         docEntry: link.sapDocEntry,
         patchPayload,

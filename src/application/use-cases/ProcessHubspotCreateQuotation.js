@@ -16,6 +16,7 @@ import {
   resolveBusinessPartnerForDocument,
   resolveDocumentSlpCode,
 } from './webhookQuotationSupport.js';
+import { createNoopSapCallRecorder } from '../services/sap-call-audit.service.js';
 import { BusinessPartnerPayloadStrategyFactory } from '#domain/business-partners/business-partner-payload.factory.js';
 import LegacyWhitelistBusinessPartnerPayloadStrategy from '#domain/business-partners/strategies/legacy-whitelist-bp-payload.strategy.js';
 import FullMappedBusinessPartnerPayloadStrategy from '#domain/business-partners/strategies/full-mapped-bp-payload.strategy.js';
@@ -44,8 +45,10 @@ export class ProcessHubspotCreateQuotation {
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
     buildWebhookSapAudit,
+    createSapCallRecorder = createNoopSapCallRecorder,
     logger = { warn: () => {} },
   }) {
+    this.createSapCallRecorder = createSapCallRecorder;
     this.runtimeRepository = runtimeRepository;
     this.sapOrderAdapter = sapOrderAdapter;
     this.sapQuotationAdapter = sapQuotationAdapter;
@@ -66,7 +69,10 @@ export class ProcessHubspotCreateQuotation {
     const companyExists = Boolean(company);
     const contactExists = Boolean(contact);
     const dealId = toNonEmptyString(deal?.hs_object_id);
-    const auditTrail = createDocumentAuditTrail(payload, 'quotation');
+    const sapCallRecorder = this.createSapCallRecorder();
+    const auditTrail = createDocumentAuditTrail(payload, 'quotation', sapCallRecorder.calls);
+    const sapOrderAdapter = sapCallRecorder.wrap(this.sapOrderAdapter);
+    const sapQuotationAdapter = sapCallRecorder.wrap(this.sapQuotationAdapter);
     let quotationResponse = null;
     let cardCode = null;
 
@@ -96,16 +102,22 @@ export class ProcessHubspotCreateQuotation {
           dealId,
           sapDocEntry: existingLink.sapDocEntry,
         });
+        auditTrail.skipped = {
+          reason: 'quotation_already_exists',
+          sapDocEntry: existingLink.sapDocEntry ?? null,
+          sapDocNum: existingLink.sapDocNum ?? null,
+        };
         return {
           cardCode: existingLink.cardCode,
           docEntry: existingLink.sapDocEntry,
           docNum: existingLink.sapDocNum,
           dealId,
+          sapAudit: this.buildWebhookSapAudit(auditTrail),
         };
       }
 
       const businessPartner = await resolveBusinessPartnerForDocument({
-        sapOrderAdapter: this.sapOrderAdapter,
+        sapOrderAdapter,
         hubspotWebhookAdapter: this.hubspotWebhookAdapter,
         runtimeRepository: this.runtimeRepository,
         webhookReferenceRepository: this.webhookReferenceRepository,
@@ -156,11 +168,11 @@ export class ProcessHubspotCreateQuotation {
         paymentGroupCode,
         mappedDealFields: mappedDeal,
         numAtCard: buildDealNumAtCard(dealId),
-        comments: 'Oferta creada desde HubSpot',
+        comments: deal?.comments,
       });
       auditTrail.payload_SAP.quotation = quotationPayload;
 
-      quotationResponse = await this.sapQuotationAdapter.createQuotation({
+      quotationResponse = await sapQuotationAdapter.createQuotation({
         sapConfig,
         quotationPayload,
       });

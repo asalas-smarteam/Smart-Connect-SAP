@@ -17,13 +17,42 @@ function toSafeLastError(lastError) {
 }
 
 export class MongooseWebhookEventRepository {
-  constructor({ WebhookEvent, batchSize }) {
+  constructor({ WebhookEvent, batchSize, logger = { error: () => {} } }) {
     if (!WebhookEvent) {
       throw new Error('WebhookEvent model is required');
     }
 
     this.WebhookEvent = WebhookEvent;
     this.batchSize = Math.max(1, Number(batchSize || 1));
+    this.logger = logger;
+  }
+
+  // La auditoría es soporte y nunca puede impedir que se guarde el estado del evento. Mongo
+  // rechaza el `$set` COMPLETO cuando una sola clave no le sirve, y eso ya se cobró dos
+  // eventos: "The dollar ($) prefixed field '$select' in 'sapAudit.sapCalls.0.params.$select'
+  // is not valid for storage" hizo fallar el markCompleted de una orden ya creada en SAP, que
+  // quedó colgada en 'sap_order_created'. Las claves del audit ya se sanean al construirlo
+  // (sanitizeAuditKeys en sync/syncLog.service.js); esto es el segundo cinturón para
+  // cualquier forma que se escape: se reintenta sin `sapAudit`, así status/retries/lastError
+  // siempre quedan. Si el reintento también falla, el error se propaga: no es del audit y le
+  // toca al batch manejarlo.
+  async applyUpdates(eventId, updates) {
+    try {
+      await this.WebhookEvent.updateOne({ _id: eventId }, { $set: updates });
+    } catch (error) {
+      if (!('sapAudit' in updates)) {
+        throw error;
+      }
+
+      const { sapAudit: _discarded, ...withoutAudit } = updates;
+      this.logger?.error?.({
+        msg: 'Webhook event sapAudit could not be persisted, saving the event state without it',
+        eventId: String(eventId),
+        error: resolveErrorMessageText(error),
+      });
+
+      await this.WebhookEvent.updateOne({ _id: eventId }, { $set: withoutAudit });
+    }
   }
 
   async claimWaiting() {
@@ -65,12 +94,7 @@ export class MongooseWebhookEventRepository {
       updates.sapAudit = result.sapAudit;
     }
 
-    await this.WebhookEvent.updateOne(
-      { _id: event._id },
-      {
-        $set: updates,
-      }
-    );
+    await this.applyUpdates(event._id, updates);
   }
 
   async markFailed(event, failure) {
@@ -92,12 +116,7 @@ export class MongooseWebhookEventRepository {
       updates.sapAudit = failure.sapAudit;
     }
 
-    await this.WebhookEvent.updateOne(
-      { _id: event._id },
-      {
-        $set: updates,
-      }
-    );
+    await this.applyUpdates(event._id, updates);
   }
 }
 

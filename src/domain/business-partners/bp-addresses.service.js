@@ -54,13 +54,15 @@ export function buildBpAddresses({ mappedAddresses, addressesConfig, addressDefa
       warnings.push({ code: BP_ADDRESS_WARNINGS.NAME_NOT_CONFIGURED, addressName });
     }
 
-    // Precedencia: defaults -> byName -> payload. AddressName se reafirma al
-    // final porque el que va a SAP es el del payload (con trim), no el de la
-    // llave normalizada de la config.
+    // Precedencia: byName -> payload -> defaults. Un default configurado
+    // SIEMPRE gana, sin importar qué traiga el payload o byName — igual que
+    // BusinessPartner y ContactEmployee. AddressName se reafirma al final
+    // porque el que va a SAP es el del payload (con trim), no el de la llave
+    // normalizada de la config, y nunca debe perderse por un default.
     addresses.push({
-      ...omitBlank(addressDefaults),
       ...omitBlank(configuredValues),
       ...omitBlank(entry),
+      ...omitBlank(addressDefaults),
       AddressName: addressName,
     });
   }

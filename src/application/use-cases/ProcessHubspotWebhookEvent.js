@@ -9,6 +9,7 @@ import {
   resolveEventPayload,
   resolveHubspotSapId,
 } from '../services/webhook-payload.service.js';
+import { createNoopSapCallRecorder } from '../services/sap-call-audit.service.js';
 import { resolveBusinessPartnerAndContactEmployees } from '#domain/business-partners/contact-employee-source.service.js';
 import { buildBpAddresses } from '#domain/business-partners/bp-addresses.service.js';
 import { buildSapPropertiesFlags } from '#domain/business-partners/sap-properties-flags.service.js';
@@ -39,6 +40,7 @@ export class ProcessHubspotWebhookEvent {
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
     buildWebhookSapAudit,
+    createSapCallRecorder = createNoopSapCallRecorder,
     logger = { warn: () => {} },
   }) {
     this.runtimeRepository = runtimeRepository;
@@ -46,6 +48,7 @@ export class ProcessHubspotWebhookEvent {
     this.hubspotWebhookAdapter = hubspotWebhookAdapter;
     this.webhookReferenceRepository = webhookReferenceRepository;
     this.webhookEventProgressRepository = webhookEventProgressRepository;
+    this.createSapCallRecorder = createSapCallRecorder;
     this.businessPartnerPayloadStrategyFactory = businessPartnerPayloadStrategyFactory;
     this.buildWebhookSyncErrorEntry = buildWebhookSyncErrorEntry;
     this.buildErrorResponseSnapshot = buildErrorResponseSnapshot;
@@ -58,7 +61,11 @@ export class ProcessHubspotWebhookEvent {
     const WebhookEvent = tenantModels?.WebhookEvent;
     const companyExists = Boolean(company);
     const contactExists = Boolean(contact);
-    const auditTrail = this.createAuditTrail(payload);
+    // El grabador comparte el array con el auditTrail por referencia, así que el catch ve
+    // todas las llamadas sin que nadie tenga que propagarlas paso por paso.
+    const sapCallRecorder = this.createSapCallRecorder();
+    const auditTrail = this.createAuditTrail(payload, sapCallRecorder.calls);
+    const sapOrderAdapter = sapCallRecorder.wrap(this.sapOrderAdapter);
     let orderResponse = null;
     let cardCode = null;
 
@@ -130,7 +137,7 @@ export class ProcessHubspotWebhookEvent {
       const payloadStrategy = this.businessPartnerPayloadStrategyFactory
         .getStrategy(creationConfig.payloadStrategy);
 
-      const businessPartnerResult = await this.sapOrderAdapter.findOrCreateBusinessPartner({
+      const businessPartnerResult = await sapOrderAdapter.findOrCreateBusinessPartner({
         sapConfig,
         tenantModels,
         company,
@@ -210,7 +217,7 @@ export class ProcessHubspotWebhookEvent {
         && payloadStrategy.includesContactEmployeesInCreate();
 
       if (!contactEmployeesWentInCreate && businessPartnerShape.contactEmployeeSources.length > 0) {
-        contactEmployeeResult = await this.sapOrderAdapter.addContactEmployeesIfNeeded({
+        contactEmployeeResult = await sapOrderAdapter.addContactEmployeesIfNeeded({
           sapConfig,
           cardCode,
           businessPartner: businessPartnerResult.businessPartner,
@@ -288,7 +295,7 @@ export class ProcessHubspotWebhookEvent {
 
       auditTrail.payload_SAP.order = orderPayload;
 
-      orderResponse = await this.sapOrderAdapter.createOrder({
+      orderResponse = await sapOrderAdapter.createOrder({
         sapConfig,
         orderPayload,
       });
@@ -363,9 +370,10 @@ export class ProcessHubspotWebhookEvent {
     }
   }
 
-  createAuditTrail(payload) {
+  createAuditTrail(payload, sapCalls = []) {
     return {
       payload_Hubspot: payload,
+      sapCalls,
       payload_SAP: {
         businessPartner: null,
         businessPartnerUpdate: null,

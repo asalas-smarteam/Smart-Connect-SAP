@@ -200,6 +200,99 @@ Línea base conocida: 6 suites / 12 tests fallando de antes (`sendMappedItemsToH
 Mongo que ambos documentos traen `sapAudit` con `payloadSap.quotation` y `responseSap`
 poblados — el que falla debe mostrar el payload que se intentó mandar.
 
+## Corrección posterior (2026-08-13): la llamada que falla también se audita
+
+El diseño de arriba llena el `auditTrail` con el valor de **retorno** de cada adapter, así que
+la llamada que lanza no deja rastro. Un `createDeal` real quedó en Mongo con
+`lastError: "(1) SP - ERROR - el subgrupo NO es valido para este cliente."` y `sapAudit: null`:
+el `POST /BusinessPartners` fue rechazado por un stored procedure de SAP y su payload murió
+dentro de `findOrCreateBusinessPartner`, antes de las asignaciones a
+`auditTrail.payload_SAP.businessPartner`. Con el trail vacío, `buildWebhookSapAudit` devuelve
+`null` por diseño y `markFailed` omite la clave.
+
+Se agrega un grabador a nivel de transporte, `createSapCallRecorder`
+(`src/infrastructure/sap/sapCallRecorder.js`), inyectado por composition a los 5 use cases:
+
+- `wrap(adapter)` devuelve una vista por evento del adapter con `request` interceptado
+  (`Object.create`, así que el resto de los métodos y los `this.request` internos siguen
+  igual). Los adapters son singletons en composition, por eso no puede ser una dependencia
+  de constructor.
+- `sapAudit.sapCalls` es la lista de llamadas: `method`, `path`, `params`, `request`, `ok`,
+  `status`, `durationMs`, y `response` o `error` (con el mensaje ya resuelto de SAP, el mismo
+  texto que `lastError`).
+- La graba **antes** de saber si va a fallar, así que la llamada rechazada queda completa.
+- Efecto colateral buscado: quedan registradas las llamadas cuyo error se traga a propósito
+  (`updateBusinessPartnerFields` / `updateContactEmployeeFields` devuelven `{ error }` para no
+  bloquear la creación del documento).
+- Nunca graba headers: la cookie de sesión viaja ahí y el login sucede dentro del transporte,
+  fuera de `request`.
+- Topes defensivos, porque el `$set` que guarda `sapAudit` es el mismo que guarda `lastError`
+  y no puede pasarse del límite de Mongo: 40 llamadas por evento (`droppedCalls` cuenta el
+  resto) y 20 000 caracteres por cuerpo serializado (se reemplaza por
+  `{ truncated, originalLength, preview }`).
+
+### Claves que MongoDB rechaza (bug del primer intento)
+
+La primera versión del grabador guardaba `params` como objeto, y el `$set` se cayó entero:
+
+```
+The dollar ($) prefixed field '$select' in 'sapAudit.sapCalls.0.params.$select'
+is not valid for storage.
+```
+
+Mongo rechaza el `$set` **completo** por una sola clave inválida, así que no se perdió solo la
+auditoría: se perdieron `status`, `retries` y `lastError`. Dos eventos con la orden ya creada
+en SAP (DocEntry 565527 y 565528) quedaron colgados en `sap_order_created`, porque falló
+`markCompleted` y después también el `markFailed` de `handlePostSapBookkeepingFailure`.
+
+Dos defensas, una en cada capa:
+
+1. **Al construir el audit** (`sync/syncLog.service.js`): `params` se guarda como query string
+   (`$top=1&$select=CardCode&$filter=...`), que además se lee mejor. Y `sanitizeAuditKeys`
+   (antes `stripODataKeys`) sanea toda clave de todo cuerpo: descarta `@odata.*`, prefija con
+   `_` las que empiezan con `$`, y reemplaza `.` por `_`.
+2. **Al persistir** (`MongooseWebhookEventRepository.applyUpdates`): si el `$set` con
+   `sapAudit` es rechazado, se reintenta sin él y se loguea. El estado del evento siempre se
+   guarda; el audit es lo único sacrificable.
+
+Cuidado al testear esto: `mongodb-memory-server` corre MongoDB >= 5.0, que **sí** acepta
+claves con `$` prefijado, así que un test de integración contra él no ve el rechazo (el
+servidor del cliente es anterior). Lo que sí se verifica contra un mongod real en
+`tests/integration/webhookSapAuditPersistence.test.js` es que lo persistido no lleve ninguna
+de esas claves; el reintento se cubre con dobles en la suite unitaria del repositorio.
+
+### Eventos saltados por idempotencia (`skipped`)
+
+Tercer síntoma del mismo día: 13 `createQuotation` cerraron en `completed` con `sapAudit: null`.
+No era un fallo — los 13 tomaron el atajo de idempotencia ("Quotation already exists for deal,
+skipping creation", visible en `logs/app.log`) porque las cotizaciones ya existían de una
+corrida anterior. No hubo **ninguna** llamada a SAP, así que no había tráfico que auditar; y
+además esos `return` tempranos no incluían `sapAudit`.
+
+Un `null` ahí es indistinguible de "la auditoría está rota", así que ahora los tres flujos con
+idempotencia (`createQuotation`, `convertQuotationToOrder`, `inventoryTransferRequest`) marcan
+`auditTrail.skipped = { reason, sapDocEntry, sapDocNum }` antes del `return`, y
+`buildWebhookSapAudit` lo devuelve como registro real (`skipped` cuenta como contenido, igual
+que `sapCalls`). El documento dice explícitamente que no se mandó nada y por qué.
+
+`sapAudit` sigue siendo `null` únicamente cuando el evento falla antes de la primera llamada a
+SAP y sin haber saltado nada.
+
+Consecuencia para probar el audit: reencolar un deal que ya tiene su documento en SAP **no**
+ejercita nada. Hace falta un deal sin `SapDocumentLink` (uno nuevo), o borrar el link a mano
+sabiendo que eso crea un documento duplicado en SAP.
+
+`payloadSap` / `responseSap` se mantienen como resumen por documento; `sapCalls` es el
+tráfico crudo y es lo único que sobrevive a una llamada que lanza. `sapAudit` sigue siendo
+`null` cuando el evento falla **antes** de la primera llamada a SAP (por ejemplo un
+`PermanentWebhookError` de `CardName` faltante), porque ahí no hubo nada que auditar.
+
+Los use cases construidos sin la dependencia (tests directos) usan
+`createNoopSapCallRecorder` (`src/application/services/sap-call-audit.service.js`) y se
+comportan como antes. Como ese default puede tapar un olvido de cableado,
+`tests/unit/composition/webhookProcessingComposition.test.js` verifica por comportamiento que
+los 5 use cases de composition reciben el grabador real.
+
 ## Fuera de alcance
 
 - Los flujos de precios de line items (`SyncLineItemPrices`,

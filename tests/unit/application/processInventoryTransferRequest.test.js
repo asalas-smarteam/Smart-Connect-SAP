@@ -194,11 +194,18 @@ describe('ProcessHubspotInventoryTransferRequest', () => {
     expect(deps.sapDocumentLinkRepository.findByDeal.mock.calls[0][0]).toMatchObject({
       documentType: 'inventoryTransferRequest',
     });
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       cardCode: 'CL00129',
       docEntry: 12345,
       docNum: 8001,
       dealId: '59680314911',
+    });
+    // Sin trafico a SAP no hay nada que auditar, pero el documento tiene que decir POR QUE
+    // esta vacio: un sapAudit en null se lee igual que una auditoria rota.
+    expect(result.sapAudit.auditTrail.skipped).toEqual({
+      reason: 'inventory_transfer_request_already_exists',
+      sapDocEntry: 12345,
+      sapDocNum: 8001,
     });
   });
 

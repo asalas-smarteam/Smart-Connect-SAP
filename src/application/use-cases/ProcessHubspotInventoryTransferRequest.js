@@ -15,6 +15,7 @@ import {
   resolveBusinessPartnerForDocument,
   resolveDocumentSlpCode,
 } from './webhookQuotationSupport.js';
+import { createNoopSapCallRecorder } from '../services/sap-call-audit.service.js';
 import { BusinessPartnerPayloadStrategyFactory } from '#domain/business-partners/business-partner-payload.factory.js';
 import LegacyWhitelistBusinessPartnerPayloadStrategy from '#domain/business-partners/strategies/legacy-whitelist-bp-payload.strategy.js';
 import FullMappedBusinessPartnerPayloadStrategy from '#domain/business-partners/strategies/full-mapped-bp-payload.strategy.js';
@@ -43,8 +44,10 @@ export class ProcessHubspotInventoryTransferRequest {
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
     buildWebhookSapAudit,
+    createSapCallRecorder = createNoopSapCallRecorder,
     logger = { warn: () => {} },
   }) {
+    this.createSapCallRecorder = createSapCallRecorder;
     this.runtimeRepository = runtimeRepository;
     this.sapOrderAdapter = sapOrderAdapter;
     this.sapInventoryTransferRequestAdapter = sapInventoryTransferRequestAdapter;
@@ -65,7 +68,15 @@ export class ProcessHubspotInventoryTransferRequest {
     const companyExists = Boolean(company);
     const contactExists = Boolean(contact);
     const dealId = toNonEmptyString(deal?.hs_object_id);
-    const auditTrail = createDocumentAuditTrail(payload, 'inventoryTransferRequest');
+    const sapCallRecorder = this.createSapCallRecorder();
+    const auditTrail = createDocumentAuditTrail(
+      payload,
+      'inventoryTransferRequest',
+      sapCallRecorder.calls
+    );
+    const sapOrderAdapter = sapCallRecorder.wrap(this.sapOrderAdapter);
+    const sapInventoryTransferRequestAdapter = sapCallRecorder
+      .wrap(this.sapInventoryTransferRequestAdapter);
     let transferResponse = null;
     let cardCode = null;
 
@@ -95,16 +106,22 @@ export class ProcessHubspotInventoryTransferRequest {
           dealId,
           sapDocEntry: existingLink.sapDocEntry,
         });
+        auditTrail.skipped = {
+          reason: 'inventory_transfer_request_already_exists',
+          sapDocEntry: existingLink.sapDocEntry ?? null,
+          sapDocNum: existingLink.sapDocNum ?? null,
+        };
         return {
           cardCode: existingLink.cardCode,
           docEntry: existingLink.sapDocEntry,
           docNum: existingLink.sapDocNum,
           dealId,
+          sapAudit: this.buildWebhookSapAudit(auditTrail),
         };
       }
 
       const businessPartner = await resolveBusinessPartnerForDocument({
-        sapOrderAdapter: this.sapOrderAdapter,
+        sapOrderAdapter,
         hubspotWebhookAdapter: this.hubspotWebhookAdapter,
         runtimeRepository: this.runtimeRepository,
         webhookReferenceRepository: this.webhookReferenceRepository,
@@ -150,7 +167,7 @@ export class ProcessHubspotInventoryTransferRequest {
       });
       auditTrail.payload_SAP.inventoryTransferRequest = inventoryTransferRequestPayload;
 
-      transferResponse = await this.sapInventoryTransferRequestAdapter.createInventoryTransferRequest({
+      transferResponse = await sapInventoryTransferRequestAdapter.createInventoryTransferRequest({
         sapConfig,
         inventoryTransferRequestPayload,
       });

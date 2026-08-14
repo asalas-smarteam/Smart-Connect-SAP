@@ -37,6 +37,92 @@ describe('SapWebhookOrderAdapter.addContactEmployeeIfNeeded', () => {
   });
 });
 
+describe('SapWebhookOrderAdapter.addContactEmployeeIfNeeded matching por InternalCode', () => {
+  const mappingsWithInternalCode = [
+    { sourceField: 'E_Mail', targetField: 'email', sourceContext: 'contactEmployee' },
+    { sourceField: 'Name', targetField: 'firstname', sourceContext: 'contactEmployee' },
+    { sourceField: 'InternalCode', targetField: 'internalcode', sourceContext: 'contactEmployee' },
+  ];
+
+  it('encuentra al existente por InternalCode aunque el nombre y el email hayan cambiado', async () => {
+    const adapter = new SapWebhookOrderAdapter();
+    const requestSpy = jest.spyOn(adapter, 'request');
+
+    const businessPartner = {
+      ContactEmployees: [{ InternalCode: 91848, Name: 'Nombre Viejo', E_Mail: 'viejo@example.com' }],
+    };
+    // El contacto trae internalcode="91848" (ya se sincronizó antes), pero su
+    // nombre y email en HubSpot cambiaron desde entonces.
+    const contact = { email: 'nuevo@example.com', firstname: 'Nombre Nuevo', internalcode: '91848' };
+
+    const result = await adapter.addContactEmployeeIfNeeded({
+      sapConfig: {},
+      cardCode: 'CLO017007',
+      businessPartner,
+      contact,
+      contactEmployeeMappings: mappingsWithInternalCode,
+    });
+
+    expect(result.created).toBe(false);
+    expect(result.internalCode).toBe(91848);
+    expect(requestSpy).not.toHaveBeenCalled();
+  });
+
+  it('el InternalCode gana sobre una coincidencia por nombre con otro empleado', async () => {
+    const adapter = new SapWebhookOrderAdapter();
+    const requestSpy = jest.spyOn(adapter, 'request');
+
+    const businessPartner = {
+      ContactEmployees: [
+        { InternalCode: 1, Name: 'Juan', E_Mail: 'juan.viejo@example.com' },
+        { InternalCode: 2, Name: 'Otro Nombre', E_Mail: 'juan@example.com' },
+      ],
+    };
+    // El nombre "Juan" coincidiría con InternalCode 1 por el fallback, pero el
+    // internalcode que trae el contacto apunta al InternalCode 2: debe ganar ese.
+    const contact = { email: 'juan@example.com', firstname: 'Juan', internalcode: '2' };
+
+    const result = await adapter.addContactEmployeeIfNeeded({
+      sapConfig: {},
+      cardCode: 'CLO017007',
+      businessPartner,
+      contact,
+      contactEmployeeMappings: mappingsWithInternalCode,
+    });
+
+    expect(result.created).toBe(false);
+    expect(result.internalCode).toBe(2);
+    expect(requestSpy).not.toHaveBeenCalled();
+  });
+
+  it('nunca manda InternalCode de vuelta al crear un ContactEmployee nuevo', async () => {
+    const adapter = new SapWebhookOrderAdapter();
+    const requestSpy = jest.spyOn(adapter, 'request').mockImplementation(async (sapConfig, { method }) => {
+      if (method === 'patch') {
+        return {};
+      }
+      return { ContactEmployees: [] };
+    });
+
+    const businessPartner = { ContactEmployees: [] };
+    // Contacto nuevo: nunca se sincronizó, así que su propiedad internalcode viene vacía.
+    const contact = { email: 'nuevo@example.com', firstname: 'Nuevo', internalcode: '' };
+
+    await adapter.addContactEmployeeIfNeeded({
+      sapConfig: {},
+      cardCode: 'CLO017007',
+      businessPartner,
+      contact,
+      contactEmployeeMappings: mappingsWithInternalCode,
+    });
+
+    const patchCall = requestSpy.mock.calls.find(([, options]) => options.method === 'patch');
+    const newEmployee = patchCall[1].data.ContactEmployees[0];
+
+    expect(newEmployee).not.toHaveProperty('InternalCode');
+  });
+});
+
 describe('SapWebhookOrderAdapter.addContactEmployeeIfNeeded upsert hook', () => {
   const contactEmployeeMappings = [
     { sourceField: 'E_Mail', targetField: 'email', sourceContext: 'contactEmployee' },

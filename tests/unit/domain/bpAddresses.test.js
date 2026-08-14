@@ -66,14 +66,16 @@ describe('buildBpAddresses', () => {
     expect(addresses[0].AddressName).toBe('FACTURA');
   });
 
-  it('el valor del payload gana sobre byName y sobre los defaults', () => {
+  it('el valor del payload gana sobre byName, pero el default de config le gana a ambos', () => {
     const { addresses } = buildBpAddresses({
       mappedAddresses: [{ AddressName: 'factura', AddressType: 'bo_ShipTo', TaxCode: 'EXE', Country: 'CU' }],
       addressesConfig: CONFIG,
       addressDefaults: DEFAULTS,
     });
 
-    expect(addresses[0]).toMatchObject({ AddressType: 'bo_ShipTo', TaxCode: 'EXE', Country: 'CU' });
+    // AddressType y Country no tienen default configurado: el payload gana sobre byName.
+    // TaxCode sí tiene default ('IVA'): gana siempre, aunque el payload traiga 'EXE'.
+    expect(addresses[0]).toMatchObject({ AddressType: 'bo_ShipTo', TaxCode: 'IVA', Country: 'CU' });
   });
 
   it('avisa cuando el AddressName no esta en byName pero crea la direccion', () => {

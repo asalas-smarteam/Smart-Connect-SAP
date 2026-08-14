@@ -3,6 +3,7 @@ import {
   mapHubspotToSapFields,
 } from '#domain/orders/order-builder.service.js';
 import { PermanentWebhookError } from '#shared/errors/index.js';
+import { createNoopSapCallRecorder } from '../services/sap-call-audit.service.js';
 import { resolveEventPayload } from '../services/webhook-payload.service.js';
 import {
   buildDealNumAtCard,
@@ -21,8 +22,10 @@ export class ProcessHubspotConvertQuotationToOrder {
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
     buildWebhookSapAudit,
+    createSapCallRecorder = createNoopSapCallRecorder,
     logger = { warn: () => {} },
   }) {
+    this.createSapCallRecorder = createSapCallRecorder;
     this.runtimeRepository = runtimeRepository;
     this.sapOrderAdapter = sapOrderAdapter;
     this.hubspotWebhookAdapter = hubspotWebhookAdapter;
@@ -37,7 +40,9 @@ export class ProcessHubspotConvertQuotationToOrder {
     const { payload, deal } = resolveEventPayload(event);
     const SapDocumentLink = tenantModels?.SapDocumentLink;
     const dealId = toNonEmptyString(deal?.hs_object_id);
-    const auditTrail = createDocumentAuditTrail(payload, 'order');
+    const sapCallRecorder = this.createSapCallRecorder();
+    const auditTrail = createDocumentAuditTrail(payload, 'order', sapCallRecorder.calls);
+    const sapOrderAdapter = sapCallRecorder.wrap(this.sapOrderAdapter);
     let orderResponse = null;
     let cardCode = null;
 
@@ -80,11 +85,17 @@ export class ProcessHubspotConvertQuotationToOrder {
           dealId,
           sapDocEntry: existingOrderLink.sapDocEntry,
         });
+        auditTrail.skipped = {
+          reason: 'order_already_exists',
+          sapDocEntry: existingOrderLink.sapDocEntry ?? null,
+          sapDocNum: existingOrderLink.sapDocNum ?? null,
+        };
         return {
           cardCode: existingOrderLink.cardCode,
           docEntry: existingOrderLink.sapDocEntry,
           docNum: existingOrderLink.sapDocNum,
           dealId,
+          sapAudit: this.buildWebhookSapAudit(auditTrail),
         };
       }
 
@@ -109,7 +120,7 @@ export class ProcessHubspotConvertQuotationToOrder {
       });
       auditTrail.payload_SAP.order = orderPayload;
 
-      orderResponse = await this.sapOrderAdapter.createOrder({
+      orderResponse = await sapOrderAdapter.createOrder({
         sapConfig,
         orderPayload,
       });

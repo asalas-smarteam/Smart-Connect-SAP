@@ -31,12 +31,13 @@ export class FullMappedBusinessPartnerPayloadStrategy {
     defaults,
     resolved,
   }) {
-    // Precedencia: defaults de config -> valores mapeados de HubSpot ->
-    // banderas PropertiesN (que no pueden venir de un mapping).
+    // Precedencia: un default configurado SIEMPRE gana, sin importar qué traiga
+    // HubSpot. Si el campo no tiene default, se usa el valor mapeado o la
+    // bandera PropertiesN. Por eso defaults va al final del spread.
     const payload = {
-      ...omitBlank(defaults?.BusinessPartner),
       ...omitBlank(mappedBusinessPartner),
       ...omitBlank(propertiesFlags),
+      ...omitBlank(defaults?.BusinessPartner),
     };
 
     for (const field of NESTED_COLLECTION_FIELDS) {
