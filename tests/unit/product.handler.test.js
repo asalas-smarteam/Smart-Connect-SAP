@@ -1,4 +1,6 @@
 import { jest } from '@jest/globals';
+import { WAREHOUSE_STOCK_KEY } from '../../src/domain/warehouses/warehouse-stock-strategy.constants.js';
+import { BATCH_EXPIRY_KEY } from '../../src/domain/batches/batch-expiry.constants.js';
 
 const mockGetHubspotWarehouseStockPropertiesForTenant = jest.fn();
 const mockBuildHubspotWarehouseStockProperties = jest.fn();
@@ -306,5 +308,46 @@ describe('product.handler preprocess', () => {
 
       expect(item.properties).toEqual({});
     });
+  });
+});
+
+describe('product.handler + lotes de caducidad', () => {
+  it('copia las propiedades de lote cuando el enricher dejo la clave', async () => {
+    const item = {
+      rawSapData: {
+        Product: '10000289',
+        [WAREHOUSE_STOCK_KEY]: { dpdo_0001_stock: 8600 },
+        [BATCH_EXPIRY_KEY]: { lotes_detalle: '17141 · vence 2026-11-01 · 9,654.000 · DPDO/0001', dias_para_vencer: 80 },
+      },
+      properties: {},
+    };
+
+    await preprocess({ item, tenantModels: {}, preprocessContext: { warehouseFields: [], priceFields: ['hs_price_usd'] } });
+
+    expect(item.properties.lotes_detalle).toContain('17141');
+    expect(item.properties.dias_para_vencer).toBe(80);
+    // El stock por bodega no se pisa
+    expect(item.properties.dpdo_0001_stock).toBe(8600);
+  });
+
+  it('sin la clave no escribe ninguna propiedad de lote', async () => {
+    const item = { rawSapData: { Product: '10000289', [WAREHOUSE_STOCK_KEY]: {} }, properties: {} };
+
+    await preprocess({ item, tenantModels: {}, preprocessContext: { warehouseFields: [], priceFields: ['hs_price_usd'] } });
+
+    expect(item.properties).not.toHaveProperty('lotes_detalle');
+    expect(item.properties).not.toHaveProperty('dias_para_vencer');
+  });
+
+  it('con la clave vacia escribe las propiedades vacias (limpia valores viejos)', async () => {
+    const item = {
+      rawSapData: { Product: 'X', [WAREHOUSE_STOCK_KEY]: {}, [BATCH_EXPIRY_KEY]: { lotes_detalle: '', cantidad_vencida: '' } },
+      properties: {},
+    };
+
+    await preprocess({ item, tenantModels: {}, preprocessContext: { warehouseFields: [], priceFields: ['hs_price_usd'] } });
+
+    expect(item.properties.lotes_detalle).toBe('');
+    expect(item.properties.cantidad_vencida).toBe('');
   });
 });

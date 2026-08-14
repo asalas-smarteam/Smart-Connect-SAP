@@ -2,6 +2,7 @@ import * as hubspotClient from '../hubspotClient.js';
 import tenantConfigurationService from '#infrastructure/config/tenantConfiguration.service.js';
 import { KEEP_MAPPED_PRICE_FLAG } from '#domain/products/product-sync-strategy.constants.js';
 import { WAREHOUSE_STOCK_KEY } from '#domain/warehouses/warehouse-stock-strategy.constants.js';
+import { BATCH_EXPIRY_KEY } from '#domain/batches/batch-expiry.constants.js';
 import { buildExclusiveDiscountProperties } from '#domain/products/discount-properties.service.js';
 import {
   buildHubspotWarehouseStockProperties,
@@ -78,6 +79,14 @@ export async function preprocess({ item, tenantModels, preprocessContext }) {
   item.properties = item.properties || {};
 
   Object.assign(item.properties, warehouseStockProperties);
+
+  // A diferencia del stock por bodega, esta clave puede NO estar: el enricher la
+  // omite cuando el tenant no maneja lotes o cuando la lectura de SAP fallo. En
+  // ese caso no se toca nada y HubSpot conserva lo de la corrida anterior, en
+  // vez de quedar con las propiedades en blanco por un timeout de red.
+  if (Object.prototype.hasOwnProperty.call(rawSapData, BATCH_EXPIRY_KEY)) {
+    Object.assign(item.properties, rawSapData[BATCH_EXPIRY_KEY]);
+  }
 
   const resolvedDiscount = item?.rawSapData?._resolvedDiscount;
   const discountHsProperty = item?.rawSapData?._discountHsProperty;
