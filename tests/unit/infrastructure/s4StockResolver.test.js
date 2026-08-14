@@ -51,6 +51,10 @@ describe('S4StockResolver', () => {
     expect(call.query.$select).toBe(MATERIAL_STOCK_SELECT);
   });
 
+  it('pide Batch: la estrategia de lotes hace el join contra el maestro con el', () => {
+    expect(MATERIAL_STOCK_SELECT.split(',')).toContain('Batch');
+  });
+
   it('renders an explicit storage-location list as an OR group, plant-scoped', async () => {
     const transport = buildTransport({ MQGT: [] });
     const resolver = new S4StockResolver({ transport });

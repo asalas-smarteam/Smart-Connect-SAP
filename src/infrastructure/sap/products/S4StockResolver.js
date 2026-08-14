@@ -9,6 +9,10 @@ export const MATERIAL_STOCK_SELECT = [
   'Material',
   'Plant',
   'StorageLocation',
+  // Campo clave de A_MatlStkInAcctMod. La estrategia de stock por bodega suma
+  // sobre el (y por eso no lo pedia); la de lotes lo necesita para el join
+  // contra el maestro de API_BATCH_SRV.
+  'Batch',
   'InventorySpecialStockType',
   'InventoryStockType',
   'MatlWrhsStkQtyInMatlBaseUnit',
