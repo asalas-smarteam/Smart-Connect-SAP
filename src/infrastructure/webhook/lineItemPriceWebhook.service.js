@@ -8,6 +8,7 @@ import {
   extractAssociationIds,
   extractLineItemAssociationIds,
   fetchHubspotObject,
+  readLineItems,
   resolveHubspotCredentials,
   toNonEmptyString,
   toNumberOrNull,
@@ -101,44 +102,6 @@ async function resolveCardCode(token, deal) {
   }
 
   return null;
-}
-
-async function resolveLineItems(token, deal, miscPriceCalculationConfig = null) {
-  const lineItemIds = extractLineItemAssociationIds(deal);
-
-  if (lineItemIds.length === 0) {
-    throw new Error('Deal has no associated line items');
-  }
-
-  const miscSourceProperty = miscPriceCalculationConfig?.enableMiscPriceCalculation === true
-    ? toNonEmptyString(miscPriceCalculationConfig?.miscSourceProperty)
-    : null;
-  const lineItemProperties = ['hs_sku', 'quantity', miscSourceProperty]
-    .filter((value, index, values) => value && values.indexOf(value) === index);
-
-  const lineItems = await Promise.all(
-    lineItemIds.map(async (lineItemId, index) => {
-      const lineItem = await fetchHubspotObject(token, 'line_items', lineItemId, {
-        properties: lineItemProperties,
-      });
-      const itemCode = toNonEmptyString(lineItem?.properties?.hs_sku || lineItem?.properties?.itemCode);
-
-      if (!itemCode) {
-        throw new Error(`lineItems[${index}].itemCode is required`);
-      }
-
-      return {
-        id: toNonEmptyString(lineItem?.id) || lineItemId,
-        itemCode,
-        quantity: lineItem?.properties?.quantity ?? null,
-        ...(miscSourceProperty
-          ? { [miscSourceProperty]: lineItem?.properties?.[miscSourceProperty] ?? null }
-          : {}),
-      };
-    })
-  );
-
-  return lineItems;
 }
 
 // Flujo de cambio de propiedad: precio = safe_price_value * (1 + miscelaneo / 100).
@@ -487,11 +450,33 @@ async function buildLegacyPayload(payload, token, miscPriceCalculationConfig = n
   const deal = await fetchHubspotObject(token, 'deals', dealId, {
     associations: ['companies', 'contacts', 'line_items'],
   });
+  const lineItemIds = extractLineItemAssociationIds(deal);
+
+  if (lineItemIds.length === 0) {
+    throw new Error('Deal has no associated line items');
+  }
+
+  const miscSourceProperty = miscPriceCalculationConfig?.enableMiscPriceCalculation === true
+    ? toNonEmptyString(miscPriceCalculationConfig?.miscSourceProperty)
+    : null;
+
+  const cardCode = await resolveCardCode(token, deal);
+  // Una línea ilegible ya no tumba al resto: viaja en lineItemFailures hasta el audit.
+  const { lineItems, failures } = await readLineItems({
+    token,
+    lineItemIds,
+    extraProperties: [miscSourceProperty].filter(Boolean),
+  });
+
+  if (lineItems.length === 0) {
+    throw new Error('Deal has no readable line items');
+  }
 
   return {
     dealId,
-    cardCode: await resolveCardCode(token, deal),
-    lineItems: await resolveLineItems(token, deal, miscPriceCalculationConfig),
+    cardCode,
+    lineItems,
+    lineItemFailures: failures,
   };
 }
 

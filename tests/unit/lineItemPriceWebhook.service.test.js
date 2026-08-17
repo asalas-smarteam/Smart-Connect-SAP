@@ -214,6 +214,60 @@ describe('lineItemPriceWebhook.service', () => {
     expect(tenantModels.LineItemPriceWebhookEvent.create).not.toHaveBeenCalled();
   });
 
+  it('builds the legacy payload with two of three lines when one line 404s', async () => {
+    const tenantModels = buildTenantModels();
+
+    mockGetAccessToken.mockResolvedValue('hubspot-token');
+    mockHubspotGet.mockImplementation(async (_token, path) => {
+      if (path === '/crm/v3/objects/deals/64058987777') {
+        return {
+          id: '64058987777',
+          associations: {
+            companies: { results: [{ id: 'company-1' }] },
+            'line items': { results: [{ id: 'line-1' }, { id: 'line-2' }, { id: 'line-3' }] },
+          },
+        };
+      }
+
+      if (path === '/crm/v3/objects/companies/company-1') {
+        return { id: 'company-1', properties: { idsap: 'C20000' } };
+      }
+
+      if (path === '/crm/v3/objects/line_items/line-2') {
+        throw Object.assign(new Error('HubSpot API request failed: 404 Not Found'), {
+          details: { endpoint: path, method: 'GET', status: 404 },
+        });
+      }
+
+      return { id: path.split('/').pop(), properties: { hs_sku: 'A0001', quantity: '1' } };
+    });
+
+    const result = await lineItemPriceWebhookService.preparePayload(
+      {
+        eventId: 2073333923,
+        subscriptionId: 6955444,
+        portalId: 50249912,
+        appId: 36665006,
+        occurredAt: 1786997905997,
+        associationType: 'DEAL_TO_LINE_ITEM',
+        changeSource: 'USER',
+        fromObjectId: 64058987777,
+      },
+      { tenantModels, tenant: { client: { hubspot: { portalId: '50249912' } } } }
+    );
+
+    expect(result.skip).toBe(false);
+    expect(result.payload.lineItems.map((line) => line.id)).toEqual(['line-1', 'line-3']);
+    expect(result.payload.lineItemFailures).toEqual([{
+      id: 'line-2',
+      stage: 'hubspot_read',
+      reason: 'HubSpot API request failed: 404 Not Found',
+      status: 404,
+      endpoint: '/crm/v3/objects/line_items/line-2',
+    }]);
+    expect(result.payload.cardCode).toBe('C20000');
+  });
+
   it('builds the legacy payload from the HubSpot deal associations', async () => {
     const tenantModels = buildTenantModels();
 
@@ -291,9 +345,20 @@ describe('lineItemPriceWebhook.service', () => {
         dealId: '58986911596',
         cardCode: 'CL00129',
         lineItems: [
-          { id: '54118822955', itemCode: 'A01050211', quantity: '2' },
-          { id: '54118822956', itemCode: 'A01050007', quantity: '0' },
+          {
+            id: '54118822955',
+            itemCode: 'A01050211',
+            quantity: '2',
+            properties: { hs_sku: 'A01050211', quantity: '2' },
+          },
+          {
+            id: '54118822956',
+            itemCode: 'A01050007',
+            quantity: '0',
+            properties: { hs_sku: 'A01050007', quantity: '0' },
+          },
         ],
+        lineItemFailures: [],
       },
       executionId: 'event-1',
     });
@@ -388,7 +453,13 @@ describe('lineItemPriceWebhook.service', () => {
     );
 
     expect(result.payload.lineItems).toEqual([
-      { id: '54118822955', itemCode: 'A01050211', quantity: '2', misc: '15' },
+      {
+        id: '54118822955',
+        itemCode: 'A01050211',
+        quantity: '2',
+        misc: '15',
+        properties: { hs_sku: 'A01050211', quantity: '2', misc: '15' },
+      },
     ]);
     expect(mockHubspotGet).toHaveBeenCalledWith(
       'hubspot-token',
@@ -406,7 +477,7 @@ describe('lineItemPriceWebhook.service', () => {
       associations: {
         companies: { results: [] },
         contacts: { results: [] },
-        line_items: { results: [] },
+        line_items: { results: [{ id: '54118822955' }] },
       },
     });
 
@@ -512,8 +583,14 @@ describe('lineItemPriceWebhook.service', () => {
         dealId: '58986911596',
         cardCode: null,
         lineItems: [
-          { id: '54118822955', itemCode: 'A01050211', quantity: '0' },
+          {
+            id: '54118822955',
+            itemCode: 'A01050211',
+            quantity: '0',
+            properties: { hs_sku: 'A01050211', quantity: '0' },
+          },
         ],
+        lineItemFailures: [],
       },
       executionId: 'event-1',
     });
