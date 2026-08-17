@@ -1,8 +1,10 @@
 import {
   QUOTATION_BASE_TYPE,
   buildOrderFromQuotationPayload,
+  buildOrderPayload,
   buildQuotationLineUpdates,
   buildQuotationPayload,
+  normalizeDocumentSpecialLines,
 } from '../../../src/domain/orders/order-builder.service.js';
 
 describe('order-builder.service buildQuotationPayload', () => {
@@ -39,6 +41,84 @@ describe('order-builder.service buildQuotationPayload', () => {
     expect(() => buildQuotationPayload({ cardCode: 'CL1', documentLines: [] })).toThrow(
       /At least one line_item/
     );
+  });
+});
+
+describe('order-builder.service normalizeDocumentSpecialLines', () => {
+  it('wraps the mapped texto_gobierno string into the collection SAP expects', () => {
+    expect(normalizeDocumentSpecialLines('Garantía: 12 Meses')).toEqual([
+      { LineNum: 0, LineText: 'Garantía: 12 Meses' },
+    ]);
+  });
+
+  it('keeps a multiline text as a single line so wrapped sentences are not cut', () => {
+    const text = 'Capacidad de \nhojas en bandeja: 550\nO.C: 111931, N.O.G: 29412315';
+
+    expect(normalizeDocumentSpecialLines(text)).toEqual([{ LineNum: 0, LineText: text }]);
+  });
+
+  it('returns null for empty, blank or missing values', () => {
+    expect(normalizeDocumentSpecialLines('')).toBeNull();
+    expect(normalizeDocumentSpecialLines('   ')).toBeNull();
+    expect(normalizeDocumentSpecialLines(null)).toBeNull();
+    expect(normalizeDocumentSpecialLines(undefined)).toBeNull();
+    expect(normalizeDocumentSpecialLines([])).toBeNull();
+  });
+
+  it('passes through a collection that is already shaped', () => {
+    const lines = [{ LineNum: 0, LineText: 'ya viene armado' }];
+
+    expect(normalizeDocumentSpecialLines(lines)).toBe(lines);
+  });
+});
+
+describe('order-builder.service DocumentSpecialLines in header payloads', () => {
+  const documentLines = [{ ItemCode: 'A01', Quantity: 1, UnitPrice: 10 }];
+
+  it('reshapes DocumentSpecialLines on a Quotation instead of sending the raw string', () => {
+    const payload = buildQuotationPayload({
+      cardCode: 'CL00129',
+      documentLines,
+      mappedDealFields: { DocumentSpecialLines: 'O.C: 111931, N.O.G: 29412315' },
+    });
+
+    expect(payload.DocumentSpecialLines).toEqual([
+      { LineNum: 0, LineText: 'O.C: 111931, N.O.G: 29412315' },
+    ]);
+  });
+
+  it('reshapes DocumentSpecialLines on an Order too', () => {
+    const payload = buildOrderPayload({
+      cardCode: 'CL00129',
+      documentLines,
+      mappedDealFields: { DocumentSpecialLines: 'texto gobierno' },
+    });
+
+    expect(payload.DocumentSpecialLines).toEqual([{ LineNum: 0, LineText: 'texto gobierno' }]);
+  });
+
+  it('omits DocumentSpecialLines entirely when the deal has no texto_gobierno', () => {
+    const payload = buildQuotationPayload({
+      cardCode: 'CL00129',
+      documentLines,
+      mappedDealFields: { DocumentSpecialLines: '   ' },
+    });
+
+    expect(payload).not.toHaveProperty('DocumentSpecialLines');
+  });
+
+  it('leaves the rest of the mapped header fields untouched', () => {
+    const payload = buildQuotationPayload({
+      cardCode: 'CL00129',
+      documentLines,
+      mappedDealFields: {
+        DocumentSpecialLines: 'texto gobierno',
+        U_BAJA_CUANTIA: 'N',
+        Series: '240',
+      },
+    });
+
+    expect(payload).toMatchObject({ U_BAJA_CUANTIA: 'N', Series: '240' });
   });
 });
 
