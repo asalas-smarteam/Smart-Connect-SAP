@@ -30,13 +30,41 @@ export function mapHubspotToSapFields(source, mappings) {
 // are excluded from the generic deal-mapping spread so mapped raw values cannot clobber them.
 const RESERVED_HEADER_FIELDS = new Set(['CardCode', 'DocDueDate', 'DocumentLines', 'PaymentGroupCode']);
 
+// SAP expects DocumentSpecialLines as a collection of line objects, but a FieldMapping can only
+// copy a scalar HubSpot property: `texto_gobierno` arrives as plain text. Service Layer does not
+// reject the malformed value — it drops the collection and stores [], so the text is lost with
+// no error anywhere. The string is reshaped here into the collection SAP actually expects.
+//
+// The whole text becomes a single line on purpose. Its newlines mix soft wraps ("Capacidad de \n
+// hojas en bandeja") with real separators ("O.C: 111931\nCódigo Artículo: 36351"), so splitting
+// on them would cut sentences in half.
+export function normalizeDocumentSpecialLines(value) {
+  if (Array.isArray(value)) {
+    return value.length ? value : null;
+  }
+
+  const lineText = toNonEmptyString(value);
+
+  return lineText ? [{ LineNum: 0, LineText: lineText }] : null;
+}
+
 function pickMappedHeaderFields(mappedDealFields) {
   const fields = {};
 
   for (const [field, value] of Object.entries(mappedDealFields || {})) {
-    if (!RESERVED_HEADER_FIELDS.has(field)) {
-      fields[field] = value;
+    if (RESERVED_HEADER_FIELDS.has(field)) {
+      continue;
     }
+
+    if (field === 'DocumentSpecialLines') {
+      const specialLines = normalizeDocumentSpecialLines(value);
+      if (specialLines) {
+        fields[field] = specialLines;
+      }
+      continue;
+    }
+
+    fields[field] = value;
   }
 
   return fields;
