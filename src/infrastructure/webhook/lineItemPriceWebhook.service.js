@@ -1,6 +1,7 @@
 import hubspotAuthService from '../hubspot/hubspotAuthService.js';
 import * as hubspotClient from '../hubspot/hubspotClient.js';
 import tenantConfigurationService from '../config/tenantConfiguration.service.js';
+import logger from '../logger/logger.js';
 import {
   assertRequiredWebhookField,
   buildDuplicateFilter,
@@ -494,6 +495,27 @@ async function buildLegacyPayload(payload, token, miscPriceCalculationConfig = n
   };
 }
 
+// Escritura aparte, y con su propio try/catch: si Mongo rechaza el audit, el resultado del
+// evento (isSend / errorMessage) ya quedó guardado por el updateOne anterior.
+async function persistAudit(LineItemPriceWebhookEvent, executionId, audit) {
+  if (!audit) {
+    return;
+  }
+
+  try {
+    await LineItemPriceWebhookEvent.updateOne(
+      { _id: executionId },
+      { $set: { audit } }
+    );
+  } catch (error) {
+    logger.warn({
+      msg: 'Line item price audit could not be persisted',
+      executionId: String(executionId),
+      error: error.message,
+    });
+  }
+}
+
 const lineItemPriceWebhookService = {
   isLegacyPayload,
 
@@ -627,7 +649,7 @@ const lineItemPriceWebhookService = {
     }
   },
 
-  async markAsSent(LineItemPriceWebhookEvent, executionId) {
+  async markAsSent(LineItemPriceWebhookEvent, executionId, audit = null) {
     if (!LineItemPriceWebhookEvent || !executionId) {
       return;
     }
@@ -641,9 +663,11 @@ const lineItemPriceWebhookService = {
         },
       }
     );
+
+    await persistAudit(LineItemPriceWebhookEvent, executionId, audit);
   },
 
-  async markAsError(LineItemPriceWebhookEvent, executionId, error) {
+  async markAsError(LineItemPriceWebhookEvent, executionId, error, audit = null) {
     if (!LineItemPriceWebhookEvent || !executionId || !error) {
       return;
     }
@@ -657,6 +681,8 @@ const lineItemPriceWebhookService = {
         },
       }
     );
+
+    await persistAudit(LineItemPriceWebhookEvent, executionId, audit);
   },
 };
 

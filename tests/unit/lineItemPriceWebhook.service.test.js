@@ -819,4 +819,64 @@ describe('lineItemPriceWebhook.service', () => {
       }
     );
   });
+
+  describe('audit persistence', () => {
+    it('writes the audit in a separate updateOne from isSend/errorMessage', async () => {
+      const LineItemPriceWebhookEvent = {
+        updateOne: jest.fn().mockResolvedValue({ acknowledged: true }),
+      };
+
+      await lineItemPriceWebhookService.markAsError(
+        LineItemPriceWebhookEvent,
+        'event-1',
+        new Error('HubSpot API request failed: 404 Not Found'),
+        { capturedAt: 'now', calls: [] }
+      );
+
+      expect(LineItemPriceWebhookEvent.updateOne).toHaveBeenCalledTimes(2);
+      expect(LineItemPriceWebhookEvent.updateOne).toHaveBeenNthCalledWith(
+        1,
+        { _id: 'event-1' },
+        { $set: { isSend: false, errorMessage: 'HubSpot API request failed: 404 Not Found' } }
+      );
+      expect(LineItemPriceWebhookEvent.updateOne).toHaveBeenNthCalledWith(
+        2,
+        { _id: 'event-1' },
+        { $set: { audit: { capturedAt: 'now', calls: [] } } }
+      );
+    });
+
+    it('does not lose errorMessage when Mongo rejects the audit write', async () => {
+      const LineItemPriceWebhookEvent = {
+        updateOne: jest.fn()
+          .mockResolvedValueOnce({ acknowledged: true })
+          .mockRejectedValueOnce(new Error("The dollar ($) prefixed field '$select' is not valid for storage")),
+      };
+
+      await expect(
+        lineItemPriceWebhookService.markAsError(
+          LineItemPriceWebhookEvent,
+          'event-1',
+          new Error('boom'),
+          { calls: [] }
+        )
+      ).resolves.toBeUndefined();
+
+      expect(LineItemPriceWebhookEvent.updateOne).toHaveBeenNthCalledWith(
+        1,
+        { _id: 'event-1' },
+        { $set: { isSend: false, errorMessage: 'boom' } }
+      );
+    });
+
+    it('skips the audit write when there is no audit', async () => {
+      const LineItemPriceWebhookEvent = {
+        updateOne: jest.fn().mockResolvedValue({ acknowledged: true }),
+      };
+
+      await lineItemPriceWebhookService.markAsSent(LineItemPriceWebhookEvent, 'event-1');
+
+      expect(LineItemPriceWebhookEvent.updateOne).toHaveBeenCalledTimes(1);
+    });
+  });
 });
