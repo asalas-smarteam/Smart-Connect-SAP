@@ -3,6 +3,10 @@ import hubspotAuthService from '../hubspot/hubspotAuthService.js';
 import * as hubspotClient from '../hubspot/hubspotClient.js';
 import { runWithRetry } from '#shared/utils/retry.js';
 import { buildExclusiveDiscountProperties } from '#domain/products/discount-properties.service.js';
+import {
+  readDealLineItemIds,
+  readLineItems,
+} from '#infrastructure/webhook/lineItemPriceWebhook.shared.js';
 
 function toNonEmptyString(value) {
   const normalized = String(value ?? '').trim();
@@ -144,6 +148,16 @@ export class HubspotLineItemPriceClient {
       `/crm/v3/objects/${objectType}/${encodeURIComponent(String(objectId))}`,
       params
     );
+  }
+
+  // Delega en la única implementación del lector tolerante. Existe como método del puerto
+  // para que SyncLineItemPrices la alcance sin que application importe infrastructure.
+  async readLineItems({ token, lineItemIds, extraProperties = [] }) {
+    return readLineItems({ token, lineItemIds, extraProperties });
+  }
+
+  async readDealLineItemIds({ token, dealId }) {
+    return readDealLineItemIds({ token, dealId });
   }
 
   async updateLineItems({ token, enrichedLineItems, tenantKey }) {

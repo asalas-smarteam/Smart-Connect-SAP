@@ -78,3 +78,77 @@ export async function fetchHubspotObject(token, objectType, objectId, { properti
   );
 }
 
+// Lector tolerante: NUNCA lanza por una línea individual. Sigue usando Promise.all porque el
+// paralelismo no es el problema; el problema era que un solo rechazo mataba al conjunto y
+// dejaba sin precio a todas las demás líneas del deal.
+export async function readLineItems({
+  token,
+  lineItemIds = [],
+  extraProperties = [],
+  fetch = fetchHubspotObject,
+} = {}) {
+  const normalizedExtras = extraProperties.filter(Boolean);
+  const properties = ['hs_sku', 'quantity', ...normalizedExtras]
+    .filter((value, index, values) => value && values.indexOf(value) === index);
+
+  const results = await Promise.all(lineItemIds.map(async (lineItemId) => {
+    const id = String(lineItemId);
+
+    try {
+      const record = await fetch(token, 'line_items', lineItemId, { properties });
+      const itemCode = toNonEmptyString(
+        record?.properties?.hs_sku || record?.properties?.itemCode
+      );
+
+      if (!itemCode) {
+        return {
+          failure: {
+            id,
+            stage: 'hubspot_read',
+            reason: 'line item has no hs_sku',
+            status: null,
+            endpoint: null,
+          },
+        };
+      }
+
+      const recordProperties = record?.properties ?? {};
+
+      return {
+        lineItem: {
+          id: toNonEmptyString(record?.id) || id,
+          itemCode,
+          quantity: recordProperties.quantity ?? null,
+          properties: recordProperties,
+          ...Object.fromEntries(
+            normalizedExtras.map((name) => [name, recordProperties[name] ?? null])
+          ),
+        },
+      };
+    } catch (error) {
+      return {
+        failure: {
+          id,
+          stage: 'hubspot_read',
+          reason: error.message,
+          status: error?.details?.status ?? error?.response?.status ?? null,
+          endpoint: error?.details?.endpoint ?? null,
+        },
+      };
+    }
+  }));
+
+  return {
+    lineItems: results.map((entry) => entry.lineItem).filter(Boolean),
+    failures: results.map((entry) => entry.failure).filter(Boolean),
+  };
+}
+
+// Lectura del deal: SÍ lanza. Sin el deal no hay nada que valorizar, así que es fatal y
+// HubSpot debe reintentar en vez de que el evento se marque como bueno sin haber hecho nada.
+export async function readDealLineItemIds({ token, dealId, fetch = fetchHubspotObject } = {}) {
+  const deal = await fetch(token, 'deals', dealId, { associations: ['line_items'] });
+
+  return extractLineItemAssociationIds(deal);
+}
+
