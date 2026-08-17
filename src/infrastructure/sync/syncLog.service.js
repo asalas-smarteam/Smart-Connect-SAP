@@ -90,7 +90,7 @@ function sanitizeAuditKey(key) {
 
 // Operates on the already-serialized (JSON-safe, non-circular) output of serializeLogValue,
 // never on the raw SAP response.
-function sanitizeAuditKeys(value) {
+export function sanitizeAuditKeys(value) {
   if (Array.isArray(value)) {
     return value.map(sanitizeAuditKeys);
   }
@@ -130,7 +130,7 @@ function serializeAuditObject(obj) {
 // también el `lastError` que va en la misma escritura.
 const MAX_AUDIT_BODY_CHARS = 20000;
 
-function truncateAuditBody(value) {
+export function truncateAuditBody(value) {
   if (value === null || typeof value !== 'object') {
     return value;
   }
@@ -244,6 +244,62 @@ export function buildWebhookSapAudit(auditTrail) {
       responseHubspot,
       responseHubspotContactEmployees,
       capturedAt: new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Tope de llamadas para el audit del webhook de precios. Un deal de 20 líneas hace ~85
+// llamadas (1 deal + 1 company + 20 líneas + hasta 40 a SAP + 3 escrituras), así que el
+// tope de 40 del grabador no alcanza. Las exitosas quedan compactas (sin cuerpos), así que
+// 200 entradas no hacen crecer el documento de forma peligrosa.
+const MAX_AUDIT_CALLS = 200;
+
+// Las llamadas exitosas se guardan sin request ni response: el audit responde "por qué
+// falló", y el cuerpo de una llamada que salió bien no aporta a eso pero sí multiplica el
+// tamaño del documento.
+function serializeAuditCall(call) {
+  const base = {
+    target: call?.target ?? null,
+    method: String(call?.method || 'GET').toUpperCase(),
+    path: call?.path ?? null,
+    params: serializeAuditParams(call?.params),
+    ok: call?.ok !== false,
+    status: call?.status ?? null,
+    durationMs: call?.durationMs ?? null,
+  };
+
+  if (call?.ok !== false) {
+    return base;
+  }
+
+  return {
+    ...base,
+    request: truncateAuditBody(sanitizeAuditKeys(serializeLogValue(call?.request ?? null))),
+    error: sanitizeAuditKeys({
+      ...buildErrorResponseSnapshot(call?.error),
+      message: resolveErrorMessageText(call?.error),
+    }),
+  };
+}
+
+// Audit del webhook de precios de line items. Nunca lanza: un audit roto no puede impedir
+// que el evento registre su resultado.
+export function buildLineItemPriceAudit(auditTrail) {
+  try {
+    const calls = Array.isArray(auditTrail?.calls) ? auditTrail.calls : [];
+
+    return {
+      capturedAt: new Date().toISOString(),
+      dealId: auditTrail?.dealId ?? null,
+      cardCode: auditTrail?.cardCode ?? null,
+      rounds: sanitizeAuditKeys(serializeLogValue(auditTrail?.rounds ?? [])) ?? [],
+      calls: calls.slice(0, MAX_AUDIT_CALLS).map(serializeAuditCall),
+      droppedCalls: Math.max(calls.length - MAX_AUDIT_CALLS, 0),
+      unresolved: sanitizeAuditKeys(serializeLogValue(auditTrail?.unresolved ?? [])) ?? [],
+      amount: sanitizeAuditKeys(serializeLogValue(auditTrail?.amount ?? null)),
+      fatalError: sanitizeAuditKeys(serializeLogValue(auditTrail?.fatalError ?? null)),
     };
   } catch {
     return null;
