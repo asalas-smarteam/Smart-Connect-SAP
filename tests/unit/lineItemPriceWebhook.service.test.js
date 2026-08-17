@@ -3,6 +3,7 @@ import { jest } from '@jest/globals';
 const mockGetAccessToken = jest.fn();
 const mockHubspotGet = jest.fn();
 const mockBatchUpdateLineItems = jest.fn();
+const mockLoggerWarn = jest.fn();
 
 jest.unstable_mockModule('../../src/infrastructure/hubspot/hubspotAuthService.js', () => ({
   default: {
@@ -13,6 +14,12 @@ jest.unstable_mockModule('../../src/infrastructure/hubspot/hubspotAuthService.js
 jest.unstable_mockModule('../../src/infrastructure/hubspot/hubspotClient.js', () => ({
   hubspotGet: mockHubspotGet,
   batchUpdateLineItems: mockBatchUpdateLineItems,
+}));
+
+jest.unstable_mockModule('../../src/infrastructure/logger/logger.js', () => ({
+  default: {
+    warn: mockLoggerWarn,
+  },
 }));
 
 const lineItemPriceWebhookService = (
@@ -826,6 +833,8 @@ describe('lineItemPriceWebhook.service', () => {
         updateOne: jest.fn().mockResolvedValue({ acknowledged: true }),
       };
 
+      mockLoggerWarn.mockClear();
+
       await lineItemPriceWebhookService.markAsError(
         LineItemPriceWebhookEvent,
         'event-1',
@@ -844,6 +853,9 @@ describe('lineItemPriceWebhook.service', () => {
         { _id: 'event-1' },
         { $set: { audit: { capturedAt: 'now', calls: [] } } }
       );
+
+      // No logger calls on successful audit write
+      expect(mockLoggerWarn).not.toHaveBeenCalled();
     });
 
     it('does not lose errorMessage when Mongo rejects the audit write', async () => {
@@ -852,6 +864,8 @@ describe('lineItemPriceWebhook.service', () => {
           .mockResolvedValueOnce({ acknowledged: true })
           .mockRejectedValueOnce(new Error("The dollar ($) prefixed field '$select' is not valid for storage")),
       };
+
+      mockLoggerWarn.mockClear();
 
       await expect(
         lineItemPriceWebhookService.markAsError(
@@ -862,10 +876,29 @@ describe('lineItemPriceWebhook.service', () => {
         )
       ).resolves.toBeUndefined();
 
+      // Verify the status write happened first
       expect(LineItemPriceWebhookEvent.updateOne).toHaveBeenNthCalledWith(
         1,
         { _id: 'event-1' },
         { $set: { isSend: false, errorMessage: 'boom' } }
+      );
+
+      // Verify the second updateOne call happened (the audit write that rejected)
+      expect(LineItemPriceWebhookEvent.updateOne).toHaveBeenCalledTimes(2);
+      expect(LineItemPriceWebhookEvent.updateOne).toHaveBeenNthCalledWith(
+        2,
+        { _id: 'event-1' },
+        { $set: { audit: { calls: [] } } }
+      );
+
+      // Verify the catch branch fired and logged the warning
+      expect(mockLoggerWarn).toHaveBeenCalledTimes(1);
+      expect(mockLoggerWarn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          msg: 'Line item price audit could not be persisted',
+          executionId: 'event-1',
+          error: "The dollar ($) prefixed field '$select' is not valid for storage",
+        })
       );
     });
 
