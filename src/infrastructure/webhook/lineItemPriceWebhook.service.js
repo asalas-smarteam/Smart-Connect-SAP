@@ -369,12 +369,19 @@ async function handlePropertyChangeEventSkipped(payload, { tenantModels, tenant 
   // webhook sobra (el que ejecutó ya recalculó todas las líneas). Solo cuentan registros
   // sin errorMessage: los skipped/duplicados no extienden la ventana (una ráfaga podría
   // suprimir el procesamiento indefinidamente) y un reintento tras fallo no se debouncea.
+  //
+  // Restringido a payload.subscriptionType = property-change (positivo, no "distinto de
+  // deal.associationChange"): un deal.associationChange también recalcula el deal completo
+  // y ahora también guarda dealId, así que sin esta restricción cualquier asociación reciente
+  // debouncea un `misc` legítimo que llegó después de que la asociación ya leyó las líneas —
+  // el precio se pierde hasta el próximo evento, la misma clase de bug que esta rama corrige.
   if (debounceConfig?.requireSkipped === true) {
     const secondsToSkipped = toNumberOrNull(debounceConfig?.secondsToSkipped)
       ?? PROPERTY_CHANGE_DEBOUNCE_DEFAULT.secondsToSkipped;
 
     const recentExecution = await LineItemPriceWebhookEvent.findOne({
       dealId,
+      'payload.subscriptionType': SUPPORTED_SUBSCRIPTION_TYPE,
       createdAt: { $gte: new Date(Date.now() - secondsToSkipped * 1000) },
       errorMessage: null,
     }).select({ _id: 1 }).lean();

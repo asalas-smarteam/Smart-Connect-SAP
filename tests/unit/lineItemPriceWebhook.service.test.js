@@ -1172,6 +1172,9 @@ describe('lineItemPriceWebhook.service', () => {
       expect(debounceFilter.dealId).toBe('900100');
       expect(debounceFilter.errorMessage).toBeNull();
       expect(debounceFilter.createdAt.$gte).toBeInstanceOf(Date);
+      // El debounce sólo cuenta otros eventos de property-change: confirma que el filtro
+      // sigue restringido a ese tipo y no a cualquier evento del deal.
+      expect(debounceFilter['payload.subscriptionType']).toBe('line_item.propertyChange');
 
       expect(tenantModels.LineItemPriceWebhookEvent.create).toHaveBeenCalledWith({
         payload,
@@ -1180,6 +1183,54 @@ describe('lineItemPriceWebhook.service', () => {
         errorMessage: 'evento skipeado por envios multiples',
       });
       expect(mockBatchUpdateLineItems).not.toHaveBeenCalled();
+    });
+
+    it('does not debounce a misc property-change event when the only recent event for the deal is an association change', async () => {
+      const tenantModels = buildTenantModels();
+      mockConfigurationValues(tenantModels, {
+        skippedInWebhooksInPropertyChange: 'SkippedVersion',
+        requireSkippedInWebhooksInPropertyChange: { requireSkipped: true, secondsToSkipped: 3 },
+      });
+
+      // Un deal.associationChange reciente y ya exitoso (errorMessage: null) para el mismo
+      // deal: antes del fix el debounce no distinguía el tipo de evento y esto suprimía el
+      // recálculo de `misc`, exactamente la clase de bug que esta rama existe para cerrar.
+      const recentAssociationEvent = {
+        _id: 'assoc-event-1',
+        dealId: '900100',
+        errorMessage: null,
+        payload: { subscriptionType: 'deal.associationChange' },
+      };
+
+      tenantModels.LineItemPriceWebhookEvent.findOne = jest.fn()
+        .mockReturnValueOnce(leanResult(null)) // duplicate check: sin match
+        .mockImplementationOnce((filter) => {
+          // Simula el filtrado real de Mongo: sólo matchea si el filtro no exige un
+          // subscriptionType, o si lo exige y coincide con el evento almacenado.
+          const requiredSubscriptionType = filter['payload.subscriptionType'];
+          const matches = filter.dealId === recentAssociationEvent.dealId
+            && (!requiredSubscriptionType
+              || requiredSubscriptionType === recentAssociationEvent.payload.subscriptionType);
+
+          return leanResult(matches ? { _id: recentAssociationEvent._id } : null);
+        });
+
+      mockGetAccessToken.mockResolvedValue('hubspot-token');
+      mockDealWithLineItems({
+        56816252584: { price: '100', miscelaneo: '10', safe_price_value: '100' },
+      });
+
+      const payload = buildPropertyChangePayload();
+      const result = await lineItemPriceWebhookService.preparePayload(
+        payload,
+        { tenantModels, tenant }
+      );
+
+      expect(result.meta.reason).toBe('deal_line_items_price_recalculated');
+      expect(mockBatchUpdateLineItems).toHaveBeenCalledTimes(1);
+
+      const debounceFilter = tenantModels.LineItemPriceWebhookEvent.findOne.mock.calls[1][0];
+      expect(debounceFilter['payload.subscriptionType']).toBe('line_item.propertyChange');
     });
 
     it('recalculates every line item of the deal using each item misc value', async () => {
