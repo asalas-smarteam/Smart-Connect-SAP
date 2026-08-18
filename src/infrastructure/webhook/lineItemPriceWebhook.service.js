@@ -450,6 +450,10 @@ async function buildLegacyPayload(payload, token, miscPriceCalculationConfig = n
   const deal = await fetchHubspotObject(token, 'deals', dealId, {
     associations: ['companies', 'contacts', 'line_items'],
   });
+
+  // resolveCardCode debe correr antes de tocar nada de line items: si el deal no tiene
+  // company/contact asociado, la petición se rechaza sin importar el estado de las líneas.
+  const cardCode = await resolveCardCode(token, deal);
   const lineItemIds = extractLineItemAssociationIds(deal);
 
   if (lineItemIds.length === 0) {
@@ -460,7 +464,6 @@ async function buildLegacyPayload(payload, token, miscPriceCalculationConfig = n
     ? toNonEmptyString(miscPriceCalculationConfig?.miscSourceProperty)
     : null;
 
-  const cardCode = await resolveCardCode(token, deal);
   // Una línea ilegible ya no tumba al resto: viaja en lineItemFailures hasta el audit.
   const { lineItems, failures } = await readLineItems({
     token,

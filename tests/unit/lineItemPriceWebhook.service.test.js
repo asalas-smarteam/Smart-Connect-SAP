@@ -268,6 +268,109 @@ describe('lineItemPriceWebhook.service', () => {
     expect(result.payload.cardCode).toBe('C20000');
   });
 
+  it('rejects with "Deal has no readable line items" when every associated line item 404s', async () => {
+    const tenantModels = buildTenantModels();
+
+    mockGetAccessToken.mockResolvedValue('hubspot-token');
+    mockHubspotGet.mockImplementation(async (_token, path) => {
+      if (path === '/crm/v3/objects/deals/64058987778') {
+        return {
+          id: '64058987778',
+          associations: {
+            companies: { results: [{ id: 'company-1' }] },
+            'line items': { results: [{ id: 'line-1' }, { id: 'line-2' }] },
+          },
+        };
+      }
+
+      if (path === '/crm/v3/objects/companies/company-1') {
+        return { id: 'company-1', properties: { idsap: 'C20000' } };
+      }
+
+      throw Object.assign(new Error('HubSpot API request failed: 404 Not Found'), {
+        details: { endpoint: path, method: 'GET', status: 404 },
+      });
+    });
+
+    await expect(
+      lineItemPriceWebhookService.preparePayload(
+        {
+          eventId: 2073333924,
+          subscriptionId: 6955445,
+          portalId: 50249912,
+          appId: 36665006,
+          occurredAt: 1786997905998,
+          associationType: 'DEAL_TO_LINE_ITEM',
+          changeSource: 'USER',
+          fromObjectId: 64058987778,
+        },
+        { tenantModels, tenant: { client: { hubspot: { portalId: '50249912' } } } }
+      )
+    ).rejects.toThrow('Deal has no readable line items');
+
+    expect(tenantModels.LineItemPriceWebhookEvent.updateOne).toHaveBeenCalledWith(
+      { _id: 'event-1' },
+      {
+        $set: {
+          isSend: false,
+          errorMessage: 'Deal has no readable line items',
+        },
+      }
+    );
+  });
+
+  it('rejects with the company/contact error before touching line items when a deal has neither', async () => {
+    const tenantModels = buildTenantModels();
+
+    mockGetAccessToken.mockResolvedValue('hubspot-token');
+    mockHubspotGet.mockImplementation(async (_token, path) => {
+      if (path === '/crm/v3/objects/deals/58986911597') {
+        return {
+          id: '58986911597',
+          associations: {
+            companies: { results: [] },
+            contacts: { results: [] },
+            // A propósito hay líneas asociadas: si el código alguna vez volviera a
+            // resolver/leer line items antes que cardCode, este mock nunca las
+            // devolvería (siempre lanza) y el test fallaría por la razón equivocada.
+            'line items': { results: [{ id: 'line-1' }] },
+          },
+        };
+      }
+
+      throw new Error(`unexpected HubSpot call: ${path}`);
+    });
+
+    await expect(
+      lineItemPriceWebhookService.preparePayload(
+        {
+          eventId: 797713316,
+          subscriptionId: 6174091,
+          portalId: 50564010,
+          appId: 31481725,
+          occurredAt: 1775764313529,
+          associationType: 'DEAL_TO_LINE_ITEM',
+          changeSource: 'USER',
+          fromObjectId: 58986911597,
+        },
+        {
+          tenantModels,
+          tenant: { client: { hubspot: { portalId: '50564010' } } },
+        }
+      )
+    ).rejects.toThrow('Associated company or contact is required for the deal');
+
+    expect(tenantModels.LineItemPriceWebhookEvent.updateOne).toHaveBeenCalledWith(
+      { _id: 'event-1' },
+      {
+        $set: {
+          isSend: false,
+          errorMessage: 'Associated company or contact is required for the deal',
+        },
+      }
+    );
+  });
+
   it('builds the legacy payload from the HubSpot deal associations', async () => {
     const tenantModels = buildTenantModels();
 
@@ -477,7 +580,7 @@ describe('lineItemPriceWebhook.service', () => {
       associations: {
         companies: { results: [] },
         contacts: { results: [] },
-        line_items: { results: [{ id: '54118822955' }] },
+        line_items: { results: [] },
       },
     });
 
