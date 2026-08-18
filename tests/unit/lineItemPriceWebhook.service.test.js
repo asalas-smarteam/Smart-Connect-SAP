@@ -319,6 +319,68 @@ describe('lineItemPriceWebhook.service', () => {
     );
   });
 
+  // Éste es el caso que reportó el cliente: el 404 cae sobre el GET del deal, así que
+  // SyncLineItemPrices nunca corre y su audit nunca existe. Si acá no se guarda uno mínimo,
+  // el evento vuelve a quedar con un solo `errorMessage` y nadie puede decir por qué falló.
+  it('persists a minimal audit with the endpoint and status when the deal read itself fails', async () => {
+    const tenantModels = buildTenantModels();
+
+    mockGetAccessToken.mockResolvedValue('hubspot-token');
+    mockHubspotGet.mockImplementation(async (_token, path) => {
+      throw Object.assign(new Error('HubSpot API request failed: 404 Not Found'), {
+        details: { endpoint: path, method: 'GET', status: 404 },
+      });
+    });
+
+    await expect(
+      lineItemPriceWebhookService.preparePayload(
+        {
+          eventId: 2073333925,
+          subscriptionId: 6955446,
+          portalId: 50249912,
+          appId: 36665006,
+          occurredAt: 1786997905999,
+          associationType: 'DEAL_TO_LINE_ITEM',
+          changeSource: 'USER',
+          fromObjectId: 64058987778,
+        },
+        { tenantModels, tenant: { client: { hubspot: { portalId: '50249912' } } } }
+      )
+    ).rejects.toThrow('HubSpot API request failed: 404 Not Found');
+
+    // Dos escrituras separadas: si Mongo rechazara el audit, el `errorMessage` ya quedó.
+    expect(tenantModels.LineItemPriceWebhookEvent.updateOne).toHaveBeenCalledTimes(2);
+    expect(tenantModels.LineItemPriceWebhookEvent.updateOne).toHaveBeenNthCalledWith(
+      1,
+      { _id: 'event-1' },
+      {
+        $set: {
+          isSend: false,
+          errorMessage: 'HubSpot API request failed: 404 Not Found',
+        },
+      }
+    );
+    expect(tenantModels.LineItemPriceWebhookEvent.updateOne).toHaveBeenNthCalledWith(
+      2,
+      { _id: 'event-1' },
+      {
+        $set: {
+          audit: expect.objectContaining({
+            dealId: '64058987778',
+            rounds: [],
+            calls: [],
+            unresolved: [],
+            fatalError: {
+              message: 'HubSpot API request failed: 404 Not Found',
+              status: 404,
+              endpoint: '/crm/v3/objects/deals/64058987778',
+            },
+          }),
+        },
+      }
+    );
+  });
+
   it('rejects with the company/contact error before touching line items when a deal has neither', async () => {
     const tenantModels = buildTenantModels();
 

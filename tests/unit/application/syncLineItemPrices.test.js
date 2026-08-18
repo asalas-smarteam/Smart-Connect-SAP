@@ -1,5 +1,9 @@
 import { jest } from '@jest/globals';
 import SyncLineItemPrices from '../../../src/application/use-cases/SyncLineItemPrices.js';
+// Se inyecta el constructor REAL del audit, no un doble: lo que hay que verificar es que el
+// audit que sale de `execute` sea legible, y un doble identidad taparía cualquier pérdida en
+// la serialización.
+import { buildLineItemPriceAudit } from '../../../src/infrastructure/sync/syncLog.service.js';
 
 function createUseCase(overrides = {}) {
   const credentialRepository = {
@@ -59,6 +63,7 @@ function createUseCase(overrides = {}) {
     hubspotPriceClient,
     buildErrorResponseSnapshot,
     buildWebhookSyncErrorEntry,
+    buildLineItemPriceAudit,
     dateProvider: () => new Date('2026-04-08T12:00:00.000Z'),
     ...overrides,
   });
@@ -168,6 +173,25 @@ describe('SyncLineItemPrices', () => {
           failures: [],
         },
       },
+      // `capturedAt` es un timestamp, así que el audit va con objectContaining; todo lo demás
+      // del audit sí se fija con valores concretos.
+      audit: expect.objectContaining({
+        dealId: 'deal-1',
+        cardCode: 'C20000',
+        rounds: [
+          {
+            round: 1,
+            lineItemIdsFromDeal: ['line-1'],
+            priced: [{ id: 'line-1', itemCode: 'A0001', price: 704.35, source: 'sap' }],
+            failures: [],
+          },
+        ],
+        calls: [],
+        droppedCalls: 0,
+        unresolved: [],
+        amount: { written: true, total: 1408.7 },
+        fatalError: null,
+      }),
     });
   });
 
@@ -702,5 +726,167 @@ describe('SyncLineItemPrices', () => {
       dealId: 'deal-1',
       error: 'HubSpot deal read failed',
     }));
+  });
+
+  it('returns an audit with the failed line and its stage', async () => {
+    const { useCase, sapPriceClient } = createUseCase();
+
+    sapPriceClient.fetchBusinessPartnerPrice = jest.fn(async ({ itemCode }) => {
+      if (itemCode === 'BAD') {
+        throw new Error('Price list 4 not found for item BAD');
+      }
+      return { Price: 100, Currency: 'C$', Discount: 0 };
+    });
+
+    const result = await useCase.execute(
+      {
+        dealId: 'deal-1',
+        cardCode: 'C20000',
+        lineItems: [
+          { itemCode: 'A0001', id: 'line-1', quantity: 1 },
+          { itemCode: 'BAD', id: 'line-2', quantity: 1 },
+        ],
+        lineItemFailures: [{
+          id: 'line-3', stage: 'hubspot_read', reason: '404 Not Found', status: 404,
+          endpoint: '/crm/v3/objects/line_items/line-3',
+        }],
+      },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    const failures = result.audit.rounds[0].failures;
+    expect(failures.map((entry) => entry.stage).sort()).toEqual(['hubspot_read', 'sap_price']);
+    expect(result.audit.dealId).toBe('deal-1');
+    expect(result.audit.amount.written).toBe(true);
+  });
+
+  it('keeps the three failure shapes intact in the audit', async () => {
+    const { useCase, sapPriceClient, hubspotPriceClient } = createUseCase();
+
+    sapPriceClient.fetchBusinessPartnerPrice = jest.fn(async ({ itemCode }) => {
+      if (itemCode === 'BAD') {
+        throw new Error('Price list 4 not found for item BAD');
+      }
+      return { Price: 100, Currency: 'C$', Discount: 0 };
+    });
+    hubspotPriceClient.readDealLineItemIds.mockRejectedValue(new Error('HubSpot deal read failed'));
+
+    const result = await useCase.execute(
+      {
+        dealId: 'deal-1',
+        cardCode: 'C20000',
+        lineItems: [
+          { itemCode: 'A0001', id: 'line-1', quantity: 1 },
+          { itemCode: 'BAD', id: 'line-2', quantity: 1 },
+        ],
+        lineItemFailures: [{
+          id: 'line-3', stage: 'hubspot_read', reason: '404 Not Found', status: 404,
+          endpoint: '/crm/v3/objects/line_items/line-3',
+        }],
+      },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    // Los tres shapes conviven sin normalizarse: `hubspot_read` trae endpoint y no itemCode,
+    // `sap_price` trae itemCode y no endpoint, y `reconciliation` no trae ni id ni itemCode.
+    expect(result.audit.unresolved).toEqual([
+      {
+        id: 'line-3',
+        stage: 'hubspot_read',
+        reason: '404 Not Found',
+        status: 404,
+        endpoint: '/crm/v3/objects/line_items/line-3',
+      },
+      {
+        id: 'line-2',
+        itemCode: 'BAD',
+        stage: 'sap_price',
+        reason: 'Price list 4 not found for item BAD',
+        status: null,
+      },
+      {
+        stage: 'reconciliation',
+        reason: 'HubSpot deal read failed',
+        status: null,
+        endpoint: null,
+      },
+    ]);
+  });
+
+  it('attaches the audit to the thrown error when the whole deal fails', async () => {
+    const failing = createUseCase({
+      sapPriceClient: {
+        fetchBusinessPartnerPrice: jest.fn().mockRejectedValue(new Error('SAP down')),
+        fetchItemPrices: jest.fn().mockRejectedValue(new Error('SAP down')),
+      },
+    });
+
+    await expect(failing.useCase.execute(
+      { dealId: 'deal-1', cardCode: 'C20000', lineItems: [{ itemCode: 'A0001', id: 'line-1' }] },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    )).rejects.toMatchObject({
+      lineItemPriceAudit: expect.objectContaining({
+        rounds: expect.any(Array),
+      }),
+    });
+  });
+
+  it('carries the round 1 failures and the fatal error in the audit of a total failure', async () => {
+    const failing = createUseCase({
+      sapPriceClient: {
+        fetchBusinessPartnerPrice: jest.fn().mockRejectedValue(
+          Object.assign(new Error('HubSpot API request failed: 404 Not Found'), {
+            details: { status: 404, endpoint: '/b1s/v2/CompanyService_GetItemPrice' },
+          })
+        ),
+        fetchItemPrices: jest.fn().mockRejectedValue(new Error('SAP down')),
+      },
+    });
+
+    const error = await failing.useCase.execute(
+      { dealId: 'deal-1', cardCode: 'C20000', lineItems: [{ itemCode: 'A0001', id: 'line-1' }] },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    ).then(() => null, (thrown) => thrown);
+
+    expect(error.message).toBe('No line item prices could be resolved for this deal');
+    // La ronda 1 se empuja al audit ANTES del fatal: sin esto el audit de una corrida que no
+    // valorizó nada no diría por qué falló ninguna línea, que es el caso que reportó el cliente.
+    expect(error.lineItemPriceAudit.rounds).toEqual([
+      {
+        round: 1,
+        lineItemIdsFromDeal: ['line-1'],
+        priced: [],
+        failures: [{
+          id: 'line-1',
+          itemCode: 'A0001',
+          stage: 'sap_price',
+          reason: 'HubSpot API request failed: 404 Not Found',
+          status: 404,
+        }],
+      },
+    ]);
+    expect(error.lineItemPriceAudit.fatalError).toEqual({
+      message: 'No line item prices could be resolved for this deal',
+      status: null,
+      endpoint: null,
+    });
+    expect(error.lineItemPriceAudit.dealId).toBe('deal-1');
+    expect(error.lineItemPriceAudit.cardCode).toBe('C20000');
   });
 });

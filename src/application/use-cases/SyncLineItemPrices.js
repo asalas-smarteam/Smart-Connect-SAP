@@ -118,6 +118,7 @@ export class SyncLineItemPrices {
     dateProvider = () => new Date(),
     logger = { warn: () => {} },
     createSapCallRecorder = createNoopSapCallRecorder,
+    buildLineItemPriceAudit = () => null,
   }) {
     this.credentialRepository = credentialRepository;
     this.sapPriceClient = sapPriceClient;
@@ -128,6 +129,7 @@ export class SyncLineItemPrices {
     this.dateProvider = dateProvider;
     this.logger = logger;
     this.createSapCallRecorder = createSapCallRecorder;
+    this.buildLineItemPriceAudit = buildLineItemPriceAudit;
   }
 
   // Una sola entrada por itemCode: cardCode y fecha son fijos durante la invocación, así que
@@ -381,6 +383,12 @@ export class SyncLineItemPrices {
       response_hubspot: null,
       response_SAP: [],
     };
+    // Declarados fuera del `try` a propósito: el `catch` arma `error.lineItemPriceAudit` con
+    // ellos, y un fallo total (ninguna línea valorizada, SAP caído) es justo el caso donde el
+    // audit tiene que decir qué se intentó y por qué falló cada línea.
+    const auditRounds = [];
+    let roundFailures = [];
+    let reconciliation = { triggered: false, trigger: [], priced: [], failures: [], enriched: [] };
 
     try {
       validatePayload(payload);
@@ -423,8 +431,9 @@ export class SyncLineItemPrices {
         : [];
       const sapCache = new Map();
       const enrichedLineItems = [];
-      const roundFailures = [...(payload.lineItemFailures ?? [])];
       const pricedLog = [];
+
+      roundFailures = [...(payload.lineItemFailures ?? [])];
 
       for (const lineItem of payload.lineItems) {
         const itemCode = toNonEmptyString(lineItem.itemCode);
@@ -531,6 +540,15 @@ export class SyncLineItemPrices {
         pricedLog.push({ id, itemCode, price, source: pricing.source });
       }
 
+      // Se empuja ANTES del fatal de abajo: si ninguna línea se valorizó, este es el único
+      // lugar del audit que dice por qué falló cada una.
+      auditRounds.push({
+        round: 1,
+        lineItemIdsFromDeal: payload.lineItems.map((line) => String(line.id)),
+        priced: pricedLog,
+        failures: roundFailures,
+      });
+
       if (enrichedLineItems.length === 0) {
         throw new Error('No line item prices could be resolved for this deal');
       }
@@ -570,8 +588,6 @@ export class SyncLineItemPrices {
       // deal SÍ lanza, por diseño), no puede tirar a la basura una ronda 1 que ya escribió los
       // precios bien. Se registra el fallo, se marca `aborted` y la ejecución sigue para que el
       // amount se escriba con lo que sí se valorizó.
-      let reconciliation = { triggered: false, trigger: [], priced: [], failures: [], enriched: [] };
-
       if (dealId) {
         try {
           reconciliation = await this.reconcile({
@@ -601,6 +617,15 @@ export class SyncLineItemPrices {
             }],
           };
         }
+      }
+
+      if (reconciliation.triggered) {
+        auditRounds.push({
+          round: 2,
+          trigger: reconciliation.trigger,
+          priced: reconciliation.priced,
+          failures: reconciliation.failures,
+        });
       }
 
       let dealUpdate = null;
@@ -650,6 +675,17 @@ export class SyncLineItemPrices {
             failures: reconciliation.failures,
           },
         },
+        audit: this.buildLineItemPriceAudit({
+          dealId,
+          cardCode,
+          rounds: auditRounds,
+          calls: callRecorder.calls,
+          unresolved: [
+            ...roundFailures,
+            ...(reconciliation.failures ?? []),
+          ],
+          amount: { written: Boolean(dealUpdate), total: totalAmount },
+        }),
       };
     } catch (error) {
       const errorSnapshot = this.buildErrorResponseSnapshot(error);
@@ -676,6 +712,19 @@ export class SyncLineItemPrices {
           responseSap,
         }),
       ];
+
+      error.lineItemPriceAudit = this.buildLineItemPriceAudit({
+        dealId: toNonEmptyString(payload?.dealId) || toNonEmptyString(payload?.fromObjectId),
+        cardCode: toNonEmptyString(payload?.cardCode),
+        rounds: auditRounds,
+        calls: callRecorder.calls,
+        unresolved: [],
+        fatalError: {
+          message: error.message,
+          status: error?.details?.status ?? error?.response?.status ?? null,
+          endpoint: error?.details?.endpoint ?? null,
+        },
+      });
 
       throw error;
     }

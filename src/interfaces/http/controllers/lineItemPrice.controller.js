@@ -67,7 +67,8 @@ function createLineItemPriceController({
         if (executionId) {
           await dependencies.webhookPayload.markAsSent(
             tenantModels.LineItemPriceWebhookEvent,
-            executionId
+            executionId,
+            result.audit
           );
         }
 
@@ -98,7 +99,8 @@ function createLineItemPriceController({
           await dependencies.webhookPayload.markAsError(
             tenantModels.LineItemPriceWebhookEvent,
             executionId,
-            error
+            error,
+            error.lineItemPriceAudit ?? null
           );
         }
 

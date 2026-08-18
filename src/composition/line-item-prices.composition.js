@@ -10,6 +10,7 @@ import requestTenantModelsAdapter from '#infrastructure/tenants/RequestTenantMod
 import lineItemPriceWebhookPayloadAdapter from '#infrastructure/webhook/LineItemPriceWebhookPayloadAdapter.js';
 import {
   buildErrorResponseSnapshot,
+  buildLineItemPriceAudit,
   buildWebhookSyncErrorEntry,
 } from '#infrastructure/sync/syncLog.service.js';
 
@@ -30,6 +31,7 @@ export function buildSyncLineItemPrices({
     buildWebhookSyncErrorEntry: syncLogGateway
       ? (entry) => syncLogGateway.buildWebhookSyncErrorEntry(entry)
       : buildWebhookErrorEntry,
+    buildLineItemPriceAudit,
     logger,
   });
 }

@@ -2,6 +2,7 @@ import hubspotAuthService from '../hubspot/hubspotAuthService.js';
 import * as hubspotClient from '../hubspot/hubspotClient.js';
 import tenantConfigurationService from '../config/tenantConfiguration.service.js';
 import logger from '../logger/logger.js';
+import { buildLineItemPriceAudit } from '../sync/syncLog.service.js';
 import {
   assertRequiredWebhookField,
   buildDuplicateFilter,
@@ -623,14 +624,24 @@ const lineItemPriceWebhookService = {
         executionId: createdEvent._id,
       };
     } catch (error) {
-      await LineItemPriceWebhookEvent.updateOne(
-        { _id: createdEvent._id },
-        {
-          $set: {
-            isSend: false,
-            errorMessage: error.message,
+      // Un fallo acá (GET del deal, token, credenciales) deja el evento sin nada valorizado.
+      // Se guarda un audit mínimo para que se vea el endpoint y el status, que es justo lo
+      // que faltaba cuando el cliente reportó "no cargan los precios".
+      await lineItemPriceWebhookService.markAsError(
+        LineItemPriceWebhookEvent,
+        createdEvent._id,
+        error,
+        buildLineItemPriceAudit({
+          dealId: toNonEmptyString(payload?.fromObjectId),
+          rounds: [],
+          calls: [],
+          unresolved: [],
+          fatalError: {
+            message: error.message,
+            status: error?.details?.status ?? error?.response?.status ?? null,
+            endpoint: error?.details?.endpoint ?? null,
           },
-        }
+        })
       );
 
       throw error;
