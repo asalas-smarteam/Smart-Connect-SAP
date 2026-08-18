@@ -289,6 +289,10 @@ function serializeAuditCall(call) {
 export function buildLineItemPriceAudit(auditTrail) {
   try {
     const calls = Array.isArray(auditTrail?.calls) ? auditTrail.calls : [];
+    // El grabador tiene su propio tope y descarta ANTES de que el array llegue acá, así que
+    // contar sólo `calls.length - MAX_AUDIT_CALLS` sobre el array ya truncado hacía que el audit
+    // afirmara que no se perdió nada. Las dos cuentas se suman.
+    const recorderDroppedCalls = Number(auditTrail?.droppedCalls);
 
     return {
       capturedAt: new Date().toISOString(),
@@ -296,7 +300,8 @@ export function buildLineItemPriceAudit(auditTrail) {
       cardCode: auditTrail?.cardCode ?? null,
       rounds: sanitizeAuditKeys(serializeLogValue(auditTrail?.rounds ?? [])) ?? [],
       calls: calls.slice(0, MAX_AUDIT_CALLS).map(serializeAuditCall),
-      droppedCalls: Math.max(calls.length - MAX_AUDIT_CALLS, 0),
+      droppedCalls: Math.max(calls.length - MAX_AUDIT_CALLS, 0)
+        + (Number.isFinite(recorderDroppedCalls) ? Math.max(recorderDroppedCalls, 0) : 0),
       unresolved: sanitizeAuditKeys(serializeLogValue(auditTrail?.unresolved ?? [])) ?? [],
       amount: sanitizeAuditKeys(serializeLogValue(auditTrail?.amount ?? null)),
       fatalError: sanitizeAuditKeys(serializeLogValue(auditTrail?.fatalError ?? null)),

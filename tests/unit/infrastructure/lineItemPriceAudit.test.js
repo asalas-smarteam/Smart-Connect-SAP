@@ -1,4 +1,5 @@
 import { buildLineItemPriceAudit } from '../../../src/infrastructure/sync/syncLog.service.js';
+import { createSapCallRecorder } from '../../../src/infrastructure/sap/sapCallRecorder.js';
 
 describe('buildLineItemPriceAudit', () => {
   it('prefixes $-leading keys and drops @odata keys of a failed call', () => {
@@ -60,6 +61,39 @@ describe('buildLineItemPriceAudit', () => {
 
     expect(audit.calls).toHaveLength(200);
     expect(audit.droppedCalls).toBe(5);
+  });
+
+  // El test de arriba le pasa 205 llamadas sintéticas DIRECTO al constructor, así que pasa en
+  // verde aunque el grabador real nunca llegue a 200. Éste recorre la costura completa: es el
+  // grabador el que descarta, y su cuenta tiene que aparecer en el audit.
+  it('reports the calls that the real recorder itself dropped', async () => {
+    const recorder = createSapCallRecorder({ maxCalls: 200 });
+
+    for (let index = 0; index < 205; index += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await recorder.record({ target: 'sap', method: 'GET', path: `/p/${index}` }, async () => ({}));
+    }
+
+    expect(recorder.calls).toHaveLength(200);
+    expect(recorder.droppedCalls).toBe(5);
+
+    const audit = buildLineItemPriceAudit({
+      calls: recorder.calls,
+      droppedCalls: recorder.droppedCalls,
+    });
+
+    expect(audit.calls).toHaveLength(200);
+    expect(audit.droppedCalls).toBe(5);
+  });
+
+  it('adds the calls dropped by the recorder to the ones it truncates itself', () => {
+    const calls = Array.from({ length: 205 }, (_unused, index) => ({
+      target: 'sap', method: 'GET', path: `/p/${index}`, ok: true,
+    }));
+
+    const audit = buildLineItemPriceAudit({ calls, droppedCalls: 3 });
+
+    expect(audit.droppedCalls).toBe(8);
   });
 
   it('returns null instead of throwing when the trail cannot be read', () => {

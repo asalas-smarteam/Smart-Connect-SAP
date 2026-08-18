@@ -463,6 +463,38 @@ describe('SyncLineItemPrices', () => {
       && call.path === '/crm/v3/objects/line_items/batch/update')).toBe(true);
   });
 
+  // El tope por defecto del grabador (40) se llena antes de la fase de escritura en un deal de
+  // ~13 líneas, así que las llamadas con más chance de fallar (los batch a HubSpot, los search
+  // por SKU con su límite de 5/s, el PATCH del deal) no llegaban al audit.
+  it('gives the recorder the audit call cap and reports the calls it dropped', async () => {
+    const createSapCallRecorder = jest.fn(() => ({
+      calls: [],
+      droppedCalls: 7,
+      record: (_options, run) => run(),
+      wrap: (adapter) => adapter,
+    }));
+
+    const { useCase } = createUseCase({ createSapCallRecorder });
+
+    const result = await useCase.execute(
+      {
+        dealId: 'deal-1',
+        cardCode: 'C20000',
+        lineItems: [{ itemCode: 'A0001', id: 'line-1', quantity: 2 }],
+      },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    expect(createSapCallRecorder).toHaveBeenCalledWith({ maxCalls: 200 });
+    // Sin esto el audit afirma que no se perdió nada: `droppedCalls` se calculaba sólo sobre el
+    // array ya truncado por el grabador.
+    expect(result.audit.droppedCalls).toBe(7);
+  });
+
   it('keeps pricing the other lines when SAP fails for one item', async () => {
     const { useCase, hubspotPriceClient, sapPriceClient } = createUseCase();
 
@@ -538,7 +570,7 @@ describe('SyncLineItemPrices', () => {
   it('works without a recorder injected (noop default)', async () => {
     const { useCase, hubspotPriceClient } = createUseCase();
 
-    await useCase.execute(
+    const result = await useCase.execute(
       { dealId: 'deal-1', cardCode: 'C20000', lineItems: [{ itemCode: 'A0001', id: 'line-1' }] },
       {
         tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
@@ -548,6 +580,10 @@ describe('SyncLineItemPrices', () => {
     );
 
     expect(hubspotPriceClient.updateLineItems).toHaveBeenCalled();
+    // El noop se construye con las MISMAS opciones que el real (`{ maxCalls }`); las ignora, y
+    // eso se verifica acá en vez de darse por supuesto.
+    expect(result.audit.calls).toEqual([]);
+    expect(result.audit.droppedCalls).toBe(0);
   });
 
   it('does not reconcile when count and prices already match', async () => {

@@ -2,6 +2,13 @@ import { calculateUnitPriceWithMisc } from '#domain/prices/misc-price-calculatio
 import { resolveDiscount } from '#domain/products/discount-resolver.service.js';
 import { createNoopSapCallRecorder } from '#application/services/sap-call-audit.service.js';
 
+// Tope de llamadas grabadas para ESTE flujo. El default del grabador (40) se llena antes de la
+// fase de escritura en un deal de ~13 líneas, así que justo las llamadas con más probabilidad de
+// fallar (los batch a HubSpot, los search por SKU limitados a 5/s, el PATCH del deal) quedaban
+// fuera del audit. Duplica a propósito el `MAX_AUDIT_CALLS` del serializador: application no
+// puede importar infrastructure (tests/unit/architecture/hexagonalBoundaries.test.js).
+const AUDIT_MAX_CALLS = 200;
+
 const SAP_ITEM_PRICES_SELECT_PATH = '/b1s/v2/Items';
 const DEFAULT_SAP_ITEM_SELECT_FIELDS = ['ItemPrices', 'ItemWarehouseInfoCollection'];
 
@@ -486,7 +493,7 @@ export class SyncLineItemPrices {
   }
 
   async execute(payload, { tenantModels, tenant, tenantKey }) {
-    const callRecorder = this.createSapCallRecorder();
+    const callRecorder = this.createSapCallRecorder({ maxCalls: AUDIT_MAX_CALLS });
     const auditTrail = {
       payload_Hubspot: payload,
       payload_SAP: [],
@@ -761,6 +768,8 @@ export class SyncLineItemPrices {
           cardCode,
           rounds: auditRounds,
           calls: callRecorder.calls,
+          // Lo que el grabador ya descartó por su propio tope: sin esto el audit informa 0.
+          droppedCalls: callRecorder.droppedCalls,
           unresolved: collectUnresolvedFailures(roundFailures, reconciliation),
           amount: { written: Boolean(dealUpdate), total: totalAmount },
         }),
@@ -796,6 +805,7 @@ export class SyncLineItemPrices {
         cardCode: toNonEmptyString(payload?.cardCode),
         rounds: auditRounds,
         calls: callRecorder.calls,
+        droppedCalls: callRecorder.droppedCalls,
         // Mismo filtro que el camino de éxito: un fallo tardío (el PATCH del amount) ocurre
         // DESPUÉS de la reconciliación, así que acá también hay líneas que la ronda 2 resolvió.
         unresolved: collectUnresolvedFailures(roundFailures, reconciliation),
