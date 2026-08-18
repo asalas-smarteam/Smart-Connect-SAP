@@ -151,6 +151,7 @@ describe('SyncLineItemPrices', () => {
         updatedCount: 1,
         productsRequestedCount: 1,
         productsUpdatedCount: 1,
+        skippedCount: 0,
         dealUpdated: true,
       },
     });
@@ -422,6 +423,78 @@ describe('SyncLineItemPrices', () => {
     expect(calls.some((call) => call.target === 'sap' && call.ok === true)).toBe(true);
     expect(calls.some((call) => call.target === 'hubspot'
       && call.path === '/crm/v3/objects/line_items/batch/update')).toBe(true);
+  });
+
+  it('keeps pricing the other lines when SAP fails for one item', async () => {
+    const { useCase, hubspotPriceClient, sapPriceClient } = createUseCase();
+
+    sapPriceClient.fetchBusinessPartnerPrice = jest.fn(async ({ itemCode }) => {
+      if (itemCode === 'BAD') {
+        throw new Error('Price list 4 not found for item BAD');
+      }
+      return { Price: 100, Currency: 'C$', Discount: 0 };
+    });
+
+    const result = await useCase.execute(
+      {
+        dealId: 'deal-1',
+        cardCode: 'C20000',
+        lineItems: [
+          { itemCode: 'A0001', id: 'line-1', quantity: 1 },
+          { itemCode: 'BAD', id: 'line-2', quantity: 1 },
+          { itemCode: 'A0002', id: 'line-3', quantity: 1 },
+        ],
+      },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    const sent = hubspotPriceClient.updateLineItems.mock.calls[0][0].enrichedLineItems;
+    expect(sent.map((line) => line.id)).toEqual(['line-1', 'line-3']);
+    expect(result.meta.skippedCount).toBe(1);
+  });
+
+  it('queries SAP once for an itemCode repeated across two lines', async () => {
+    const { useCase, sapPriceClient } = createUseCase();
+
+    await useCase.execute(
+      {
+        dealId: 'deal-1',
+        cardCode: 'C20000',
+        lineItems: [
+          { itemCode: 'A0001', id: 'line-1', quantity: 1 },
+          { itemCode: 'A0001', id: 'line-2', quantity: 4 },
+        ],
+      },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    expect(sapPriceClient.fetchBusinessPartnerPrice).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws when SAP fails for every line', async () => {
+    const { useCase } = createUseCase({
+      sapPriceClient: {
+        fetchBusinessPartnerPrice: jest.fn().mockRejectedValue(new Error('SAP down')),
+        fetchItemPrices: jest.fn().mockRejectedValue(new Error('SAP down')),
+      },
+    });
+
+    await expect(useCase.execute(
+      { dealId: 'deal-1', cardCode: 'C20000', lineItems: [{ itemCode: 'A0001', id: 'line-1' }] },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    )).rejects.toThrow('No line item prices could be resolved for this deal');
   });
 
   it('works without a recorder injected (noop default)', async () => {

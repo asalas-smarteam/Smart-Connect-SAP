@@ -130,6 +130,104 @@ export class SyncLineItemPrices {
     this.createSapCallRecorder = createSapCallRecorder;
   }
 
+  // Una sola entrada por itemCode: cardCode y fecha son fijos durante la invocación, así que
+  // dos líneas del mismo producto comparten resultado. La caché también es la que le permite
+  // a la reconciliación reescribir una línea sin volver a SAP.
+  // `callRecorder` y `sapCache` llegan por parámetro y no viven en `this`: el caso de uso es
+  // un singleton y guardarlos en la instancia mezclaría el tráfico de un tenant con otro.
+  async resolveSapPricing({
+    itemCode,
+    sapCache,
+    callRecorder,
+    sapConfig,
+    cardCode,
+    currentDate,
+    tenantKey,
+    itemSelectFields,
+    fallbackPriceList,
+    useBusinessPartnerPrice,
+    auditTrail,
+  }) {
+    const cached = sapCache.get(itemCode);
+
+    if (cached) {
+      return { ...cached, source: 'cache' };
+    }
+
+    let priceData;
+    let sapItemData;
+
+    if (useBusinessPartnerPrice) {
+      const sapRequestPayload = buildSapPricePayload({ cardCode, itemCode, date: currentDate });
+      auditTrail.payload_SAP.push(sapRequestPayload);
+
+      priceData = await callRecorder.record(
+        {
+          target: 'sap',
+          method: 'POST',
+          path: '/b1s/v2/CompanyService_GetItemPrice',
+          data: sapRequestPayload,
+        },
+        () => this.sapPriceClient.fetchBusinessPartnerPrice({
+          sapConfig,
+          cardCode,
+          itemCode,
+          date: currentDate,
+          tenantKey,
+          requestPayload: sapRequestPayload,
+        })
+      );
+      auditTrail.response_SAP.push(priceData);
+
+      sapItemData = await callRecorder.record(
+        { target: 'sap', method: 'GET', path: buildSapItemPricesPath(itemCode, itemSelectFields) },
+        () => this.sapPriceClient.fetchItemPrices({
+          sapConfig,
+          itemCode,
+          tenantKey,
+          selectFields: itemSelectFields,
+        })
+      );
+    } else {
+      const sapRequestPayload = {
+        method: 'GET',
+        endpoint: buildSapItemPricesPath(itemCode, itemSelectFields),
+        priceList: fallbackPriceList,
+      };
+      auditTrail.payload_SAP.push(sapRequestPayload);
+
+      sapItemData = await callRecorder.record(
+        { target: 'sap', method: 'GET', path: sapRequestPayload.endpoint },
+        () => this.sapPriceClient.fetchItemPrices({
+          sapConfig,
+          itemCode,
+          tenantKey,
+          selectFields: itemSelectFields,
+        })
+      );
+
+      const selectedPrice = selectConfiguredItemPrice(
+        sapItemData?.ItemPrices,
+        fallbackPriceList,
+        itemCode
+      );
+
+      priceData = {
+        Price: selectedPrice?.Price ?? 0,
+        Currency: selectedPrice?.Currency ?? null,
+        Discount: 0,
+        PriceList: selectedPrice?.PriceList ?? fallbackPriceList,
+      };
+
+      auditTrail.response_SAP.push({ ...sapItemData, selectedPrice });
+    }
+
+    const entry = { priceData, sapItemData };
+    sapCache.set(itemCode, entry);
+
+    return { ...entry, source: 'sap' };
+  }
+
   async execute(payload, { tenantModels, tenant, tenantKey }) {
     const callRecorder = this.createSapCallRecorder();
     const auditTrail = {
@@ -178,98 +276,53 @@ export class SyncLineItemPrices {
       const activeDiscountGroups = discountConfig.isRequired && this.sapDiscountClient
         ? await this.sapDiscountClient.fetchActiveDiscountGroups({ sapConfig, tenantKey })
         : [];
+      const sapCache = new Map();
       const enrichedLineItems = [];
+      const roundFailures = [...(payload.lineItemFailures ?? [])];
+      const pricedLog = [];
 
       for (const lineItem of payload.lineItems) {
         const itemCode = toNonEmptyString(lineItem.itemCode);
         const id = toNonEmptyString(lineItem.id);
-        let priceData;
+        let pricing;
 
-        if (useBusinessPartnerPrice) {
-          const sapRequestPayload = buildSapPricePayload({
-            cardCode,
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          pricing = await this.resolveSapPricing({
             itemCode,
-            date: currentDate,
-          });
-
-          auditTrail.payload_SAP.push(sapRequestPayload);
-
-          priceData = await callRecorder.record(
-            {
-              target: 'sap',
-              method: 'POST',
-              path: '/b1s/v2/CompanyService_GetItemPrice',
-              data: sapRequestPayload,
-            },
-            () => this.sapPriceClient.fetchBusinessPartnerPrice({
-              sapConfig,
-              cardCode,
-              itemCode,
-              date: currentDate,
-              tenantKey,
-              requestPayload: sapRequestPayload,
-            })
-          );
-        } else {
-          const sapRequestPayload = {
-            method: 'GET',
-            endpoint: buildSapItemPricesPath(itemCode, itemSelectFields),
-            priceList: fallbackPriceList,
-          };
-
-          auditTrail.payload_SAP.push(sapRequestPayload);
-
-          const sapItemData = await callRecorder.record(
-            {
-              target: 'sap',
-              method: 'GET',
-              path: buildSapItemPricesPath(itemCode, itemSelectFields),
-            },
-            () => this.sapPriceClient.fetchItemPrices({
-              sapConfig,
-              itemCode,
-              tenantKey,
-              selectFields: itemSelectFields,
-            })
-          );
-          const selectedPrice = selectConfiguredItemPrice(
-            sapItemData?.ItemPrices,
+            sapCache,
+            callRecorder,
+            sapConfig,
+            cardCode,
+            currentDate,
+            tenantKey,
+            itemSelectFields,
             fallbackPriceList,
-            itemCode
-          );
-
-          priceData = {
-            Price: selectedPrice?.Price ?? 0,
-            Currency: selectedPrice?.Currency ?? null,
-            Discount: 0,
-            PriceList: selectedPrice?.PriceList ?? fallbackPriceList,
-          };
-
-          auditTrail.response_SAP.push({
-            ...sapItemData,
-            selectedPrice,
+            useBusinessPartnerPrice,
+            auditTrail,
           });
+        } catch (error) {
+          // Una línea sin precio en SAP no puede dejar sin precio a las demás del deal.
+          this.logger.warn({
+            msg: 'Line item skipped: SAP price could not be resolved',
+            tenantKey,
+            lineItemId: id,
+            itemCode,
+            error: error.message,
+          });
+          roundFailures.push({
+            id,
+            itemCode,
+            stage: 'sap_price',
+            reason: error.message,
+            status: error?.response?.status ?? error?.details?.status ?? null,
+          });
+          // eslint-disable-next-line no-continue
+          continue;
         }
 
-        if (useBusinessPartnerPrice) {
-          auditTrail.response_SAP.push(priceData);
-        }
+        const { priceData, sapItemData: sapItemStockData } = pricing;
 
-        const sapItemStockData = useBusinessPartnerPrice
-          ? await callRecorder.record(
-            {
-              target: 'sap',
-              method: 'GET',
-              path: buildSapItemPricesPath(itemCode, itemSelectFields),
-            },
-            () => this.sapPriceClient.fetchItemPrices({
-              sapConfig,
-              itemCode,
-              tenantKey,
-              selectFields: itemSelectFields,
-            })
-          )
-          : auditTrail.response_SAP[auditTrail.response_SAP.length - 1];
         const warehouseStockProperties = await this.credentialRepository.resolveWarehouseStockProperties({
           tenantModels,
           itemWarehouseInfoCollection: sapItemStockData?.ItemWarehouseInfoCollection,
@@ -329,6 +382,12 @@ export class SyncLineItemPrices {
           ...(discountHsField ? { _discountHsProperty: discountHsField } : {}),
           warehouseStockProperties,
         });
+
+        pricedLog.push({ id, itemCode, price, source: pricing.source });
+      }
+
+      if (enrichedLineItems.length === 0) {
+        throw new Error('No line item prices could be resolved for this deal');
       }
 
       const token = await this.hubspotPriceClient.getAccessToken({
@@ -388,6 +447,7 @@ export class SyncLineItemPrices {
           productsUpdatedCount: Array.isArray(hubspotProductUpdate.response?.results)
             ? hubspotProductUpdate.response.results.length
             : hubspotProductUpdate.payload.inputs.length,
+          skippedCount: roundFailures.length,
           dealUpdated: Boolean(dealUpdate),
         },
       };
