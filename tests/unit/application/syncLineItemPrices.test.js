@@ -44,6 +44,11 @@ function createUseCase(overrides = {}) {
       payload: { properties: { amount: '1408.7' } },
       response: { id: 'deal-1' },
     }),
+    readDealLineItemIds: jest.fn().mockResolvedValue(['line-1']),
+    readLineItems: jest.fn().mockResolvedValue({
+      lineItems: [{ id: 'line-1', itemCode: 'A0001', quantity: '2', price: '704.35', properties: {} }],
+      failures: [],
+    }),
   };
   const buildErrorResponseSnapshot = jest.fn((error) => ({ message: error.message }));
   const buildWebhookSyncErrorEntry = jest.fn((entry) => entry);
@@ -58,11 +63,13 @@ function createUseCase(overrides = {}) {
     ...overrides,
   });
 
+  // Se devuelven los dobles que realmente recibió el caso de uso: si el test los sobreescribe,
+  // asertar sobre los de por defecto (que nadie llamó) daría un falso verde.
   return {
     useCase,
     credentialRepository,
-    sapPriceClient,
-    hubspotPriceClient,
+    sapPriceClient: overrides.sapPriceClient ?? sapPriceClient,
+    hubspotPriceClient: overrides.hubspotPriceClient ?? hubspotPriceClient,
     buildErrorResponseSnapshot,
     buildWebhookSyncErrorEntry,
   };
@@ -153,6 +160,11 @@ describe('SyncLineItemPrices', () => {
         productsUpdatedCount: 1,
         skippedCount: 0,
         dealUpdated: true,
+        reconciliation: {
+          triggered: false,
+          trigger: [],
+          pricedCount: 0,
+        },
       },
     });
   });
@@ -510,5 +522,141 @@ describe('SyncLineItemPrices', () => {
     );
 
     expect(hubspotPriceClient.updateLineItems).toHaveBeenCalled();
+  });
+
+  it('does not reconcile when count and prices already match', async () => {
+    const { useCase, hubspotPriceClient, sapPriceClient } = createUseCase();
+
+    const result = await useCase.execute(
+      { dealId: 'deal-1', cardCode: 'C20000', lineItems: [{ itemCode: 'A0001', id: 'line-1', quantity: 2 }] },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    expect(result.meta.reconciliation.triggered).toBe(false);
+    expect(hubspotPriceClient.updateLineItems).toHaveBeenCalledTimes(1);
+    expect(sapPriceClient.fetchBusinessPartnerPrice).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconciles a line that appeared after the first read, reusing the SAP cache', async () => {
+    const { useCase, hubspotPriceClient, sapPriceClient } = createUseCase();
+
+    hubspotPriceClient.readDealLineItemIds.mockResolvedValue(['line-1', 'line-2']);
+    hubspotPriceClient.readLineItems.mockResolvedValue({
+      lineItems: [
+        { id: 'line-1', itemCode: 'A0001', quantity: '2', price: '704.35', properties: {} },
+        { id: 'line-2', itemCode: 'A0001', quantity: '1', price: '0', properties: {} },
+      ],
+      failures: [],
+    });
+
+    const result = await useCase.execute(
+      { dealId: 'deal-1', cardCode: 'C20000', lineItems: [{ itemCode: 'A0001', id: 'line-1', quantity: 2 }] },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    expect(result.meta.reconciliation.triggered).toBe(true);
+    expect(result.meta.reconciliation.trigger).toContain('count_mismatch');
+    // A0001 ya estaba en caché: la ronda 2 no vuelve a SAP.
+    expect(sapPriceClient.fetchBusinessPartnerPrice).toHaveBeenCalledTimes(1);
+    expect(hubspotPriceClient.updateLineItems).toHaveBeenCalledTimes(2);
+    expect(hubspotPriceClient.updateLineItems.mock.calls[1][0].enrichedLineItems[0].id).toBe('line-2');
+  });
+
+  it('does not reconcile a zero price that SAP itself reports as zero', async () => {
+    const { useCase, hubspotPriceClient, sapPriceClient } = createUseCase({
+      sapPriceClient: {
+        fetchBusinessPartnerPrice: jest.fn().mockResolvedValue({ Price: 0, Currency: 'C$', Discount: 0 }),
+        fetchItemPrices: jest.fn().mockResolvedValue({
+          ItemPrices: [{ PriceList: 4, Price: 0, Currency: 'C$' }],
+          ItemWarehouseInfoCollection: [],
+        }),
+      },
+    });
+
+    hubspotPriceClient.readLineItems.mockResolvedValue({
+      lineItems: [{ id: 'line-1', itemCode: 'A0001', quantity: '2', price: '0', properties: {} }],
+      failures: [],
+    });
+
+    const result = await useCase.execute(
+      { dealId: 'deal-1', cardCode: 'C20000', lineItems: [{ itemCode: 'A0001', id: 'line-1', quantity: 2 }] },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    expect(result.meta.reconciliation.triggered).toBe(false);
+    expect(sapPriceClient.fetchBusinessPartnerPrice).toHaveBeenCalledTimes(1);
+    expect(hubspotPriceClient.updateLineItems).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconciles a zero price that the SAP cache contradicts, without calling SAP again', async () => {
+    const { useCase, hubspotPriceClient, sapPriceClient } = createUseCase();
+
+    hubspotPriceClient.readLineItems.mockResolvedValue({
+      lineItems: [{ id: 'line-1', itemCode: 'A0001', quantity: '2', price: '0', properties: {} }],
+      failures: [],
+    });
+
+    const result = await useCase.execute(
+      { dealId: 'deal-1', cardCode: 'C20000', lineItems: [{ itemCode: 'A0001', id: 'line-1', quantity: 2 }] },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    expect(result.meta.reconciliation.trigger).toContain('zero_price');
+    expect(sapPriceClient.fetchBusinessPartnerPrice).toHaveBeenCalledTimes(1);
+    expect(hubspotPriceClient.updateLineItems).toHaveBeenCalledTimes(2);
+    // Reusar la caché tiene que producir una línea completa, no sólo ahorrarse la llamada a SAP.
+    expect(hubspotPriceClient.updateLineItems.mock.calls[1][0].enrichedLineItems).toEqual([
+      {
+        itemCode: 'A0001',
+        id: 'line-1',
+        quantity: 2,
+        Price: 704.35,
+        Currency: 'C$',
+        Discount: 0,
+        lineTotal: 1408.7,
+        warehouseStockProperties: { A01_stock: 8 },
+      },
+    ]);
+  });
+
+  it('updates the deal amount once, after reconciliation, with both rounds', async () => {
+    const { useCase, hubspotPriceClient } = createUseCase();
+
+    hubspotPriceClient.readDealLineItemIds.mockResolvedValue(['line-1', 'line-2']);
+    hubspotPriceClient.readLineItems.mockResolvedValue({
+      lineItems: [
+        { id: 'line-1', itemCode: 'A0001', quantity: '1', price: '704.35', properties: {} },
+        { id: 'line-2', itemCode: 'A0001', quantity: '1', price: '0', properties: {} },
+      ],
+      failures: [],
+    });
+
+    await useCase.execute(
+      { dealId: 'deal-1', cardCode: 'C20000', lineItems: [{ itemCode: 'A0001', id: 'line-1', quantity: 1 }] },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    expect(hubspotPriceClient.updateDealAmount).toHaveBeenCalledTimes(1);
+    expect(hubspotPriceClient.updateDealAmount.mock.calls[0][0].totalAmount).toBe(1408.7);
   });
 });

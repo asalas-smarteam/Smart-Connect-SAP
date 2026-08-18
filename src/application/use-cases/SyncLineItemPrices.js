@@ -228,6 +228,151 @@ export class SyncLineItemPrices {
     return { ...entry, source: 'sap' };
   }
 
+  // Segunda pasada de seguridad, UNA sola vez. Existe porque el índice de asociaciones de
+  // HubSpot va unos segundos atrasado: cuando el asesor quita o agrega líneas, la lectura de
+  // la ronda 1 puede traer una línea ya archivada (404) o perderse una recién creada.
+  //
+  // Sólo corre si hay señal de que algo quedó mal: diferencia de cantidad, o una línea en
+  // precio 0 que la caché de SAP contradice. Un 0 que SAP mismo reporta es correcto y no
+  // dispara trabajo.
+  async reconcile({
+    token,
+    dealId,
+    updatedIds,
+    sapCache,
+    callRecorder,
+    sapConfig,
+    cardCode,
+    currentDate,
+    tenantKey,
+    itemSelectFields,
+    fallbackPriceList,
+    useBusinessPartnerPrice,
+    miscPriceCalculationConfig,
+    taxSettings,
+    discountHsField,
+    auditTrail,
+    tenantModels,
+  }) {
+    const freshIds = await this.hubspotPriceClient.readDealLineItemIds({ token, dealId });
+    const { lineItems: freshLines, failures: readFailures } = await this.hubspotPriceClient
+      .readLineItems({ token, lineItemIds: freshIds, extraProperties: ['price'] });
+
+    const trigger = [];
+
+    if (freshIds.length !== updatedIds.size) {
+      trigger.push('count_mismatch');
+    }
+
+    const zeroPriceLines = freshLines.filter((line) => {
+      if (normalizeNumber(line.price, 0) !== 0) {
+        return false;
+      }
+
+      const cached = sapCache.get(line.itemCode);
+
+      // El 0 viene de SAP: es correcto, no se toca.
+      return !(cached && roundCurrency(cached.priceData?.Price ?? 0) === 0);
+    });
+
+    if (zeroPriceLines.length > 0) {
+      trigger.push('zero_price');
+    }
+
+    if (trigger.length === 0) {
+      return { triggered: false, trigger: [], priced: [], failures: readFailures, enriched: [] };
+    }
+
+    const pending = freshLines.filter(
+      (line) => !updatedIds.has(String(line.id)) || zeroPriceLines.includes(line)
+    );
+    const enriched = [];
+    const priced = [];
+    const failures = [...readFailures];
+
+    for (const line of pending) {
+      let pricing;
+
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        pricing = await this.resolveSapPricing({
+          itemCode: line.itemCode,
+          sapCache,
+          callRecorder,
+          sapConfig,
+          cardCode,
+          currentDate,
+          tenantKey,
+          itemSelectFields,
+          fallbackPriceList,
+          useBusinessPartnerPrice,
+          auditTrail,
+        });
+      } catch (error) {
+        failures.push({
+          id: String(line.id),
+          itemCode: line.itemCode,
+          stage: 'sap_price',
+          reason: error.message,
+          status: error?.response?.status ?? error?.details?.status ?? null,
+        });
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+
+      // eslint-disable-next-line no-await-in-loop
+      const warehouseStockProperties = await this.credentialRepository
+        .resolveWarehouseStockProperties({
+          tenantModels,
+          itemWarehouseInfoCollection: pricing.sapItemData?.ItemWarehouseInfoCollection,
+        });
+      const tax = taxSettings?.taxCodes?.find(
+        (entry) => toNonEmptyString(entry?.Code)
+          === toNonEmptyString(pricing.sapItemData?.[taxSettings.fieldItem])
+      ) || {};
+      const quantity = normalizeQuantity(line.quantity);
+      const priceCalculation = calculateUnitPriceWithMisc({
+        sapPrice: pricing.priceData?.Price ?? 0,
+        lineItem: line,
+        config: miscPriceCalculationConfig,
+      });
+      const price = priceCalculation.price;
+
+      enriched.push({
+        itemCode: line.itemCode,
+        id: String(line.id),
+        quantity,
+        Price: price,
+        ...(priceCalculation.originalPriceTargetProperty
+          ? {
+            originalPrice: priceCalculation.originalPrice,
+            originalPriceTargetProperty: priceCalculation.originalPriceTargetProperty,
+          }
+          : {}),
+        Currency: pricing.priceData?.Currency ?? null,
+        Discount: 0,
+        lineTotal: roundCurrency(quantity * price),
+        ...(toNonEmptyString(tax.HSCode) ? { tax: tax.HSCode } : {}),
+        ...(discountHsField ? { _discountHsProperty: discountHsField } : {}),
+        warehouseStockProperties,
+      });
+      priced.push({ id: String(line.id), itemCode: line.itemCode, price, source: pricing.source });
+    }
+
+    if (enriched.length > 0) {
+      await callRecorder.record(
+        { target: 'hubspot', method: 'POST', path: '/crm/v3/objects/line_items/batch/update' },
+        () => this.hubspotPriceClient.updateLineItems({
+          token,
+          enrichedLineItems: enriched,
+          tenantKey,
+        })
+      );
+    }
+
+    return { triggered: true, trigger, priced, failures, enriched };
+  }
+
   async execute(payload, { tenantModels, tenant, tenantKey }) {
     const callRecorder = this.createSapCallRecorder();
     const auditTrail = {
@@ -414,9 +559,28 @@ export class SyncLineItemPrices {
         },
       };
 
+      const updatedIds = new Set(
+        (Array.isArray(hubspotUpdate.response?.results)
+          ? hubspotUpdate.response.results.map((entry) => String(entry?.id))
+          : hubspotUpdate.payload.inputs.map((input) => String(input.id))
+        ).filter(Boolean)
+      );
+
+      const reconciliation = dealId
+        ? await this.reconcile({
+          token, dealId, updatedIds, sapCache, callRecorder, sapConfig, cardCode,
+          currentDate, tenantKey, itemSelectFields, fallbackPriceList,
+          useBusinessPartnerPrice, miscPriceCalculationConfig, taxSettings,
+          discountHsField, auditTrail, tenantModels,
+        })
+        : { triggered: false, trigger: [], priced: [], failures: [], enriched: [] };
+
       let dealUpdate = null;
+      // El amount se escribe al cierre y una sola vez, con lo que se pudo valorizar en las dos
+      // rondas: es preferible un total parcial a dejar el deal con el amount viejo.
+      const allPricedLines = [...enrichedLineItems, ...reconciliation.enriched];
       const totalAmount = roundCurrency(
-        enrichedLineItems.reduce((sum, lineItem) => sum + lineItem.lineTotal, 0)
+        allPricedLines.reduce((sum, line) => sum + line.lineTotal, 0)
       );
 
       if (dealId) {
@@ -449,6 +613,11 @@ export class SyncLineItemPrices {
             : hubspotProductUpdate.payload.inputs.length,
           skippedCount: roundFailures.length,
           dealUpdated: Boolean(dealUpdate),
+          reconciliation: {
+            triggered: reconciliation.triggered,
+            trigger: reconciliation.trigger,
+            pricedCount: reconciliation.priced.length,
+          },
         },
       };
     } catch (error) {
