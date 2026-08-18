@@ -107,6 +107,46 @@ function resolveTaxRate({ sapItemData, taxSettings, fallbackDiscount }) {
   return taxRate ?? fallbackDiscount;
 }
 
+// `unresolved` tiene que significar lo que dice su nombre. Dos razones por las que la simple
+// concatenación de las dos listas de fallos miente:
+//
+// - La reconciliación reintenta toda línea que no quedó en `updatedIds`, y `resolveSapPricing`
+//   sólo memoiza éxitos, así que una línea que falló en SAP en la ronda 1 se vuelve a pedir y
+//   puede salir bien. Su entrada de la ronda 1 sigue en `roundFailures`, y dejarla acá diría
+//   que quedó sin resolver una línea que sí se escribió.
+// - Una línea que falla en las DOS rondas aparece en las dos listas, y saldría duplicada.
+//
+// El detalle por ronda no se pierde: sigue completo en `rounds[].failures`. Acá sólo se filtra.
+//
+// Las entradas SIN `id` no representan una línea -- el fallo de pasada completa
+// `stage: 'reconciliation'` no trae `id` ni `itemCode` -- así que no se filtran ni se
+// deduplican nunca. Los tres shapes (`hubspot_read`, `sap_price`, `reconciliation`) salen tal
+// como entraron, sin normalizarse.
+function collectUnresolvedFailures(roundFailures = [], reconciliation = {}) {
+  const resolvedIds = new Set(
+    (reconciliation?.priced ?? [])
+      .map((line) => toNonEmptyString(line?.id))
+      .filter(Boolean)
+  );
+  const seenIds = new Set();
+
+  return [...roundFailures, ...(reconciliation?.failures ?? [])].filter((failure) => {
+    const id = toNonEmptyString(failure?.id);
+
+    if (!id) {
+      return true;
+    }
+
+    if (resolvedIds.has(id) || seenIds.has(id)) {
+      return false;
+    }
+
+    // Se conserva la PRIMERA aparición: es la evidencia más temprana del fallo.
+    seenIds.add(id);
+    return true;
+  });
+}
+
 export class SyncLineItemPrices {
   constructor({
     credentialRepository,
@@ -383,11 +423,20 @@ export class SyncLineItemPrices {
       response_hubspot: null,
       response_SAP: [],
     };
-    // Declarados fuera del `try` a propósito: el `catch` arma `error.lineItemPriceAudit` con
-    // ellos, y un fallo total (ninguna línea valorizada, SAP caído) es justo el caso donde el
-    // audit tiene que decir qué se intentó y por qué falló cada línea.
+    // Los cuatro viven fuera del `try` porque el `catch` los LEE para armar
+    // `error.lineItemPriceAudit`: `auditRounds` y `callRecorder` van directo al audit, y
+    // `roundFailures` + `reconciliation` alimentan su `unresolved`.
+    //
+    // `roundFailures` se siembra ACÁ, antes de cualquier await, y no dentro del `try`: los
+    // fallos `hubspot_read` que el lector tolerante de `preparePayload` ya dejó en el payload
+    // son la evidencia del 404 por línea que este audit existe para capturar, y un fallo
+    // temprano (credenciales, config, SAP caído en `fetchActiveDiscountGroups`) tira antes del
+    // ciclo de la ronda 1. Si se sembrara adentro, ese camino escribiría el audit con
+    // `rounds: []` y `unresolved: []`, o sea sin la evidencia.
     const auditRounds = [];
-    let roundFailures = [];
+    const roundFailures = Array.isArray(payload?.lineItemFailures)
+      ? [...payload.lineItemFailures]
+      : [];
     let reconciliation = { triggered: false, trigger: [], priced: [], failures: [], enriched: [] };
 
     try {
@@ -432,8 +481,6 @@ export class SyncLineItemPrices {
       const sapCache = new Map();
       const enrichedLineItems = [];
       const pricedLog = [];
-
-      roundFailures = [...(payload.lineItemFailures ?? [])];
 
       for (const lineItem of payload.lineItems) {
         const itemCode = toNonEmptyString(lineItem.itemCode);
@@ -544,7 +591,10 @@ export class SyncLineItemPrices {
       // lugar del audit que dice por qué falló cada una.
       auditRounds.push({
         round: 1,
-        lineItemIdsFromDeal: payload.lineItems.map((line) => String(line.id)),
+        // Del payload, no del deal: las líneas que fallaron `hubspot_read` no están acá (viajan
+        // en `failures`), así que llamarlo "FromDeal" haría concluir que el deal tenía menos
+        // líneas de las que tenía.
+        lineItemIdsInPayload: payload.lineItems.map((line) => String(line.id)),
         priced: pricedLog,
         failures: roundFailures,
       });
@@ -680,10 +730,7 @@ export class SyncLineItemPrices {
           cardCode,
           rounds: auditRounds,
           calls: callRecorder.calls,
-          unresolved: [
-            ...roundFailures,
-            ...(reconciliation.failures ?? []),
-          ],
+          unresolved: collectUnresolvedFailures(roundFailures, reconciliation),
           amount: { written: Boolean(dealUpdate), total: totalAmount },
         }),
       };
@@ -718,7 +765,9 @@ export class SyncLineItemPrices {
         cardCode: toNonEmptyString(payload?.cardCode),
         rounds: auditRounds,
         calls: callRecorder.calls,
-        unresolved: [],
+        // Mismo filtro que el camino de éxito: un fallo tardío (el PATCH del amount) ocurre
+        // DESPUÉS de la reconciliación, así que acá también hay líneas que la ronda 2 resolvió.
+        unresolved: collectUnresolvedFailures(roundFailures, reconciliation),
         fatalError: {
           message: error.message,
           status: error?.details?.status ?? error?.response?.status ?? null,

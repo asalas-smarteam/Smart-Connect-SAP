@@ -181,7 +181,7 @@ describe('SyncLineItemPrices', () => {
         rounds: [
           {
             round: 1,
-            lineItemIdsFromDeal: ['line-1'],
+            lineItemIdsInPayload: ['line-1'],
             priced: [{ id: 'line-1', itemCode: 'A0001', price: 704.35, source: 'sap' }],
             failures: [],
           },
@@ -870,7 +870,7 @@ describe('SyncLineItemPrices', () => {
     expect(error.lineItemPriceAudit.rounds).toEqual([
       {
         round: 1,
-        lineItemIdsFromDeal: ['line-1'],
+        lineItemIdsInPayload: ['line-1'],
         priced: [],
         failures: [{
           id: 'line-1',
@@ -888,5 +888,145 @@ describe('SyncLineItemPrices', () => {
     });
     expect(error.lineItemPriceAudit.dealId).toBe('deal-1');
     expect(error.lineItemPriceAudit.cardCode).toBe('C20000');
+  });
+
+  it('keeps the payload hubspot_read failures in the audit when the run throws before round 1', async () => {
+    const { useCase, credentialRepository } = createUseCase();
+
+    // Falla antes del ciclo de la ronda 1: no hay `rounds`, así que `unresolved` es el ÚNICO
+    // lugar donde puede quedar la evidencia del 404 por línea que trajo el payload.
+    credentialRepository.resolveHubspotCredentials.mockRejectedValue(
+      new Error('HubSpot credentials are not configured')
+    );
+
+    const error = await useCase.execute(
+      {
+        dealId: 'deal-1',
+        cardCode: 'C20000',
+        lineItems: [{ itemCode: 'A0001', id: 'line-1', quantity: 1 }],
+        lineItemFailures: [{
+          id: 'line-3', stage: 'hubspot_read', reason: '404 Not Found', status: 404,
+          endpoint: '/crm/v3/objects/line_items/line-3',
+        }],
+      },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    ).then(() => null, (thrown) => thrown);
+
+    expect(error.message).toBe('HubSpot credentials are not configured');
+    expect(error.lineItemPriceAudit.rounds).toEqual([]);
+    expect(error.lineItemPriceAudit.unresolved).toEqual([{
+      id: 'line-3',
+      stage: 'hubspot_read',
+      reason: '404 Not Found',
+      status: 404,
+      endpoint: '/crm/v3/objects/line_items/line-3',
+    }]);
+  });
+
+  it('drops a line from unresolved when round 2 priced it successfully', async () => {
+    const { useCase, sapPriceClient, hubspotPriceClient } = createUseCase();
+
+    let badAttempts = 0;
+    sapPriceClient.fetchBusinessPartnerPrice = jest.fn(async ({ itemCode }) => {
+      if (itemCode === 'BAD') {
+        badAttempts += 1;
+        if (badAttempts === 1) {
+          throw new Error('Price list 4 not found for item BAD');
+        }
+      }
+      return { Price: 100, Currency: 'C$', Discount: 0 };
+    });
+    // La ronda 1 sólo escribió line-1, así que el conteo no cuadra y la reconciliación corre.
+    hubspotPriceClient.readDealLineItemIds.mockResolvedValue(['line-1', 'line-2']);
+    hubspotPriceClient.readLineItems.mockResolvedValue({
+      lineItems: [
+        { id: 'line-1', itemCode: 'A0001', quantity: '1', price: '100', properties: {} },
+        { id: 'line-2', itemCode: 'BAD', quantity: '1', price: '0', properties: {} },
+      ],
+      failures: [],
+    });
+
+    const result = await useCase.execute(
+      {
+        dealId: 'deal-1',
+        cardCode: 'C20000',
+        lineItems: [
+          { itemCode: 'A0001', id: 'line-1', quantity: 1 },
+          { itemCode: 'BAD', id: 'line-2', quantity: 1 },
+        ],
+      },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    // El reintento de la ronda 2 sí volvió a SAP (los fallos no se memorizan) y salió bien.
+    expect(badAttempts).toBe(2);
+    expect(result.audit.rounds[1].priced).toEqual([
+      { id: 'line-2', itemCode: 'BAD', price: 100, source: 'sap' },
+    ]);
+    // La línea quedó escrita, así que no puede figurar como no resuelta...
+    expect(result.audit.unresolved).toEqual([]);
+    // ...pero la evidencia del fallo de la ronda 1 no se pierde, sigue en su ronda.
+    expect(result.audit.rounds[0].failures).toEqual([{
+      id: 'line-2',
+      itemCode: 'BAD',
+      stage: 'sap_price',
+      reason: 'Price list 4 not found for item BAD',
+      status: null,
+    }]);
+  });
+
+  it('lists a line that failed in both rounds exactly once in unresolved', async () => {
+    const { useCase, sapPriceClient, hubspotPriceClient } = createUseCase();
+
+    sapPriceClient.fetchBusinessPartnerPrice = jest.fn(async ({ itemCode }) => {
+      if (itemCode === 'BAD') {
+        throw new Error('Price list 4 not found for item BAD');
+      }
+      return { Price: 100, Currency: 'C$', Discount: 0 };
+    });
+    hubspotPriceClient.readDealLineItemIds.mockResolvedValue(['line-1', 'line-2']);
+    hubspotPriceClient.readLineItems.mockResolvedValue({
+      lineItems: [
+        { id: 'line-1', itemCode: 'A0001', quantity: '1', price: '100', properties: {} },
+        { id: 'line-2', itemCode: 'BAD', quantity: '1', price: '0', properties: {} },
+      ],
+      failures: [],
+    });
+
+    const result = await useCase.execute(
+      {
+        dealId: 'deal-1',
+        cardCode: 'C20000',
+        lineItems: [
+          { itemCode: 'A0001', id: 'line-1', quantity: 1 },
+          { itemCode: 'BAD', id: 'line-2', quantity: 1 },
+        ],
+      },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    // Falló en las dos rondas, así que está en las dos listas de fallos...
+    expect(result.audit.rounds[0].failures).toHaveLength(1);
+    expect(result.audit.rounds[1].failures).toHaveLength(1);
+    // ...pero `unresolved` la nombra una sola vez.
+    expect(result.audit.unresolved).toEqual([{
+      id: 'line-2',
+      itemCode: 'BAD',
+      stage: 'sap_price',
+      reason: 'Price list 4 not found for item BAD',
+      status: null,
+    }]);
   });
 });
