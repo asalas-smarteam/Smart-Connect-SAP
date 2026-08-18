@@ -75,12 +75,17 @@ function createLineItemPriceController({
         const requestedCount =
           Number(result?.meta?.requestedCount) || preparedPayload?.payload?.lineItems?.length || 0;
         const updatedCount = Number(result?.meta?.updatedCount) || 0;
+        // Las líneas descartadas (404 al leerlas, sin precio en SAP) no llegan a
+        // `requestedCount`, que sólo cuenta las que entraron al batch. Sin sumarlas, un éxito
+        // parcial cierra el log con `failed: 0` y las alertas que se arman sobre estos
+        // contadores no ven nada.
+        const skippedCount = Number(result?.meta?.skippedCount) || 0;
 
         await dependencies.syncLogGateway.finish(syncLogRecord, {
           status: 'completed',
-          recordsProcessed: requestedCount,
+          recordsProcessed: requestedCount + skippedCount,
           sent: updatedCount,
-          failed: Math.max(requestedCount - updatedCount, 0),
+          failed: Math.max(requestedCount - updatedCount, 0) + skippedCount,
         });
 
         return reply.send({

@@ -134,6 +134,49 @@ describe('lineItemPrice.controller syncPrices', () => {
     );
   });
 
+  // Un éxito parcial cerraba el syncLog con contadores derivados sólo de las líneas
+  // sobrevivientes, así que una línea descartada por un 404 no figuraba ni como procesada ni
+  // como fallida y la gente arma alertas sobre esos contadores.
+  it('counts the skipped lines in the sync log of a partial success', async () => {
+    const reply = buildReply();
+    const req = {
+      body: [
+        {
+          cardCode: 'C20000',
+          lineItems: [{ itemCode: 'A0001', id: 'line-1' }],
+        },
+      ],
+      tenantModels: {},
+      tenant: {},
+      tenantKey: 'tenant_1',
+      log: { error: jest.fn() },
+    };
+
+    mockSyncPrices.mockResolvedValue({
+      data: { cardCode: 'C20000', dealId: 'deal-1', totalAmount: 100, lineItems: [] },
+      meta: {
+        requestedCount: 2,
+        updatedCount: 1,
+        skippedCount: 3,
+        dealUpdated: true,
+      },
+    });
+
+    await buildController().syncPrices(req, reply);
+
+    expect(mockFinishSyncLog).toHaveBeenCalledWith(
+      { _id: 'sync-log-1' },
+      expect.objectContaining({
+        status: 'completed',
+        // 2 que llegaron a la escritura + 3 descartadas antes.
+        recordsProcessed: 5,
+        sent: 1,
+        // La que no se actualizó, más las 3 descartadas.
+        failed: 4,
+      })
+    );
+  });
+
   it('returns 400 for expected payload errors', async () => {
     const reply = buildReply();
     const req = {
