@@ -535,6 +535,56 @@ describe('lineItemPriceWebhook.service', () => {
     );
   });
 
+  // El mismo punto ciego del reporte original, una capa más arriba: "Deal has no readable line
+  // items" solo, sin endpoint ni status, no dice NADA de por qué no se pudo leer la línea. Es el
+  // escenario de un deal de una sola línea: el asesor la borra, el índice de asociaciones va
+  // atrasado, y la única línea da 404.
+  it('keeps the endpoint and status of the 404s in the audit when every line item 404s', async () => {
+    const tenantModels = buildTenantModels();
+
+    mockGetAccessToken.mockResolvedValue('hubspot-token');
+    mockHubspotGet.mockImplementation(async (_token, path) => {
+      if (path === '/crm/v3/objects/deals/64058987778') {
+        return {
+          id: '64058987778',
+          associations: {
+            companies: { results: [{ id: 'company-1' }] },
+            'line items': { results: [{ id: 'line-1' }] },
+          },
+        };
+      }
+
+      if (path === '/crm/v3/objects/companies/company-1') {
+        return { id: 'company-1', properties: { idsap: 'C20000' } };
+      }
+
+      throw Object.assign(new Error('HubSpot API request failed: 404 Not Found'), {
+        details: { endpoint: path, method: 'GET', status: 404 },
+      });
+    });
+
+    await expect(
+      lineItemPriceWebhookService.preparePayload(
+        buildAssociationPayload({ fromObjectId: 64058987778 }),
+        { tenantModels, tenant: { client: { hubspot: { portalId: '50249912' } } } }
+      )
+    ).rejects.toThrow('Deal has no readable line items');
+
+    const auditCall = tenantModels.LineItemPriceWebhookEvent.updateOne.mock.calls
+      .find(([, update]) => update?.$set?.audit);
+
+    expect(auditCall[0]).toEqual({ _id: 'event-1' });
+    expect(auditCall[1].$set.audit.unresolved).toEqual([
+      {
+        id: 'line-1',
+        stage: 'hubspot_read',
+        reason: 'HubSpot API request failed: 404 Not Found',
+        status: 404,
+        endpoint: '/crm/v3/objects/line_items/line-1',
+      },
+    ]);
+  });
+
   // Éste es el caso que reportó el cliente: el 404 cae sobre el GET del deal, así que
   // SyncLineItemPrices nunca corre y su audit nunca existe. Si acá no se guarda uno mínimo,
   // el evento vuelve a quedar con un solo `errorMessage` y nadie puede decir por qué falló.

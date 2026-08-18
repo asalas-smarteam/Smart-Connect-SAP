@@ -473,7 +473,12 @@ async function buildLegacyPayload(payload, token, miscPriceCalculationConfig = n
   });
 
   if (lineItems.length === 0) {
-    throw new Error('Deal has no readable line items');
+    // Los fallos van PEGADOS al error: sin esto el audit del catch queda con `unresolved: []` y
+    // un `fatalError` de status/endpoint null, o sea el mismo "no cargan los precios" sin
+    // evidencia que originó todo este trabajo. Acá está el 404 con su endpoint.
+    throw Object.assign(new Error('Deal has no readable line items'), {
+      lineItemFailures: failures,
+    });
   }
 
   return {
@@ -678,7 +683,9 @@ const lineItemPriceWebhookService = {
           dealId: toNonEmptyString(payload?.fromObjectId),
           rounds: [],
           calls: [],
-          unresolved: [],
+          // Los fallos por línea que el lector tolerante alcanzó a juntar antes del fatal: es
+          // donde viven el endpoint y el status de cada 404.
+          unresolved: Array.isArray(error?.lineItemFailures) ? error.lineItemFailures : [],
           fatalError: {
             message: error.message,
             status: error?.details?.status ?? error?.response?.status ?? null,
