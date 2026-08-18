@@ -500,16 +500,18 @@ async function buildLegacyPayload(payload, token, miscPriceCalculationConfig = n
 // mismo registro fallido y las dos lo procesarían. Acá el `$set` es parte de la reclamación, así
 // que sólo una gana; la otra recibe null, cae al create y choca con el índice único.
 //
-// El `$set` sólo limpia `errorMessage` (a null = en vuelo, que es lo que hace que el guard
-// descarte al perdedor). `isSend` no se toca porque el propio filtro ya exige que sea false.
-async function claimFailedAttempt(LineItemPriceWebhookEvent, duplicateFilter) {
+// El `$set` limpia `errorMessage` (a null = en vuelo, que es lo que hace que el guard descarte
+// al perdedor) y estampa el `dealId`: el registro que se reutiliza puede venir de antes de que
+// este campo se escribiera, y sin él el índice {dealId, createdAt} no sirve para diagnosticar.
+// `isSend` no se toca porque el propio filtro ya exige que sea false.
+async function claimFailedAttempt(LineItemPriceWebhookEvent, duplicateFilter, dealId) {
   return LineItemPriceWebhookEvent.findOneAndUpdate(
     {
       ...duplicateFilter,
       isSend: false,
       errorMessage: { $ne: null },
     },
-    { $set: { errorMessage: null } },
+    { $set: { errorMessage: null, dealId } },
     { new: true, projection: { _id: 1 } }
   ).lean();
 }
@@ -599,6 +601,10 @@ const lineItemPriceWebhookService = {
 
     const { LineItemPriceWebhookEvent } = tenantModels;
     const duplicateFilter = buildDuplicateFilter(payload);
+    // En un evento de asociación el deal es el `fromObjectId`. Se guarda en su propio campo
+    // porque el índice {dealId, createdAt} es el que se usa para reconstruir la historia de un
+    // deal cuando el cliente reporta que no le cargaron los precios.
+    const dealId = toNonEmptyString(payload?.fromObjectId);
     // El $or va acá y NO dentro de buildDuplicateFilter: ese helper es compartido y la
     // estrategia dealPriceList ya le agrega el mismo $or por su cuenta.
     // Sin esto, un reintento de HubSpot tras un fallo nuestro se descartaba como duplicado y
@@ -624,12 +630,13 @@ const lineItemPriceWebhookService = {
 
     // El índice único cubre los 6 campos del filtro, así que un reintento NO puede crear un
     // registro nuevo: hay que reclamar el que quedó del intento fallido.
-    let createdEvent = await claimFailedAttempt(LineItemPriceWebhookEvent, duplicateFilter);
+    let createdEvent = await claimFailedAttempt(LineItemPriceWebhookEvent, duplicateFilter, dealId);
 
     if (!createdEvent) {
       try {
         createdEvent = await LineItemPriceWebhookEvent.create({
           payload,
+          dealId,
           isSend: false,
           errorMessage: null,
         });
@@ -638,7 +645,11 @@ const lineItemPriceWebhookService = {
           // Otro proceso insertó el mismo evento entre nuestro guard y este create. Se intenta
           // reclamar SU registro, pero sólo si es un fallo reprocesable: con el filtro pelado se
           // adoptaba también un registro en vuelo o ya enviado y el deal se valorizaba dos veces.
-          createdEvent = await claimFailedAttempt(LineItemPriceWebhookEvent, duplicateFilter);
+          createdEvent = await claimFailedAttempt(
+            LineItemPriceWebhookEvent,
+            duplicateFilter,
+            dealId
+          );
 
           if (!createdEvent) {
             return {

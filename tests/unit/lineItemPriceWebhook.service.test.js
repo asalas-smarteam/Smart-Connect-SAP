@@ -298,7 +298,10 @@ describe('lineItemPriceWebhook.service', () => {
     // reintentos simultáneos se quedaran los dos con el mismo registro.
     expect(tenantModels.LineItemPriceWebhookEvent.findOneAndUpdate).toHaveBeenCalledWith(
       expect.objectContaining({ isSend: false, errorMessage: { $ne: null } }),
-      { $set: { errorMessage: null } },
+      // El `dealId` va también en la reclamación: un registro reutilizado que quedó con
+      // `dealId: null` deja el índice {dealId, createdAt} inútil justo para el evento que se
+      // está diagnosticando.
+      { $set: { errorMessage: null, dealId: '64058987777' } },
       { new: true, projection: { _id: 1 } }
     );
   });
@@ -416,6 +419,27 @@ describe('lineItemPriceWebhook.service', () => {
       message: 'HubSpot API request failed: 502 Bad Gateway',
       status: 502,
       endpoint: '/crm/v3/objects/deals/64058987777',
+    });
+  });
+
+  // Por esto el documento del reporte de producción salía con `dealId: null`: la rama de
+  // asociación creaba el evento sin el campo, y el índice {dealId, createdAt} no servía justo
+  // para los eventos que se estaban diagnosticando.
+  it('stores the dealId on the association event it creates', async () => {
+    const tenantModels = buildTenantModels();
+    mockPriceableDeal();
+
+    const result = await lineItemPriceWebhookService.preparePayload(
+      buildAssociationPayload(),
+      { tenantModels, tenant: { client: { hubspot: { portalId: '50249912' } } } }
+    );
+
+    expect(result.skip).toBe(false);
+    expect(tenantModels.LineItemPriceWebhookEvent.create).toHaveBeenCalledWith({
+      payload: buildAssociationPayload(),
+      dealId: '64058987777',
+      isSend: false,
+      errorMessage: null,
     });
   });
 
@@ -805,6 +829,7 @@ describe('lineItemPriceWebhook.service', () => {
         changeSource: 'USER',
         fromObjectId: 58986911596,
       },
+      dealId: '58986911596',
       isSend: false,
       errorMessage: null,
     });
