@@ -1,12 +1,15 @@
 import hubspotAuthService from '../hubspot/hubspotAuthService.js';
 import * as hubspotClient from '../hubspot/hubspotClient.js';
 import tenantConfigurationService from '../config/tenantConfiguration.service.js';
+import logger from '../logger/logger.js';
+import { buildLineItemPriceAudit } from '../sync/syncLog.service.js';
 import {
   assertRequiredWebhookField,
   buildDuplicateFilter,
   extractAssociationIds,
   extractLineItemAssociationIds,
   fetchHubspotObject,
+  readLineItems,
   resolveHubspotCredentials,
   toNonEmptyString,
   toNumberOrNull,
@@ -100,44 +103,6 @@ async function resolveCardCode(token, deal) {
   }
 
   return null;
-}
-
-async function resolveLineItems(token, deal, miscPriceCalculationConfig = null) {
-  const lineItemIds = extractLineItemAssociationIds(deal);
-
-  if (lineItemIds.length === 0) {
-    throw new Error('Deal has no associated line items');
-  }
-
-  const miscSourceProperty = miscPriceCalculationConfig?.enableMiscPriceCalculation === true
-    ? toNonEmptyString(miscPriceCalculationConfig?.miscSourceProperty)
-    : null;
-  const lineItemProperties = ['hs_sku', 'quantity', miscSourceProperty]
-    .filter((value, index, values) => value && values.indexOf(value) === index);
-
-  const lineItems = await Promise.all(
-    lineItemIds.map(async (lineItemId, index) => {
-      const lineItem = await fetchHubspotObject(token, 'line_items', lineItemId, {
-        properties: lineItemProperties,
-      });
-      const itemCode = toNonEmptyString(lineItem?.properties?.hs_sku || lineItem?.properties?.itemCode);
-
-      if (!itemCode) {
-        throw new Error(`lineItems[${index}].itemCode is required`);
-      }
-
-      return {
-        id: toNonEmptyString(lineItem?.id) || lineItemId,
-        itemCode,
-        quantity: lineItem?.properties?.quantity ?? null,
-        ...(miscSourceProperty
-          ? { [miscSourceProperty]: lineItem?.properties?.[miscSourceProperty] ?? null }
-          : {}),
-      };
-    })
-  );
-
-  return lineItems;
 }
 
 // Flujo de cambio de propiedad: precio = safe_price_value * (1 + miscelaneo / 100).
@@ -404,12 +369,19 @@ async function handlePropertyChangeEventSkipped(payload, { tenantModels, tenant 
   // webhook sobra (el que ejecutó ya recalculó todas las líneas). Solo cuentan registros
   // sin errorMessage: los skipped/duplicados no extienden la ventana (una ráfaga podría
   // suprimir el procesamiento indefinidamente) y un reintento tras fallo no se debouncea.
+  //
+  // Restringido a payload.subscriptionType = property-change (positivo, no "distinto de
+  // deal.associationChange"): un deal.associationChange también recalcula el deal completo
+  // y ahora también guarda dealId, así que sin esta restricción cualquier asociación reciente
+  // debouncea un `misc` legítimo que llegó después de que la asociación ya leyó las líneas —
+  // el precio se pierde hasta el próximo evento, la misma clase de bug que esta rama corrige.
   if (debounceConfig?.requireSkipped === true) {
     const secondsToSkipped = toNumberOrNull(debounceConfig?.secondsToSkipped)
       ?? PROPERTY_CHANGE_DEBOUNCE_DEFAULT.secondsToSkipped;
 
     const recentExecution = await LineItemPriceWebhookEvent.findOne({
       dealId,
+      'payload.subscriptionType': SUPPORTED_SUBSCRIPTION_TYPE,
       createdAt: { $gte: new Date(Date.now() - secondsToSkipped * 1000) },
       errorMessage: null,
     }).select({ _id: 1 }).lean();
@@ -487,11 +459,89 @@ async function buildLegacyPayload(payload, token, miscPriceCalculationConfig = n
     associations: ['companies', 'contacts', 'line_items'],
   });
 
+  // resolveCardCode debe correr antes de tocar nada de line items: si el deal no tiene
+  // company/contact asociado, la petición se rechaza sin importar el estado de las líneas.
+  const cardCode = await resolveCardCode(token, deal);
+  const lineItemIds = extractLineItemAssociationIds(deal);
+
+  if (lineItemIds.length === 0) {
+    throw new Error('Deal has no associated line items');
+  }
+
+  const miscSourceProperty = miscPriceCalculationConfig?.enableMiscPriceCalculation === true
+    ? toNonEmptyString(miscPriceCalculationConfig?.miscSourceProperty)
+    : null;
+
+  // Una línea ilegible ya no tumba al resto: viaja en lineItemFailures hasta el audit.
+  const { lineItems, failures } = await readLineItems({
+    token,
+    lineItemIds,
+    extraProperties: [miscSourceProperty].filter(Boolean),
+  });
+
+  if (lineItems.length === 0) {
+    // Los fallos van PEGADOS al error: sin esto el audit del catch queda con `unresolved: []` y
+    // un `fatalError` de status/endpoint null, o sea el mismo "no cargan los precios" sin
+    // evidencia que originó todo este trabajo. Acá está el 404 con su endpoint.
+    throw Object.assign(new Error('Deal has no readable line items'), {
+      lineItemFailures: failures,
+    });
+  }
+
   return {
     dealId,
-    cardCode: await resolveCardCode(token, deal),
-    lineItems: await resolveLineItems(token, deal, miscPriceCalculationConfig),
+    cardCode,
+    lineItems,
+    lineItemFailures: failures,
   };
+}
+
+// Reclama, de forma atómica, el registro de un intento fallido NUESTRO para reprocesarlo.
+//
+// El filtro es la negación exacta del guard de duplicados: sólo `isSend: false` + `errorMessage`
+// no nulo es un fallo propio reintentable. `isSend: true` es un evento ya procesado y
+// `errorMessage: null` es uno en vuelo, y ninguno de los dos se toca.
+//
+// Va en un solo findOneAndUpdate y no en un findOne + updateOne porque dos entregas simultáneas
+// del mismo evento pasan las dos el guard: leyendo y escribiendo por separado, las dos leerían el
+// mismo registro fallido y las dos lo procesarían. Acá el `$set` es parte de la reclamación, así
+// que sólo una gana; la otra recibe null, cae al create y choca con el índice único.
+//
+// El `$set` limpia `errorMessage` (a null = en vuelo, que es lo que hace que el guard descarte
+// al perdedor) y estampa el `dealId`: el registro que se reutiliza puede venir de antes de que
+// este campo se escribiera, y sin él el índice {dealId, createdAt} no sirve para diagnosticar.
+// `isSend` no se toca porque el propio filtro ya exige que sea false.
+async function claimFailedAttempt(LineItemPriceWebhookEvent, duplicateFilter, dealId) {
+  return LineItemPriceWebhookEvent.findOneAndUpdate(
+    {
+      ...duplicateFilter,
+      isSend: false,
+      errorMessage: { $ne: null },
+    },
+    { $set: { errorMessage: null, dealId } },
+    { new: true, projection: { _id: 1 } }
+  ).lean();
+}
+
+// Escritura aparte, y con su propio try/catch: si Mongo rechaza el audit, el resultado del
+// evento (isSend / errorMessage) ya quedó guardado por el updateOne anterior.
+async function persistAudit(LineItemPriceWebhookEvent, executionId, audit) {
+  if (!audit) {
+    return;
+  }
+
+  try {
+    await LineItemPriceWebhookEvent.updateOne(
+      { _id: executionId },
+      { $set: { audit } }
+    );
+  } catch (error) {
+    logger.warn({
+      msg: 'Line item price audit could not be persisted',
+      executionId: String(executionId),
+      error: error.message,
+    });
+  }
 }
 
 const lineItemPriceWebhookService = {
@@ -558,7 +608,18 @@ const lineItemPriceWebhookService = {
 
     const { LineItemPriceWebhookEvent } = tenantModels;
     const duplicateFilter = buildDuplicateFilter(payload);
-    const duplicate = await LineItemPriceWebhookEvent.findOne(duplicateFilter)
+    // En un evento de asociación el deal es el `fromObjectId`. Se guarda en su propio campo
+    // porque el índice {dealId, createdAt} es el que se usa para reconstruir la historia de un
+    // deal cuando el cliente reporta que no le cargaron los precios.
+    const dealId = toNonEmptyString(payload?.fromObjectId);
+    // El $or va acá y NO dentro de buildDuplicateFilter: ese helper es compartido y la
+    // estrategia dealPriceList ya le agrega el mismo $or por su cuenta.
+    // Sin esto, un reintento de HubSpot tras un fallo nuestro se descartaba como duplicado y
+    // el precio no cargaba nunca.
+    const duplicate = await LineItemPriceWebhookEvent.findOne({
+      ...duplicateFilter,
+      $or: [{ isSend: true }, { errorMessage: null }],
+    })
       .select({ _id: 1 })
       .lean();
 
@@ -574,28 +635,44 @@ const lineItemPriceWebhookService = {
       };
     }
 
-    let createdEvent;
+    // El índice único cubre los 6 campos del filtro, así que un reintento NO puede crear un
+    // registro nuevo: hay que reclamar el que quedó del intento fallido.
+    let createdEvent = await claimFailedAttempt(LineItemPriceWebhookEvent, duplicateFilter, dealId);
 
-    try {
-      createdEvent = await LineItemPriceWebhookEvent.create({
-        payload,
-        isSend: false,
-        errorMessage: null,
-      });
-    } catch (error) {
-      if (error?.code === 11000) {
-        return {
-          skip: true,
-          payload: null,
-          executionId: null,
-          meta: {
-            skipped: true,
-            reason: 'duplicate_event',
-          },
-        };
+    if (!createdEvent) {
+      try {
+        createdEvent = await LineItemPriceWebhookEvent.create({
+          payload,
+          dealId,
+          isSend: false,
+          errorMessage: null,
+        });
+      } catch (error) {
+        if (error?.code === 11000) {
+          // Otro proceso insertó el mismo evento entre nuestro guard y este create. Se intenta
+          // reclamar SU registro, pero sólo si es un fallo reprocesable: con el filtro pelado se
+          // adoptaba también un registro en vuelo o ya enviado y el deal se valorizaba dos veces.
+          createdEvent = await claimFailedAttempt(
+            LineItemPriceWebhookEvent,
+            duplicateFilter,
+            dealId
+          );
+
+          if (!createdEvent) {
+            return {
+              skip: true,
+              payload: null,
+              executionId: null,
+              meta: {
+                skipped: true,
+                reason: 'duplicate_event',
+              },
+            };
+          }
+        } else {
+          throw error;
+        }
       }
-
-      throw error;
     }
 
     try {
@@ -613,21 +690,33 @@ const lineItemPriceWebhookService = {
         executionId: createdEvent._id,
       };
     } catch (error) {
-      await LineItemPriceWebhookEvent.updateOne(
-        { _id: createdEvent._id },
-        {
-          $set: {
-            isSend: false,
-            errorMessage: error.message,
+      // Un fallo acá (GET del deal, token, credenciales) deja el evento sin nada valorizado.
+      // Se guarda un audit mínimo para que se vea el endpoint y el status, que es justo lo
+      // que faltaba cuando el cliente reportó "no cargan los precios".
+      await lineItemPriceWebhookService.markAsError(
+        LineItemPriceWebhookEvent,
+        createdEvent._id,
+        error,
+        buildLineItemPriceAudit({
+          dealId: toNonEmptyString(payload?.fromObjectId),
+          rounds: [],
+          calls: [],
+          // Los fallos por línea que el lector tolerante alcanzó a juntar antes del fatal: es
+          // donde viven el endpoint y el status de cada 404.
+          unresolved: Array.isArray(error?.lineItemFailures) ? error.lineItemFailures : [],
+          fatalError: {
+            message: error.message,
+            status: error?.details?.status ?? error?.response?.status ?? null,
+            endpoint: error?.details?.endpoint ?? null,
           },
-        }
+        })
       );
 
       throw error;
     }
   },
 
-  async markAsSent(LineItemPriceWebhookEvent, executionId) {
+  async markAsSent(LineItemPriceWebhookEvent, executionId, audit = null) {
     if (!LineItemPriceWebhookEvent || !executionId) {
       return;
     }
@@ -641,9 +730,11 @@ const lineItemPriceWebhookService = {
         },
       }
     );
+
+    await persistAudit(LineItemPriceWebhookEvent, executionId, audit);
   },
 
-  async markAsError(LineItemPriceWebhookEvent, executionId, error) {
+  async markAsError(LineItemPriceWebhookEvent, executionId, error, audit = null) {
     if (!LineItemPriceWebhookEvent || !executionId || !error) {
       return;
     }
@@ -657,6 +748,8 @@ const lineItemPriceWebhookService = {
         },
       }
     );
+
+    await persistAudit(LineItemPriceWebhookEvent, executionId, audit);
   },
 };
 

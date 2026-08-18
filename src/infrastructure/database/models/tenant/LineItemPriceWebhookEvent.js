@@ -21,6 +21,13 @@ export const lineItemPriceWebhookEventSchema = new Schema(
       type: String,
       default: null,
     },
+    // El audit se escribe SIEMPRE en un $set aparte del de isSend/errorMessage: el Mongo de
+    // producción es < 5.0 y rechaza el $set completo por una sola clave con `$` al inicio
+    // (los params de OData traen `$select`), y con él se perdería el errorMessage.
+    audit: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
   },
   {
     timestamps: true,

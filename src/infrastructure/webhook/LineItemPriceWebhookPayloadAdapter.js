@@ -26,12 +26,17 @@ export class LineItemPriceWebhookPayloadAdapter {
     return strategy.preparePayload(payload, { ...context, strategyConfig });
   }
 
-  markAsSent(LineItemPriceWebhookEvent, executionId) {
-    return lineItemPriceWebhookService.markAsSent(LineItemPriceWebhookEvent, executionId);
+  markAsSent(LineItemPriceWebhookEvent, executionId, audit = null) {
+    return lineItemPriceWebhookService.markAsSent(LineItemPriceWebhookEvent, executionId, audit);
   }
 
-  markAsError(LineItemPriceWebhookEvent, executionId, error) {
-    return lineItemPriceWebhookService.markAsError(LineItemPriceWebhookEvent, executionId, error);
+  markAsError(LineItemPriceWebhookEvent, executionId, error, audit = null) {
+    return lineItemPriceWebhookService.markAsError(
+      LineItemPriceWebhookEvent,
+      executionId,
+      error,
+      audit
+    );
   }
 }
 

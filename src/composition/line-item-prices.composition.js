@@ -2,6 +2,7 @@ import SyncLineItemPrices from '#application/use-cases/SyncLineItemPrices.js';
 import HubspotLineItemPriceClient from '#infrastructure/external-services/HubspotLineItemPriceClient.js';
 import SapLineItemPriceClient from '#infrastructure/external-services/SapLineItemPriceClient.js';
 import SapDiscountClient from '#infrastructure/external-services/SapDiscountClient.js';
+import { createSapCallRecorder } from '#infrastructure/sap/sapCallRecorder.js';
 import TenantLineItemPriceConfigRepository from '#infrastructure/repositories/TenantLineItemPriceConfigRepository.js';
 import logger from '#infrastructure/logger/logger.js';
 import syncLogAdapter from '#infrastructure/sync/SyncLogAdapter.js';
@@ -9,6 +10,7 @@ import requestTenantModelsAdapter from '#infrastructure/tenants/RequestTenantMod
 import lineItemPriceWebhookPayloadAdapter from '#infrastructure/webhook/LineItemPriceWebhookPayloadAdapter.js';
 import {
   buildErrorResponseSnapshot,
+  buildLineItemPriceAudit,
   buildWebhookSyncErrorEntry,
 } from '#infrastructure/sync/syncLog.service.js';
 
@@ -22,12 +24,14 @@ export function buildSyncLineItemPrices({
     sapPriceClient: new SapLineItemPriceClient(),
     hubspotPriceClient: new HubspotLineItemPriceClient(),
     sapDiscountClient: new SapDiscountClient(),
+    createSapCallRecorder,
     buildErrorResponseSnapshot: syncLogGateway
       ? (error) => syncLogGateway.buildErrorResponseSnapshot(error)
       : buildErrorResponse,
     buildWebhookSyncErrorEntry: syncLogGateway
       ? (entry) => syncLogGateway.buildWebhookSyncErrorEntry(entry)
       : buildWebhookErrorEntry,
+    buildLineItemPriceAudit,
     logger,
   });
 }

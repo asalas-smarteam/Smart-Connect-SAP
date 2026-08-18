@@ -3,6 +3,10 @@ import hubspotAuthService from '../hubspot/hubspotAuthService.js';
 import * as hubspotClient from '../hubspot/hubspotClient.js';
 import { runWithRetry } from '#shared/utils/retry.js';
 import { buildExclusiveDiscountProperties } from '#domain/products/discount-properties.service.js';
+import {
+  readDealLineItemIds,
+  readLineItems,
+} from '#infrastructure/webhook/lineItemPriceWebhook.shared.js';
 
 function toNonEmptyString(value) {
   const normalized = String(value ?? '').trim();
@@ -146,6 +150,16 @@ export class HubspotLineItemPriceClient {
     );
   }
 
+  // Delega en la única implementación del lector tolerante. Existe como método del puerto
+  // para que SyncLineItemPrices la alcance sin que application importe infrastructure.
+  async readLineItems({ token, lineItemIds, extraProperties = [] }) {
+    return readLineItems({ token, lineItemIds, extraProperties });
+  }
+
+  async readDealLineItemIds({ token, dealId }) {
+    return readDealLineItemIds({ token, dealId });
+  }
+
   async updateLineItems({ token, enrichedLineItems, tenantKey }) {
     const batchPayload = buildHubspotBatchPayload(enrichedLineItems);
 
@@ -188,7 +202,11 @@ export class HubspotLineItemPriceClient {
     };
   }
 
-  async updateProducts({ token, enrichedLineItems, tenantKey }) {
+  // callRecorder: the audit recorder created (per webhook call) by SyncLineItemPrices. It is
+  // an application-layer concept, so this client cannot import its noop default -- the
+  // transparent inline default below keeps this method usable standalone (e.g. the
+  // dealPriceList route, tests) without depending on `application`.
+  async updateProducts({ token, enrichedLineItems, tenantKey, callRecorder = { record: (_options, run) => run() } }) {
     const uniqueItemCodes = enrichedLineItems
       .map((lineItem) => lineItem.itemCode)
       .filter(Boolean)
@@ -197,12 +215,17 @@ export class HubspotLineItemPriceClient {
 
     for (const itemCode of uniqueItemCodes) {
       // Sequential search avoids burst rate-limit against HubSpot search API.
+      // Recorded on its own entry (real endpoint: POST /crm/v3/objects/products/search) so a
+      // search failure isn't misattributed to the batch/update call that wraps this method.
       // eslint-disable-next-line no-await-in-loop
-      const product = await findHubspotProductBySku({
-        token,
-        sku: itemCode,
-        tenantKey,
-      });
+      const product = await callRecorder.record(
+        { target: 'hubspot', method: 'POST', path: '/crm/v3/objects/products/search' },
+        () => findHubspotProductBySku({
+          token,
+          sku: itemCode,
+          tenantKey,
+        })
+      );
 
       const productId = toNonEmptyString(product?.id);
       if (productId) {

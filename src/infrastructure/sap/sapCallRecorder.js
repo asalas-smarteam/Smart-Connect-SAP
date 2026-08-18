@@ -36,6 +36,10 @@ export function createSapCallRecorder({ maxCalls = DEFAULT_MAX_CALLS, now = () =
   async function record(options, run) {
     const startedAt = now();
     const base = {
+      // `target` distingue SAP de HubSpot cuando un mismo grabador audita las dos patas
+      // (el webhook de precios). Las entradas de los flujos que sólo hablan con SAP quedan
+      // con `target: null`, y serializeSapCalls no la copia, así que sapAudit no cambia.
+      target: options?.target ?? null,
       method: String(options?.method || 'get').toUpperCase(),
       path: options?.path ?? null,
       params: options?.params ?? null,

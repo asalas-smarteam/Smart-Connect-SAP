@@ -39,6 +39,14 @@ export class HubspotLineItemPriceClientPort {
     throw new Error('Not implemented');
   }
 
+  async readLineItems() {
+    throw new Error('Not implemented');
+  }
+
+  async readDealLineItemIds() {
+    throw new Error('Not implemented');
+  }
+
   async updateLineItems() {
     throw new Error('Not implemented');
   }
