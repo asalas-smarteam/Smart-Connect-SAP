@@ -341,7 +341,7 @@ export class SyncLineItemPrices {
       );
       const hubspotProductUpdate = await callRecorder.record(
         { target: 'hubspot', method: 'POST', path: '/crm/v3/objects/products/batch/update' },
-        () => this.hubspotPriceClient.updateProducts({ token, enrichedLineItems, tenantKey })
+        () => this.hubspotPriceClient.updateProducts({ token, enrichedLineItems, tenantKey, callRecorder })
       );
 
       auditTrail.response_hubspot = {
