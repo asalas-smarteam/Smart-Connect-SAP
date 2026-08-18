@@ -45,6 +45,11 @@ function buildTenantModels() {
       }),
       create: jest.fn().mockResolvedValue({ _id: 'event-1' }),
       updateOne: jest.fn().mockResolvedValue({ acknowledged: true }),
+      // Reclamación atómica del intento fallido. Por defecto no hay nada que reclamar, así que
+      // el flujo sigue derecho al create como antes de que existiera este método.
+      findOneAndUpdate: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue(null),
+      }),
     },
     Configuration: {
       findOne: jest.fn().mockReturnValue({
@@ -67,6 +72,62 @@ function leanResult(value) {
       lean: jest.fn().mockResolvedValue(value),
     }),
   };
+}
+
+// findOneAndUpdate proyecta con la opción `projection`, así que devuelve .lean() directo, sin
+// .select() intermedio.
+function leanDocument(value) {
+  return { lean: jest.fn().mockResolvedValue(value) };
+}
+
+// Simula el ÚNICO registro que puede existir para un payload dado: el índice único parcial cubre
+// los mismos 6 campos que el filtro de duplicados, así que nunca hay dos.
+//
+// Responde según el ESTADO del registro en vez de devolver lo que se haya encolado. Sin esto, un
+// test no puede distinguir un reenvío de un evento ya enviado (isSend: true) de uno en vuelo
+// (errorMessage: null): con returns encolados los dos casos son el mismo mock.
+function stubStoredEvent(tenantModels, stored) {
+  const isLiveDuplicate = Boolean(stored) && (stored.isSend === true || stored.errorMessage === null);
+  const isReclaimableFailure = Boolean(stored) && stored.isSend === false && stored.errorMessage !== null;
+
+  tenantModels.LineItemPriceWebhookEvent.findOne = jest.fn()
+    .mockReturnValue(leanResult(isLiveDuplicate ? { _id: stored._id } : null));
+  tenantModels.LineItemPriceWebhookEvent.findOneAndUpdate = jest.fn()
+    .mockReturnValue(leanDocument(isReclaimableFailure ? { _id: stored._id } : null));
+}
+
+function buildAssociationPayload(overrides = {}) {
+  return {
+    eventId: 2073333923,
+    subscriptionId: 6955444,
+    portalId: 50249912,
+    appId: 36665006,
+    occurredAt: 1786997905997,
+    associationType: 'DEAL_TO_LINE_ITEM',
+    changeSource: 'USER',
+    fromObjectId: 64058987777,
+    ...overrides,
+  };
+}
+
+// Deal 64058987777: una company con idsap y una sola línea legible.
+function mockPriceableDeal() {
+  mockGetAccessToken.mockResolvedValue('hubspot-token');
+  mockHubspotGet.mockImplementation(async (_token, path) => {
+    if (path === '/crm/v3/objects/deals/64058987777') {
+      return {
+        id: '64058987777',
+        associations: {
+          companies: { results: [{ id: 'company-1' }] },
+          'line items': { results: [{ id: 'line-1' }] },
+        },
+      };
+    }
+    if (path === '/crm/v3/objects/companies/company-1') {
+      return { id: 'company-1', properties: { idsap: 'C20000' } };
+    }
+    return { id: 'line-1', properties: { hs_sku: 'A0001', quantity: '1' } };
+  });
 }
 
 function buildPropertyChangePayload(overrides = {}) {
@@ -216,79 +277,157 @@ describe('lineItemPriceWebhook.service', () => {
 
   it('processes a HubSpot retry after a failed attempt instead of skipping it as duplicate', async () => {
     const tenantModels = buildTenantModels();
-    const previous = { _id: 'event-previous' };
 
-    // Primer findOne: guard de duplicados con $or -> no hay duplicado "vivo".
-    // Segundo findOne: registro fallido previo con el mismo filtro -> se reutiliza.
-    tenantModels.LineItemPriceWebhookEvent.findOne = jest.fn()
-      .mockReturnValueOnce(leanResult(null))
-      .mockReturnValueOnce(leanResult(previous));
-
-    mockGetAccessToken.mockResolvedValue('hubspot-token');
-    mockHubspotGet.mockImplementation(async (_token, path) => {
-      if (path === '/crm/v3/objects/deals/64058987777') {
-        return {
-          id: '64058987777',
-          associations: {
-            companies: { results: [{ id: 'company-1' }] },
-            'line items': { results: [{ id: 'line-1' }] },
-          },
-        };
-      }
-      if (path === '/crm/v3/objects/companies/company-1') {
-        return { id: 'company-1', properties: { idsap: 'C20000' } };
-      }
-      return { id: 'line-1', properties: { hs_sku: 'A0001', quantity: '1' } };
+    // Registro del intento fallido: isSend false Y errorMessage no nulo.
+    stubStoredEvent(tenantModels, {
+      _id: 'event-previous',
+      isSend: false,
+      errorMessage: 'HubSpot 404',
     });
+    mockPriceableDeal();
 
     const result = await lineItemPriceWebhookService.preparePayload(
-      {
-        eventId: 2073333923,
-        subscriptionId: 6955444,
-        portalId: 50249912,
-        appId: 36665006,
-        occurredAt: 1786997905997,
-        associationType: 'DEAL_TO_LINE_ITEM',
-        changeSource: 'USER',
-        fromObjectId: 64058987777,
-      },
+      buildAssociationPayload(),
       { tenantModels, tenant: { client: { hubspot: { portalId: '50249912' } } } }
     );
 
     expect(result.skip).toBe(false);
     expect(result.executionId).toBe('event-previous');
     expect(tenantModels.LineItemPriceWebhookEvent.create).not.toHaveBeenCalled();
-    expect(tenantModels.LineItemPriceWebhookEvent.updateOne).toHaveBeenCalledWith(
-      { _id: 'event-previous' },
-      { $set: { isSend: false, errorMessage: null } }
+    // La reclamación es un solo findOneAndUpdate: leer y resetear por separado dejaba que dos
+    // reintentos simultáneos se quedaran los dos con el mismo registro.
+    expect(tenantModels.LineItemPriceWebhookEvent.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ isSend: false, errorMessage: { $ne: null } }),
+      { $set: { errorMessage: null } },
+      { new: true, projection: { _id: 1 } }
     );
   });
 
   it('still skips a resend of an already successful event', async () => {
     const tenantModels = buildTenantModels();
-    tenantModels.LineItemPriceWebhookEvent.findOne = jest.fn()
-      .mockReturnValueOnce(leanResult({ _id: 'event-done' }));
+    stubStoredEvent(tenantModels, { _id: 'event-done', isSend: true, errorMessage: null });
 
     const result = await lineItemPriceWebhookService.preparePayload(
-      {
-        eventId: 2073333923,
-        subscriptionId: 6955444,
-        portalId: 50249912,
-        appId: 36665006,
-        occurredAt: 1786997905997,
-        associationType: 'DEAL_TO_LINE_ITEM',
-        changeSource: 'USER',
-        fromObjectId: 64058987777,
-      },
+      buildAssociationPayload(),
       { tenantModels, tenant: { client: { hubspot: { portalId: '50249912' } } } }
     );
 
-    expect(result).toMatchObject({ skip: true, meta: { reason: 'duplicate_event' } });
+    expect(result).toMatchObject({
+      skip: true,
+      executionId: 'event-done',
+      meta: { reason: 'duplicate_event' },
+    });
+    expect(tenantModels.LineItemPriceWebhookEvent.create).not.toHaveBeenCalled();
     // Sólo un registro ya enviado o en vuelo cuenta como duplicado: el $or es lo que
     // distingue eso de un fallo nuestro reintentable.
     expect(tenantModels.LineItemPriceWebhookEvent.findOne).toHaveBeenCalledWith(
       expect.objectContaining({ $or: [{ isSend: true }, { errorMessage: null }] })
     );
+  });
+
+  it('still skips a resend of an event that is currently in flight', async () => {
+    const tenantModels = buildTenantModels();
+    // isSend false pero errorMessage null: nadie registró un fallo todavía, así que sigue
+    // corriendo. Reprocesarlo valorizaría el deal dos veces en paralelo.
+    stubStoredEvent(tenantModels, { _id: 'event-in-flight', isSend: false, errorMessage: null });
+
+    const result = await lineItemPriceWebhookService.preparePayload(
+      buildAssociationPayload(),
+      { tenantModels, tenant: { client: { hubspot: { portalId: '50249912' } } } }
+    );
+
+    expect(result).toMatchObject({
+      skip: true,
+      executionId: 'event-in-flight',
+      meta: { reason: 'duplicate_event' },
+    });
+    expect(tenantModels.LineItemPriceWebhookEvent.create).not.toHaveBeenCalled();
+    expect(tenantModels.LineItemPriceWebhookEvent.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(mockHubspotGet).not.toHaveBeenCalled();
+  });
+
+  it('skips instead of adopting a concurrent in-flight record when the create hits the unique index', async () => {
+    const tenantModels = buildTenantModels();
+
+    // Dos entregas casi simultáneas del mismo evento, A y B. Esta es B: cuando pasó el guard no
+    // había registro, y A insertó el suyo antes de que B llegara al create.
+    tenantModels.LineItemPriceWebhookEvent.findOne = jest.fn()
+      // Guard: todavía no existía nada.
+      .mockReturnValueOnce(leanResult(null))
+      // Cualquier findOne posterior con el filtro pelado SÍ ve el registro en vuelo de A. Si el
+      // fallback del E11000 volviera a usar ese filtro, adoptaría este registro y valorizaría el
+      // deal por segunda vez.
+      .mockReturnValue(leanResult({ _id: 'event-a' }));
+    // El registro de A está en vuelo (errorMessage null), así que no es reclamable.
+    tenantModels.LineItemPriceWebhookEvent.findOneAndUpdate = jest.fn()
+      .mockReturnValue(leanDocument(null));
+    tenantModels.LineItemPriceWebhookEvent.create = jest.fn()
+      .mockRejectedValue(Object.assign(new Error('E11000 duplicate key error'), { code: 11000 }));
+
+    mockPriceableDeal();
+
+    const result = await lineItemPriceWebhookService.preparePayload(
+      buildAssociationPayload(),
+      { tenantModels, tenant: { client: { hubspot: { portalId: '50249912' } } } }
+    );
+
+    expect(result).toMatchObject({
+      skip: true,
+      payload: null,
+      executionId: null,
+      meta: { skipped: true, reason: 'duplicate_event' },
+    });
+    expect(tenantModels.LineItemPriceWebhookEvent.create).toHaveBeenCalled();
+    // Lo que importa: la entrega perdedora no llegó a valorizar nada ni a escribir el resultado
+    // sobre el registro de A.
+    expect(mockHubspotGet).not.toHaveBeenCalled();
+    expect(tenantModels.LineItemPriceWebhookEvent.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('records the error and the audit against the reused record when the retry fails again', async () => {
+    const tenantModels = buildTenantModels();
+
+    stubStoredEvent(tenantModels, {
+      _id: 'event-previous',
+      isSend: false,
+      errorMessage: 'HubSpot 404',
+    });
+
+    mockGetAccessToken.mockResolvedValue('hubspot-token');
+    mockHubspotGet.mockRejectedValue(Object.assign(
+      new Error('HubSpot API request failed: 502 Bad Gateway'),
+      { details: { status: 502, endpoint: '/crm/v3/objects/deals/64058987777' } }
+    ));
+
+    await expect(lineItemPriceWebhookService.preparePayload(
+      buildAssociationPayload(),
+      { tenantModels, tenant: { client: { hubspot: { portalId: '50249912' } } } }
+    )).rejects.toThrow('HubSpot API request failed: 502 Bad Gateway');
+
+    // El audit de Task 8 tiene que caer sobre el registro REUTILIZADO, no sobre uno nuevo.
+    expect(tenantModels.LineItemPriceWebhookEvent.updateOne).toHaveBeenCalledWith(
+      { _id: 'event-previous' },
+      { $set: { isSend: false, errorMessage: 'HubSpot API request failed: 502 Bad Gateway' } }
+    );
+    const auditCall = tenantModels.LineItemPriceWebhookEvent.updateOne.mock.calls
+      .find(([, update]) => update?.$set?.audit);
+    expect(auditCall[0]).toEqual({ _id: 'event-previous' });
+    expect(auditCall[1].$set.audit.fatalError).toMatchObject({
+      message: 'HubSpot API request failed: 502 Bad Gateway',
+      status: 502,
+      endpoint: '/crm/v3/objects/deals/64058987777',
+    });
+  });
+
+  it('rethrows a create error that is not a unique index violation', async () => {
+    const tenantModels = buildTenantModels();
+    tenantModels.LineItemPriceWebhookEvent.create = jest.fn()
+      .mockRejectedValue(new Error('connection lost'));
+
+    await expect(lineItemPriceWebhookService.preparePayload(
+      buildAssociationPayload(),
+      { tenantModels, tenant: { client: { hubspot: { portalId: '50249912' } } } }
+    )).rejects.toThrow('connection lost');
   });
 
   it('builds the legacy payload with two of three lines when one line 404s', async () => {

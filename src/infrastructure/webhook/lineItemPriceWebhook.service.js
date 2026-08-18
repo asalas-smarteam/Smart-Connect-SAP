@@ -484,6 +484,31 @@ async function buildLegacyPayload(payload, token, miscPriceCalculationConfig = n
   };
 }
 
+// Reclama, de forma atómica, el registro de un intento fallido NUESTRO para reprocesarlo.
+//
+// El filtro es la negación exacta del guard de duplicados: sólo `isSend: false` + `errorMessage`
+// no nulo es un fallo propio reintentable. `isSend: true` es un evento ya procesado y
+// `errorMessage: null` es uno en vuelo, y ninguno de los dos se toca.
+//
+// Va en un solo findOneAndUpdate y no en un findOne + updateOne porque dos entregas simultáneas
+// del mismo evento pasan las dos el guard: leyendo y escribiendo por separado, las dos leerían el
+// mismo registro fallido y las dos lo procesarían. Acá el `$set` es parte de la reclamación, así
+// que sólo una gana; la otra recibe null, cae al create y choca con el índice único.
+//
+// El `$set` sólo limpia `errorMessage` (a null = en vuelo, que es lo que hace que el guard
+// descarte al perdedor). `isSend` no se toca porque el propio filtro ya exige que sea false.
+async function claimFailedAttempt(LineItemPriceWebhookEvent, duplicateFilter) {
+  return LineItemPriceWebhookEvent.findOneAndUpdate(
+    {
+      ...duplicateFilter,
+      isSend: false,
+      errorMessage: { $ne: null },
+    },
+    { $set: { errorMessage: null } },
+    { new: true, projection: { _id: 1 } }
+  ).lean();
+}
+
 // Escritura aparte, y con su propio try/catch: si Mongo rechaza el audit, el resultado del
 // evento (isSend / errorMessage) ya quedó guardado por el updateOne anterior.
 async function persistAudit(LineItemPriceWebhookEvent, executionId, audit) {
@@ -593,17 +618,10 @@ const lineItemPriceWebhookService = {
     }
 
     // El índice único cubre los 6 campos del filtro, así que un reintento NO puede crear un
-    // registro nuevo: hay que reutilizar el que quedó del intento fallido.
-    let createdEvent = await LineItemPriceWebhookEvent.findOne(duplicateFilter)
-      .select({ _id: 1 })
-      .lean();
+    // registro nuevo: hay que reclamar el que quedó del intento fallido.
+    let createdEvent = await claimFailedAttempt(LineItemPriceWebhookEvent, duplicateFilter);
 
-    if (createdEvent) {
-      await LineItemPriceWebhookEvent.updateOne(
-        { _id: createdEvent._id },
-        { $set: { isSend: false, errorMessage: null } }
-      );
-    } else {
+    if (!createdEvent) {
       try {
         createdEvent = await LineItemPriceWebhookEvent.create({
           payload,
@@ -612,10 +630,10 @@ const lineItemPriceWebhookService = {
         });
       } catch (error) {
         if (error?.code === 11000) {
-          // Carrera con otro proceso que insertó el mismo evento: se reutiliza el suyo.
-          createdEvent = await LineItemPriceWebhookEvent.findOne(duplicateFilter)
-            .select({ _id: 1 })
-            .lean();
+          // Otro proceso insertó el mismo evento entre nuestro guard y este create. Se intenta
+          // reclamar SU registro, pero sólo si es un fallo reprocesable: con el filtro pelado se
+          // adoptaba también un registro en vuelo o ya enviado y el deal se valorizaba dos veces.
+          createdEvent = await claimFailedAttempt(LineItemPriceWebhookEvent, duplicateFilter);
 
           if (!createdEvent) {
             return {
