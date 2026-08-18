@@ -1,5 +1,10 @@
 import mappingService from './mapping.service.js';
 import tenantConfigurationService from '#infrastructure/config/tenantConfiguration.service.js';
+import {
+  DEFAULT_SAP_ERROR_BYPASS_CONFIG,
+  SAP_ERROR_BYPASS_CONFIG_KEY,
+  normalizeSapErrorBypassConfig,
+} from '#infrastructure/config/sapErrorBypass.config.js';
 import { getUpsertDataSapConfig } from '#infrastructure/config/upsertDataSap.config.js';
 import { resolvePriceListFromConfigValue } from '#domain/prices/price-list-config.service.js';
 import { PermanentWebhookError } from '#shared/errors/index.js';
@@ -164,6 +169,19 @@ export class TenantWebhookRuntimeRepository {
       : await query;
 
     return configuration?.value ?? null;
+  }
+
+  // Qué errores de SAP se indultan en vez de tumbar el documento. Por default
+  // NINGUNO: un ContactEmployee rechazado bloquea el negocio para que la data se
+  // corrija en HubSpot y se reenvíe. El bypass es un acto explícito por tenant.
+  async resolveSapErrorBypassConfig(tenantModels) {
+    const value = await tenantConfigurationService.getValue(
+      tenantModels,
+      SAP_ERROR_BYPASS_CONFIG_KEY,
+      { ...DEFAULT_SAP_ERROR_BYPASS_CONFIG }
+    );
+
+    return normalizeSapErrorBypassConfig(value);
   }
 
   async resolveGroupCodeDefaults(tenantModels) {

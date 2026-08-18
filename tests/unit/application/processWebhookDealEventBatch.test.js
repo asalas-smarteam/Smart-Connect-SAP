@@ -436,4 +436,98 @@ describe('ProcessWebhookDealEventBatch', () => {
       expect.objectContaining({ sapAudit })
     );
   });
+
+  // Un documento creado con ContactEmployees rechazados por SAP es un exito PARCIAL: el
+  // evento queda `completed` (la orden existe, reprocesarlo la duplicaria) pero el usuario
+  // de HubSpot tiene que enterarse. Antes no se enteraba por ningun canal.
+  describe('fallos parciales de ContactEmployee', () => {
+    const FAILURES = [
+      {
+        email: 'linda.colop@fundap.com.gt',
+        name: 'LINDA MARIBEL COLOP',
+        message: "Value too long in property 'Title' of 'ContactEmployee'",
+      },
+    ];
+
+    function buildUseCase({ result, markCompleted = jest.fn() }) {
+      const event = { _id: 'event-1', payload: { deal: { hs_object_id: 'deal-1' } } };
+      const repository = {
+        claimWaiting: jest.fn().mockResolvedValue([event]),
+        markCompleted,
+        markFailed: jest.fn(),
+      };
+      const notifyWebhookFailure = jest.fn();
+      const useCase = new ProcessWebhookDealEventBatch({
+        webhookEventRepository: repository,
+        processWebhookDealEvent: jest.fn().mockResolvedValue(result),
+        logger: { info: jest.fn(), error: jest.fn(), warn: jest.fn() },
+        maxRetries: 3,
+        buildWebhookSyncErrorEntry: jest.fn(),
+        buildErrorResponseSnapshot: jest.fn(),
+        notifyWebhookFailure,
+      });
+      return { useCase, repository, notifyWebhookFailure, event };
+    }
+
+    it('deja nota en el deal sin devolver la etapa, y el evento sigue completed', async () => {
+      const { useCase, repository, notifyWebhookFailure, event } = buildUseCase({
+        result: { docEntry: 126905, docNum: 1074112, contactEmployeeFailures: FAILURES },
+      });
+
+      const summary = await useCase.execute({
+        tenantModels: { WebhookEvent: {} },
+        portalId: 'portal-id',
+      });
+
+      expect(summary.completed).toBe(1);
+      expect(summary.errored).toBe(0);
+      expect(repository.markFailed).not.toHaveBeenCalled();
+
+      expect(notifyWebhookFailure).toHaveBeenCalledTimes(1);
+      const [args] = notifyWebhookFailure.mock.calls[0];
+      expect(args.event).toBe(event);
+      expect(args.portalId).toBe('portal-id');
+      // El documento YA existe en SAP: devolver el deal a una etapa anterior seria mentir
+      // sobre su estado, asi que este aviso nunca mueve la etapa.
+      expect(args.revertStage).toBe(false);
+      expect(args.lastError).toContain('1074112');
+      expect(args.lastError).toContain('linda.colop@fundap.com.gt');
+      expect(args.lastError).toContain("Value too long in property 'Title'");
+    });
+
+    it('no avisa cuando no hubo fallos parciales', async () => {
+      const { useCase, notifyWebhookFailure } = buildUseCase({
+        result: { docEntry: 1, docNum: 2, contactEmployeeFailures: [] },
+      });
+
+      await useCase.execute({ tenantModels: { WebhookEvent: {} } });
+
+      expect(notifyWebhookFailure).not.toHaveBeenCalled();
+    });
+
+    it('no avisa cuando el resultado no trae contactEmployeeFailures', async () => {
+      const { useCase, notifyWebhookFailure } = buildUseCase({
+        result: { docEntry: 1, docNum: 2 },
+      });
+
+      await useCase.execute({ tenantModels: { WebhookEvent: {} } });
+
+      expect(notifyWebhookFailure).not.toHaveBeenCalled();
+    });
+
+    // Si markCompleted falla el evento se marca `sap_created_hubspot_error` y ese camino
+    // tiene su propio manejo; avisar del fallo parcial ademas seria ruido sobre un evento
+    // que ya quedo marcado con error.
+    it('no avisa del fallo parcial cuando el markCompleted falla', async () => {
+      const { useCase, notifyWebhookFailure } = buildUseCase({
+        result: { docEntry: 1, docNum: 2, contactEmployeeFailures: FAILURES },
+        markCompleted: jest.fn().mockRejectedValue(new Error('Mongo down')),
+      });
+
+      const summary = await useCase.execute({ tenantModels: { WebhookEvent: {} } });
+
+      expect(summary.errored).toBe(1);
+      expect(notifyWebhookFailure).not.toHaveBeenCalled();
+    });
+  });
 });

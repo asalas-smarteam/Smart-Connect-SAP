@@ -30,25 +30,43 @@ export function mapHubspotToSapFields(source, mappings) {
 // are excluded from the generic deal-mapping spread so mapped raw values cannot clobber them.
 const RESERVED_HEADER_FIELDS = new Set(['CardCode', 'DocDueDate', 'DocumentLines', 'PaymentGroupCode']);
 
+// BoDocSpecialLineType member for a free-text special line (the alternative is dslt_Subtotal).
+const SPECIAL_LINE_TYPE_TEXT = 'dslt_Text';
+
 // SAP expects DocumentSpecialLines as a collection of line objects, but a FieldMapping can only
 // copy a scalar HubSpot property: `texto_gobierno` arrives as plain text. Service Layer does not
-// reject the malformed value — it drops the collection and stores [], so the text is lost with
-// no error anywhere. The string is reshaped here into the collection SAP actually expects.
+// reject a malformed entry — it drops the whole collection and stores [], so the text is lost
+// with no error anywhere. The string is reshaped here into the collection SAP actually expects.
+//
+// Both LineType and AfterLineNumber are required: a special line is positioned relative to the
+// document lines, so without an anchor SAP has nowhere to put it and discards it in silence.
+// This was verified against the DocumentSpecialLine ComplexType in the Service Layer $metadata
+// after a first attempt sending only LineNum + LineText came back as [] on a GET by key.
 //
 // The whole text becomes a single line on purpose. Its newlines mix soft wraps ("Capacidad de \n
 // hojas en bandeja") with real separators ("O.C: 111931\nCódigo Artículo: 36351"), so splitting
 // on them would cut sentences in half.
-export function normalizeDocumentSpecialLines(value) {
+export function normalizeDocumentSpecialLines(value, { afterLineNumber = 0 } = {}) {
   if (Array.isArray(value)) {
     return value.length ? value : null;
   }
 
   const lineText = toNonEmptyString(value);
 
-  return lineText ? [{ LineNum: 0, LineText: lineText }] : null;
+  if (!lineText) {
+    return null;
+  }
+
+  return [
+    {
+      LineType: SPECIAL_LINE_TYPE_TEXT,
+      AfterLineNumber: afterLineNumber,
+      LineText: lineText,
+    },
+  ];
 }
 
-function pickMappedHeaderFields(mappedDealFields) {
+function pickMappedHeaderFields(mappedDealFields, { documentLineCount = 0 } = {}) {
   const fields = {};
 
   for (const [field, value] of Object.entries(mappedDealFields || {})) {
@@ -57,7 +75,10 @@ function pickMappedHeaderFields(mappedDealFields) {
     }
 
     if (field === 'DocumentSpecialLines') {
-      const specialLines = normalizeDocumentSpecialLines(value);
+      // Anchor the text after the last document line: SAP numbers lines from 0.
+      const specialLines = normalizeDocumentSpecialLines(value, {
+        afterLineNumber: Math.max(documentLineCount - 1, 0),
+      });
       if (specialLines) {
         fields[field] = specialLines;
       }
@@ -348,7 +369,7 @@ export function buildOrderPayload({
   }
 
   const payload = {
-    ...pickMappedHeaderFields(mappedDealFields),
+    ...pickMappedHeaderFields(mappedDealFields, { documentLineCount: documentLines.length }),
     CardCode: cardCode,
     DocDueDate: resolveDocDueDate({ mappedDeal: mappedDealFields }),
     DocumentLines: documentLines,
@@ -395,7 +416,7 @@ export function buildQuotationPayload({
   }
 
   const payload = {
-    ...pickMappedHeaderFields(mappedDealFields),
+    ...pickMappedHeaderFields(mappedDealFields, { documentLineCount: documentLines.length }),
     CardCode: cardCode,
     DocDueDate: resolveDocDueDate({ mappedDeal: mappedDealFields }),
     DocumentLines: documentLines,

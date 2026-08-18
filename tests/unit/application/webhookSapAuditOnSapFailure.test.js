@@ -86,6 +86,7 @@ function buildDeps({ sapOrderAdapter }) {
         trueValue: 'tYES',
       }),
       findOwnerMappingByHubspotOwner: jest.fn().mockResolvedValue(null),
+      resolveSapErrorBypassConfig: jest.fn().mockResolvedValue({ contactEmployee: false }),
     },
     sapOrderAdapter,
     hubspotWebhookAdapter: {

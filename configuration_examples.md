@@ -3,6 +3,12 @@ Detalle:
 Cuando un cliente quiere que sus errores se muestren en hubspot y si requiere que se retorne a otra etapa 
 { key: 'requireMessageHS', value: { requireMessageHS: false, requiereReturnStage: false, stageToReturned: null } }
 
+Detalle: bypassSapErrors
+Qué errores de SAP se indultan en vez de tumbar el documento. Por default NINGUNO: si SAP rechaza un ContactEmployee (p.ej. `Value too long in property 'Title'` porque el jobtitle de HubSpot pasa el largo de `OCPR.Title`), el webhook falla como permanente ANTES de crear la orden/oferta/traslado, el evento queda en `errored` y el negocio no se sincroniza — para que la data se corrija en HubSpot y se reenvíe. Los ContactEmployees que sí entraron quedan en SAP (el Service Layer no tiene rollback entre llamadas), pero el reenvío los reencuentra por email/nombre/InternalCode en vez de duplicarlos.
+Con `contactEmployee: true` se vuelve a la conducta anterior: el documento se crea igual, el evento queda `completed`, y el fallo solo se registra (log, `sapAudit.responseSap.contactEmployeeErrors` y — si `requireMessageHS` está activo — una nota en el deal, sin revertir la etapa).
+La forma es namespaced a propósito: agregar otra área indultable en el futuro es sumar una llave más a este mismo value.
+{ key: 'bypassSapErrors', value: { contactEmployee: false } }
+
 Detalle:
 Cuando un cliente quiere que, al procesar un webhook de deal (order/quotation/inventoryTransfer) y el BusinessPartner/ContactEmployee ya exista en SAP, se actualice con la data actual de HubSpot en vez de solo tomar el CardCode. fieldsUpdated_BP/fieldsUpdated_CE son nombres de campo SAP (no de HubSpot); cada uno puede ir null/[] para dejar esa entidad sin actualizar. Solo se envía el PATCH si algún campo difiere entre HubSpot y SAP.
 { key: 'upsertDataSAP', value: { required: true, fieldsUpdated_BP: ['EmailAddress', 'CardName'], fieldsUpdated_CE: ['Name', 'E_Mail'] } }

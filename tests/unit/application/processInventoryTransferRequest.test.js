@@ -73,6 +73,8 @@ function buildRuntimeRepository(context = buildContext()) {
       trueValue: 'tYES',
     }),
     findOwnerMappingByHubspotOwner: jest.fn().mockResolvedValue(null),
+    // Espeja el default de produccion: sin bypass, un ContactEmployee rechazado bloquea.
+    resolveSapErrorBypassConfig: jest.fn().mockResolvedValue({ contactEmployee: false }),
   };
 }
 
@@ -128,9 +130,161 @@ describe('ProcessHubspotInventoryTransferRequest', () => {
         create: jest.fn().mockResolvedValue({}),
       },
       ...noopSyncError,
-      logger: { info: jest.fn(), warn: jest.fn() },
+      logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
     };
   }
+
+  // El PATCH de ContactEmployees se traga el error a proposito para no tumbar el
+  // documento, pero antes no lo logueaba, no lo auditaba y no lo devolvia: el evento
+  // quedaba `completed` limpio con contactos que SAP nunca aceptó.
+  describe('ContactEmployees rechazados por SAP', () => {
+    // Con company presente el contacto del deal se resuelve como ContactEmployee, que es lo
+    // que hace que el flujo llegue a addContactEmployeesIfNeeded. Sin company el contacto ES
+    // el Business Partner y no hay ContactEmployee que crear.
+    const eventWithCompanyForFailures = {
+      ...baseEvent,
+      payload: {
+        ...baseEvent.payload,
+        company: { hs_object_id: 'company-1', name: 'FUNDAP' },
+      },
+    };
+
+    function buildDepsWithRejectedContactEmployee() {
+      const deps = buildDeps();
+      const sapError = new Error('Request failed with status code 400');
+      sapError.response = {
+        data: {
+          error: {
+            message: { lang: 'en-us', value: "Value too long in property 'Title' of 'ContactEmployee'" },
+          },
+        },
+      };
+      deps.sapOrderAdapter.addContactEmployeesIfNeeded.mockResolvedValue({
+        created: false,
+        internalCodes: [],
+        results: [],
+        requestPayload: [{ Name: 'LINDA MARIBEL COLOP', Title: 'MICROCREDITOS CNTRAL' }],
+        responsePayload: [],
+        updateResults: [],
+        errors: [{
+          contact: { email: 'linda.colop@fundap.com.gt' },
+          requestPayload: { Name: 'LINDA MARIBEL COLOP', E_Mail: 'linda.colop@fundap.com.gt' },
+          error: sapError,
+        }],
+      });
+      return deps;
+    }
+
+    const EXPECTED_FAILURES = [
+      {
+        email: 'linda.colop@fundap.com.gt',
+        name: 'LINDA MARIBEL COLOP',
+        message: "Value too long in property 'Title' of 'ContactEmployee'",
+      },
+    ];
+
+    // Sin bypass (el default) el negocio NO se sincroniza: el punto es que el traslado no
+    // exista en SAP para que la data se corrija en HubSpot y se reenvie.
+    describe('sin bypass configurado', () => {
+      it('falla como permanente y NO crea el documento en SAP', async () => {
+        const deps = buildDepsWithRejectedContactEmployee();
+        const useCase = new ProcessHubspotInventoryTransferRequest(deps);
+
+        const error = await useCase
+          .execute({ event: eventWithCompanyForFailures, tenantModels })
+          .then(() => null, (rejected) => rejected);
+
+        expect(error).not.toBeNull();
+        // permanent: la data no se arregla sola, reintentar 3 veces es gastar viajes a SAP.
+        expect(error.permanent).toBe(true);
+        expect(deps.sapInventoryTransferRequestAdapter.createInventoryTransferRequest)
+          .not.toHaveBeenCalled();
+        expect(deps.sapDocumentLinkRepository.create).not.toHaveBeenCalled();
+      });
+
+      it('el mensaje del error dice que no se sincronizo y nombra al contacto', async () => {
+        const deps = buildDepsWithRejectedContactEmployee();
+        const useCase = new ProcessHubspotInventoryTransferRequest(deps);
+
+        const error = await useCase
+          .execute({ event: eventWithCompanyForFailures, tenantModels })
+          .then(() => null, (rejected) => rejected);
+
+        expect(error.message).toContain('No se sincronizó');
+        expect(error.message).toContain('HubSpot');
+        expect(error.message).toContain('linda.colop@fundap.com.gt');
+        expect(error.message).toContain("Value too long in property 'Title'");
+      });
+
+      it('el sapAudit del error conserva los ContactEmployees rechazados', async () => {
+        const deps = buildDepsWithRejectedContactEmployee();
+        const useCase = new ProcessHubspotInventoryTransferRequest(deps);
+
+        const error = await useCase
+          .execute({ event: eventWithCompanyForFailures, tenantModels })
+          .then(() => null, (rejected) => rejected);
+
+        expect(error.sapAudit.auditTrail.response_SAP.contactEmployeeErrors)
+          .toEqual(EXPECTED_FAILURES);
+        expect(deps.logger.error).toHaveBeenCalledWith(expect.objectContaining({
+          msg: 'ContactEmployee rechazado por SAP: el documento sigue adelante sin el',
+          email: 'linda.colop@fundap.com.gt',
+        }));
+      });
+    });
+
+    // Con bypass el tenant acepta el trade-off: el documento vale mas que el contacto.
+    describe('con bypass activo', () => {
+      function buildDepsWithBypass() {
+        const deps = buildDepsWithRejectedContactEmployee();
+        deps.runtimeRepository.resolveSapErrorBypassConfig
+          .mockResolvedValue({ contactEmployee: true });
+        return deps;
+      }
+
+      it('crea el documento y devuelve los fallos para que el batch avise a HubSpot', async () => {
+        const deps = buildDepsWithBypass();
+        const useCase = new ProcessHubspotInventoryTransferRequest(deps);
+
+        const result = await useCase.execute({ event: eventWithCompanyForFailures, tenantModels });
+
+        expect(result.docNum).toBe(8001);
+        expect(result.contactEmployeeFailures).toEqual(EXPECTED_FAILURES);
+      });
+
+      it('deja el fallo en el sapAudit y en el log igual que sin bypass', async () => {
+        const deps = buildDepsWithBypass();
+        const useCase = new ProcessHubspotInventoryTransferRequest(deps);
+
+        const result = await useCase.execute({ event: eventWithCompanyForFailures, tenantModels });
+
+        expect(result.sapAudit.auditTrail.response_SAP.contactEmployeeErrors)
+          .toEqual(EXPECTED_FAILURES);
+        expect(deps.logger.error).toHaveBeenCalledWith(expect.objectContaining({
+          email: 'linda.colop@fundap.com.gt',
+        }));
+      });
+    });
+
+    it('no agrega contactEmployeeFailures cuando todos los contactos entran', async () => {
+      const deps = buildDeps();
+      deps.sapOrderAdapter.addContactEmployeesIfNeeded.mockResolvedValue({
+        created: true,
+        internalCodes: [],
+        results: [],
+        requestPayload: [],
+        responsePayload: [],
+        updateResults: [],
+        errors: [],
+      });
+      const useCase = new ProcessHubspotInventoryTransferRequest(deps);
+
+      const result = await useCase.execute({ event: eventWithCompanyForFailures, tenantModels });
+
+      expect(result.contactEmployeeFailures).toEqual([]);
+      expect(result.sapAudit.auditTrail.response_SAP).not.toHaveProperty('contactEmployeeErrors');
+    });
+  });
 
   it('creates an Inventory Transfer Request, persists the link and updates the deal', async () => {
     const deps = buildDeps();

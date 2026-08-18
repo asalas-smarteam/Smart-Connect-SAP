@@ -8,7 +8,17 @@ export function buildNotifyWebhookFailure({
   resolveEventPayload,
   logger,
 }) {
-  return async function notifyWebhookFailure({ event, lastError, tenantModels, portalId }) {
+  // `revertStage: false` lo usa el aviso de fallo PARCIAL (el documento sí se creó
+  // en SAP, pero algún ContactEmployee fue rechazado): ahí la nota es válida pero
+  // devolver el deal a una etapa anterior mentiría sobre el estado del documento.
+  // Default true para no cambiar el camino de fallo definitivo, que sí debe moverla.
+  return async function notifyWebhookFailure({
+    event,
+    lastError,
+    tenantModels,
+    portalId,
+    revertStage = true,
+  }) {
     try {
       const config = await getWebhookFailureNotificationConfig({ tenantModels });
 
@@ -43,7 +53,7 @@ export function buildNotifyWebhookFailure({
       const note = await hubspotClient.createNote(resolved.token, { body: lastError });
       await hubspotClient.associateObjectsDefault(resolved.token, 'note', note.id, 'deal', dealId);
 
-      if (config.requiereReturnStage && config.stageToReturned) {
+      if (revertStage && config.requiereReturnStage && config.stageToReturned) {
         await hubspotClient.updateDeal(resolved.token, dealId, {
           properties: { dealstage: config.stageToReturned },
         });

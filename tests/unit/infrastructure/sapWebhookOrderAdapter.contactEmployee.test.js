@@ -171,6 +171,55 @@ describe('SapWebhookOrderAdapter.addContactEmployeeIfNeeded matching por Interna
     expect(result.internalCodes).toEqual([{ contact: { email: 'dos@example.com' }, internalCode: 999 }]);
   });
 
+  // Seguir con el resto no basta: el error del que falló tiene que salir del
+  // adapter para que alguien pueda loguearlo y contarlo. Antes solo quedaba
+  // enterrado en `results[i].error`, que ningún caso de uso lee.
+  it('addContactEmployeesIfNeeded devuelve los fallos en `errors`', async () => {
+    const adapter = new SapWebhookOrderAdapter();
+    const sapError = new Error("Value too long in property 'Title' of 'ContactEmployee'");
+    adapter.addContactEmployeeIfNeeded = jest.fn()
+      .mockResolvedValueOnce({
+        created: false,
+        internalCode: null,
+        requestPayload: { Name: 'Uno', Title: 'MICROCREDITOS CNTRAL' },
+        responsePayload: null,
+        error: sapError,
+      })
+      .mockResolvedValueOnce({ created: true, internalCode: 999, requestPayload: {}, responsePayload: {} });
+
+    const result = await adapter.addContactEmployeesIfNeeded({
+      sapConfig: {},
+      cardCode: 'CLO061620',
+      businessPartner: { ContactEmployees: [] },
+      contacts: [{ email: 'uno@example.com' }, { email: 'dos@example.com' }],
+      contactEmployeeMappings: mappingsWithInternalCode,
+    });
+
+    expect(result.errors).toEqual([
+      {
+        contact: { email: 'uno@example.com' },
+        requestPayload: { Name: 'Uno', Title: 'MICROCREDITOS CNTRAL' },
+        error: sapError,
+      },
+    ]);
+  });
+
+  it('addContactEmployeesIfNeeded devuelve `errors` vacio cuando todos entran', async () => {
+    const adapter = new SapWebhookOrderAdapter();
+    adapter.addContactEmployeeIfNeeded = jest.fn()
+      .mockResolvedValue({ created: true, internalCode: 999, requestPayload: {}, responsePayload: {} });
+
+    const result = await adapter.addContactEmployeesIfNeeded({
+      sapConfig: {},
+      cardCode: 'CLO061620',
+      businessPartner: { ContactEmployees: [] },
+      contacts: [{ email: 'uno@example.com' }],
+      contactEmployeeMappings: mappingsWithInternalCode,
+    });
+
+    expect(result.errors).toEqual([]);
+  });
+
   it('nunca manda InternalCode de vuelta al crear un ContactEmployee nuevo', async () => {
     const adapter = new SapWebhookOrderAdapter();
     const requestSpy = jest.spyOn(adapter, 'request').mockImplementation(async (sapConfig, { method }) => {

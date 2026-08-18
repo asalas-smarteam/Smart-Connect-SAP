@@ -391,10 +391,16 @@ export async function batchUpdate(token, dataArray) {
   );
 }
 
-// Ruta `default` de la API v4: sin cuerpo, HubSpot aplica el tipo sin etiqueta
-// del par. Verificada en vivo el 2026-08-11 para contact->contact (typeId 449,
-// HUBSPOT_DEFINED, label null), donde además crea LAS DOS direcciones en una
-// sola llamada -- nunca asocies el mismo par dos veces.
+// Ruta `default` de la API v4: HubSpot aplica el tipo sin etiqueta del par y
+// no lee el cuerpo. Verificada en vivo el 2026-08-11 para contact->contact
+// (typeId 449, HUBSPOT_DEFINED, label null), donde además crea LAS DOS
+// direcciones en una sola llamada -- nunca asocies el mismo par dos veces.
+//
+// El `{}` NO es un cuerpo de datos: es lo único que hace que axios mande
+// `Content-Type: application/json`, y sin esa cabecera HubSpot responde 415
+// Unsupported Media Type antes de mirar la ruta. Mandar la llamada sin `data`
+// (que era lo "correcto" según el contrato documentado, porque la ruta no
+// necesita cuerpo) dejó 3 notas de error huérfanas el 2026-08-17. No lo quites.
 //
 // Deliberadamente NO es la ruta `/associations/{to}/{id}` con cuerpo de tipos:
 // esa espera al menos un {associationCategory, associationTypeId} y la versión
@@ -412,6 +418,7 @@ export async function associateObjectsDefault(token, fromType, fromId, toType, t
     'put',
     `/crm/v4/objects/${fromType}/${fromId}/associations/default/${toType}/${toId}`,
     token,
+    {},
   );
 }
 

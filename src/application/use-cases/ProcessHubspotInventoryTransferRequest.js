@@ -142,6 +142,7 @@ export class ProcessHubspotInventoryTransferRequest {
       cardCode = businessPartner.cardCode;
       const {
         contactEmployeeResult,
+        contactEmployeeFailures,
         hubspotToken,
         dealContactIsContactEmployee,
       } = businessPartner;
@@ -230,6 +231,7 @@ export class ProcessHubspotInventoryTransferRequest {
         docEntry: transferResponse?.DocEntry ?? null,
         docNum: transferResponse?.DocNum ?? null,
         dealId,
+        contactEmployeeFailures,
         sapAudit: this.buildWebhookSapAudit(auditTrail),
       };
     } catch (error) {

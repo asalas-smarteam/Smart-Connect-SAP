@@ -47,14 +47,22 @@ describe('order-builder.service buildQuotationPayload', () => {
 describe('order-builder.service normalizeDocumentSpecialLines', () => {
   it('wraps the mapped texto_gobierno string into the collection SAP expects', () => {
     expect(normalizeDocumentSpecialLines('Garantía: 12 Meses')).toEqual([
-      { LineNum: 0, LineText: 'Garantía: 12 Meses' },
+      { LineType: 'dslt_Text', AfterLineNumber: 0, LineText: 'Garantía: 12 Meses' },
+    ]);
+  });
+
+  it('anchors the text after the line number it is given', () => {
+    expect(normalizeDocumentSpecialLines('texto', { afterLineNumber: 3 })).toEqual([
+      { LineType: 'dslt_Text', AfterLineNumber: 3, LineText: 'texto' },
     ]);
   });
 
   it('keeps a multiline text as a single line so wrapped sentences are not cut', () => {
     const text = 'Capacidad de \nhojas en bandeja: 550\nO.C: 111931, N.O.G: 29412315';
 
-    expect(normalizeDocumentSpecialLines(text)).toEqual([{ LineNum: 0, LineText: text }]);
+    expect(normalizeDocumentSpecialLines(text)).toEqual([
+      { LineType: 'dslt_Text', AfterLineNumber: 0, LineText: text },
+    ]);
   });
 
   it('returns null for empty, blank or missing values', () => {
@@ -66,7 +74,7 @@ describe('order-builder.service normalizeDocumentSpecialLines', () => {
   });
 
   it('passes through a collection that is already shaped', () => {
-    const lines = [{ LineNum: 0, LineText: 'ya viene armado' }];
+    const lines = [{ LineType: 'dslt_Text', AfterLineNumber: 0, LineText: 'ya viene armado' }];
 
     expect(normalizeDocumentSpecialLines(lines)).toBe(lines);
   });
@@ -83,7 +91,7 @@ describe('order-builder.service DocumentSpecialLines in header payloads', () => 
     });
 
     expect(payload.DocumentSpecialLines).toEqual([
-      { LineNum: 0, LineText: 'O.C: 111931, N.O.G: 29412315' },
+      { LineType: 'dslt_Text', AfterLineNumber: 0, LineText: 'O.C: 111931, N.O.G: 29412315' },
     ]);
   });
 
@@ -94,7 +102,22 @@ describe('order-builder.service DocumentSpecialLines in header payloads', () => 
       mappedDealFields: { DocumentSpecialLines: 'texto gobierno' },
     });
 
-    expect(payload.DocumentSpecialLines).toEqual([{ LineNum: 0, LineText: 'texto gobierno' }]);
+    expect(payload.DocumentSpecialLines).toEqual([
+      { LineType: 'dslt_Text', AfterLineNumber: 0, LineText: 'texto gobierno' },
+    ]);
+  });
+
+  it('anchors the text after the last document line so SAP has somewhere to put it', () => {
+    const payload = buildQuotationPayload({
+      cardCode: 'CL00129',
+      documentLines: [
+        { ItemCode: 'A01', Quantity: 1, UnitPrice: 10 },
+        { ItemCode: 'A02', Quantity: 1, UnitPrice: 20 },
+      ],
+      mappedDealFields: { DocumentSpecialLines: 'texto gobierno' },
+    });
+
+    expect(payload.DocumentSpecialLines[0].AfterLineNumber).toBe(1);
   });
 
   it('omits DocumentSpecialLines entirely when the deal has no texto_gobierno', () => {

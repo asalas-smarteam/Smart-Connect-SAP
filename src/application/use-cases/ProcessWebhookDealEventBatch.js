@@ -1,4 +1,5 @@
 import { resolveErrorMessageText } from '#application/services/error-message.service.js';
+import { buildContactEmployeeFailureNote } from '#application/services/contact-employee-failures.service.js';
 
 function emptySummary() {
   return {
@@ -86,9 +87,12 @@ export class ProcessWebhookDealEventBatch {
       // this point, so a bookkeeping failure here must never fall back to
       // handleProcessingError's 'waiting' path -- the cron would reprocess the
       // event and duplicate the order in SAP.
+      let markedCompleted = false;
+
       try {
         await this.webhookEventRepository.markCompleted(event, result);
         summary.completed += 1;
+        markedCompleted = true;
 
         this.logger.info({
           msg: 'Webhook event processed',
@@ -111,9 +115,58 @@ export class ProcessWebhookDealEventBatch {
           summary,
         });
       }
+
+      // Fuera del try de arriba a propósito: si el aviso reventara dentro, caería
+      // en handlePostSapBookkeepingFailure y marcaría con error un evento que ya
+      // está completado. Y solo cuando markCompleted funcionó: el otro camino ya
+      // deja el evento marcado con su propio error.
+      if (markedCompleted) {
+        await this.notifyContactEmployeeFailures({
+          event,
+          result,
+          tenantId,
+          tenantKey,
+          tenantModels,
+          portalId,
+        });
+      }
     }
 
     return summary;
+  }
+
+  // Éxito PARCIAL: el documento se creó en SAP pero SAP rechazó uno o más
+  // ContactEmployees. El evento se queda `completed` a propósito -- la orden ya
+  // existe y reprocesarla la duplicaría -- así que este es el único canal que le
+  // avisa a quien trabaja el deal en HubSpot. Durante meses no hubo ninguno: el
+  // error quedaba solo en `sapAudit.sapCalls` de Mongo.
+  async notifyContactEmployeeFailures({ event, result, tenantId, tenantKey, tenantModels, portalId }) {
+    const failures = Array.isArray(result?.contactEmployeeFailures)
+      ? result.contactEmployeeFailures
+      : [];
+
+    if (failures.length === 0) {
+      return;
+    }
+
+    this.logger.warn?.({
+      msg: 'Webhook event completed with rejected ContactEmployees',
+      tenantId: tenantId || null,
+      tenantKey: tenantKey || null,
+      eventId: String(event?._id),
+      docEntry: result?.docEntry ?? null,
+      docNum: result?.docNum ?? null,
+      rejected: failures.length,
+      emails: failures.map((failure) => failure.email),
+    });
+
+    await this.notifyWebhookFailure({
+      event,
+      lastError: buildContactEmployeeFailureNote({ failures, docNum: result?.docNum ?? null }),
+      tenantModels,
+      portalId,
+      revertStage: false,
+    });
   }
 
   // Wraps handleProcessingError so a bookkeeping failure (CastError, Mongo

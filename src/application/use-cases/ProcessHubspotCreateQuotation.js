@@ -138,6 +138,7 @@ export class ProcessHubspotCreateQuotation {
       cardCode = businessPartner.cardCode;
       const {
         contactEmployeeResult,
+        contactEmployeeFailures,
         hubspotToken,
         dealContactIsContactEmployee,
       } = businessPartner;
@@ -227,6 +228,7 @@ export class ProcessHubspotCreateQuotation {
         docEntry: quotationResponse?.DocEntry ?? null,
         docNum: quotationResponse?.DocNum ?? null,
         dealId,
+        contactEmployeeFailures,
         sapAudit: this.buildWebhookSapAudit(auditTrail),
       };
     } catch (error) {

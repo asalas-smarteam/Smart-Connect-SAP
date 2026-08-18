@@ -64,6 +64,7 @@ function buildRuntimeRepository(context = buildContext()) {
       trueValue: 'tYES',
     }),
     findOwnerMappingByHubspotOwner: jest.fn().mockResolvedValue(null),
+    resolveSapErrorBypassConfig: jest.fn().mockResolvedValue({ contactEmployee: false }),
   };
 }
 

@@ -1,5 +1,10 @@
 import { mapHubspotToSapFields } from '#domain/orders/order-builder.service.js';
 import { resolveHubspotSapId } from '../services/webhook-payload.service.js';
+import {
+  buildContactEmployeeFailureMessage,
+  recordContactEmployeeFailures,
+} from '../services/contact-employee-failures.service.js';
+import { PermanentWebhookError } from '#shared/errors/index.js';
 import { resolveBusinessPartnerAndContactEmployees } from '#domain/business-partners/contact-employee-source.service.js';
 import { buildBpAddresses } from '#domain/business-partners/bp-addresses.service.js';
 import { buildSapPropertiesFlags } from '#domain/business-partners/sap-properties-flags.service.js';
@@ -144,6 +149,8 @@ export async function resolveBusinessPartnerForDocument({
     .resolveBusinessPartnerCreationConfig(context.tenantModels);
   const propertiesConfig = await runtimeRepository
     .resolvePropertiesFlagsConfig(context.tenantModels);
+  const sapErrorBypass = await runtimeRepository
+    .resolveSapErrorBypassConfig(context.tenantModels);
 
   const businessPartnerShape = resolveBusinessPartnerAndContactEmployees({
     company,
@@ -311,10 +318,34 @@ export async function resolveBusinessPartnerForDocument({
   auditTrail.payload_SAP.contactEmployeeUpdate = contactEmployeeResult.updateResults?.[0]?.requestPayload ?? null;
   auditTrail.response_SAP.contactEmployeeUpdate = contactEmployeeResult.updateResults?.[0]?.responsePayload ?? null;
 
+  const contactEmployeeFailures = recordContactEmployeeFailures({
+    contactEmployeeResult,
+    auditTrail,
+    logger,
+    cardCode,
+    dealId: toNonEmptyString(payload?.deal?.hs_object_id),
+  });
+
+  // Punto de corte: acá arriba ya se escribieron el BP, los ContactEmployees que SÍ
+  // entraron y sus internalCodes de vuelta en HubSpot; el documento todavía NO existe.
+  // Tirar acá es lo que hace que el negocio no se sincronice y se pueda corregir la data
+  // en HubSpot. Los ContactEmployees ya creados quedan en SAP -- no hay rollback entre
+  // llamadas del Service Layer -- pero el reenvío los reencuentra por email/nombre/
+  // internalCode en vez de duplicarlos.
+  //
+  // `permanent`: un jobtitle demasiado largo no se arregla solo, reintentar 3 veces es
+  // gastar viajes a SAP para llegar al mismo lugar. Así el evento queda `errored` en el
+  // primer intento y `notifyWebhookFailure` deja la nota y revierte la etapa si el tenant
+  // lo configuró.
+  if (contactEmployeeFailures.length > 0 && !sapErrorBypass.contactEmployee) {
+    throw new PermanentWebhookError(buildContactEmployeeFailureMessage(contactEmployeeFailures));
+  }
+
   return {
     cardCode,
     businessPartnerResult,
     contactEmployeeResult,
+    contactEmployeeFailures,
     hubspotToken,
     // Lo consumen los llamadores para decidir si el write-back legacy de
     // updateAfterSap puede escribirle internalcode al contact del deal.

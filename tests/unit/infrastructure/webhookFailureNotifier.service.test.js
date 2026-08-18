@@ -129,3 +129,30 @@ describe('notifyWebhookFailure', () => {
     expect(deps.logger.error).toHaveBeenCalled();
   });
 });
+
+// El aviso de fallo PARCIAL (documento creado, ContactEmployee rechazado) reusa este
+// notificador, pero nunca debe mover la etapa del deal: el documento ya existe en SAP.
+describe('notifyWebhookFailure con revertStage: false', () => {
+  it('deja la nota pero no toca el dealstage', async () => {
+    const deps = buildDeps({
+      getWebhookFailureNotificationConfig: jest.fn().mockResolvedValue({
+        requireMessageHS: true,
+        requiereReturnStage: true,
+        stageToReturned: 'stage-99',
+      }),
+    });
+    const notifyWebhookFailure = buildNotifyWebhookFailure(deps);
+
+    await notifyWebhookFailure({
+      event: { _id: 'event-1', payload: { deal: { hs_object_id: 'deal-1' } } },
+      lastError: 'El documento se creo en SAP (DocNum 1074112), pero 1 contacto no se creo',
+      tenantModels: {},
+      portalId: 'p1',
+      revertStage: false,
+    });
+
+    expect(deps.hubspotClient.createNote).toHaveBeenCalledTimes(1);
+    expect(deps.hubspotClient.associateObjectsDefault).toHaveBeenCalledTimes(1);
+    expect(deps.hubspotClient.updateDeal).not.toHaveBeenCalled();
+  });
+});

@@ -534,6 +534,11 @@ export class SapWebhookOrderAdapter {
     const internalCodes = [];
     const requestPayload = [];
     const responsePayload = [];
+    // El error de cada contacto que no entró ya venía en `results[i].error`, pero
+    // ningún caso de uso lee `results`, así que un ContactEmployee rechazado por
+    // SAP quedaba invisible y el evento se marcaba `completed` sin rastro. Este
+    // array es el canal explícito para que el llamador lo loguee y lo audite.
+    const errors = [];
     let created = false;
     let currentBusinessPartner = businessPartner;
 
@@ -549,6 +554,14 @@ export class SapWebhookOrderAdapter {
 
       results.push(result);
       created = created || Boolean(result?.created);
+
+      if (result?.error) {
+        errors.push({
+          contact,
+          requestPayload: result.requestPayload ?? null,
+          error: result.error,
+        });
+      }
 
       if (result?.internalCode) {
         internalCodes.push({ contact, internalCode: result.internalCode });
@@ -576,7 +589,7 @@ export class SapWebhookOrderAdapter {
     // singleContactResult.updateResult.
     const updateResults = results.map((result) => result?.updateResult);
 
-    return { created, internalCodes, results, requestPayload, responsePayload, updateResults };
+    return { created, internalCodes, results, requestPayload, responsePayload, updateResults, errors };
   }
 
   async createOrder({ sapConfig, orderPayload }) {

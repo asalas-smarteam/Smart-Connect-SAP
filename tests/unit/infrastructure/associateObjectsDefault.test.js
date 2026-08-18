@@ -11,7 +11,7 @@ describe('associateObjectsDefault', () => {
     axiosMock.mockResolvedValue({ data: { status: 'COMPLETE' } });
   });
 
-  it('usa la ruta /associations/default/ y no manda cuerpo', async () => {
+  it('usa la ruta /associations/default/', async () => {
     await associateObjectsDefault('tok', 'contact', '233059562020', 'contact', '233053375747');
 
     expect(axiosMock).toHaveBeenCalledTimes(1);
@@ -21,8 +21,21 @@ describe('associateObjectsDefault', () => {
     expect(config.url).toContain(
       '/crm/v4/objects/contact/233059562020/associations/default/contact/233053375747'
     );
-    expect(config.data).toBeUndefined();
     expect(config.headers.Authorization).toBe('Bearer tok');
+  });
+
+  // HubSpot ignora el cuerpo de esta ruta, pero exige `Content-Type:
+  // application/json` y responde 415 sin él. Sin `data`, axios no manda cuerpo y
+  // por tanto tampoco la cabecera: eso dejó 3 notas de error huérfanas el
+  // 2026-08-17 (`Failed to notify webhook failure to HubSpot`, 415). El `{}` está
+  // aquí SOLO para que axios derive la cabecera -- no lo quites por "no hace falta
+  // cuerpo": eso reintroduce el 415.
+  it('manda un cuerpo JSON vacio para que la peticion lleve Content-Type', async () => {
+    await associateObjectsDefault('tok', 'note', '115027105138', 'deal', '59086426948');
+
+    const [config] = axiosMock.mock.calls[0];
+
+    expect(config.data).toEqual({});
   });
 
   it('sirve igual para company -> contact', async () => {

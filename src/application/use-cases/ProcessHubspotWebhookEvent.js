@@ -10,6 +10,10 @@ import {
   resolveHubspotSapId,
 } from '../services/webhook-payload.service.js';
 import { createNoopSapCallRecorder } from '../services/sap-call-audit.service.js';
+import {
+  buildContactEmployeeFailureMessage,
+  recordContactEmployeeFailures,
+} from '../services/contact-employee-failures.service.js';
 import { resolveBusinessPartnerAndContactEmployees } from '#domain/business-partners/contact-employee-source.service.js';
 import { buildBpAddresses } from '#domain/business-partners/bp-addresses.service.js';
 import { buildSapPropertiesFlags } from '#domain/business-partners/sap-properties-flags.service.js';
@@ -17,6 +21,7 @@ import { BusinessPartnerPayloadStrategyFactory } from '#domain/business-partners
 import LegacyWhitelistBusinessPartnerPayloadStrategy from '#domain/business-partners/strategies/legacy-whitelist-bp-payload.strategy.js';
 import FullMappedBusinessPartnerPayloadStrategy from '#domain/business-partners/strategies/full-mapped-bp-payload.strategy.js';
 import { toNonEmptyString } from '#shared/utils/string.utils.js';
+import { PermanentWebhookError } from '#shared/errors/index.js';
 
 // Dead in production since composition always passes an explicit factory (see
 // webhook-processing.composition.js). Kept only as a defensive default for direct
@@ -93,6 +98,7 @@ export class ProcessHubspotWebhookEvent {
       const upsertConfig = await this.runtimeRepository.resolveUpsertDataSap(tenantModels);
       const creationConfig = await this.runtimeRepository.resolveBusinessPartnerCreationConfig(tenantModels);
       const propertiesConfig = await this.runtimeRepository.resolvePropertiesFlagsConfig(tenantModels);
+      const sapErrorBypass = await this.runtimeRepository.resolveSapErrorBypassConfig(tenantModels);
 
       const businessPartnerShape = resolveBusinessPartnerAndContactEmployees({
         company,
@@ -261,6 +267,23 @@ export class ProcessHubspotWebhookEvent {
       auditTrail.payload_SAP.contactEmployeeUpdate = contactEmployeeResult.updateResults?.[0]?.requestPayload ?? null;
       auditTrail.response_SAP.contactEmployeeUpdate = contactEmployeeResult.updateResults?.[0]?.responsePayload ?? null;
 
+      const contactEmployeeFailures = recordContactEmployeeFailures({
+        contactEmployeeResult,
+        auditTrail,
+        logger: this.logger,
+        cardCode,
+        dealId: toNonEmptyString(deal?.hs_object_id),
+      });
+
+      // Mismo punto de corte que en resolveBusinessPartnerForDocument (ver el comentario
+      // largo ahí): la orden todavía no existe, así que tirar acá es lo que evita
+      // sincronizar un negocio cuya data hay que corregir en HubSpot.
+      if (contactEmployeeFailures.length > 0 && !sapErrorBypass.contactEmployee) {
+        throw new PermanentWebhookError(
+          buildContactEmployeeFailureMessage(contactEmployeeFailures)
+        );
+      }
+
       const documentLines = mapDocumentLines({
         lineItems,
         productMappings: mappings.productMappings,
@@ -336,6 +359,7 @@ export class ProcessHubspotWebhookEvent {
         docEntry: orderResponse?.DocEntry ?? null,
         docNum: orderResponse?.DocNum ?? null,
         dealId: toNonEmptyString(deal?.hs_object_id),
+        contactEmployeeFailures,
         sapAudit: this.buildWebhookSapAudit(auditTrail),
       };
     } catch (error) {
