@@ -1,5 +1,6 @@
 import { calculateUnitPriceWithMisc } from '#domain/prices/misc-price-calculation.service.js';
 import { resolveDiscount } from '#domain/products/discount-resolver.service.js';
+import { createNoopSapCallRecorder } from '#application/services/sap-call-audit.service.js';
 
 const SAP_ITEM_PRICES_SELECT_PATH = '/b1s/v2/Items';
 const DEFAULT_SAP_ITEM_SELECT_FIELDS = ['ItemPrices', 'ItemWarehouseInfoCollection'];
@@ -116,6 +117,7 @@ export class SyncLineItemPrices {
     sapDiscountClient = null,
     dateProvider = () => new Date(),
     logger = { warn: () => {} },
+    createSapCallRecorder = createNoopSapCallRecorder,
   }) {
     this.credentialRepository = credentialRepository;
     this.sapPriceClient = sapPriceClient;
@@ -125,9 +127,11 @@ export class SyncLineItemPrices {
     this.sapDiscountClient = sapDiscountClient;
     this.dateProvider = dateProvider;
     this.logger = logger;
+    this.createSapCallRecorder = createSapCallRecorder;
   }
 
   async execute(payload, { tenantModels, tenant, tenantKey }) {
+    const callRecorder = this.createSapCallRecorder();
     const auditTrail = {
       payload_Hubspot: payload,
       payload_SAP: [],
@@ -190,14 +194,22 @@ export class SyncLineItemPrices {
 
           auditTrail.payload_SAP.push(sapRequestPayload);
 
-          priceData = await this.sapPriceClient.fetchBusinessPartnerPrice({
-            sapConfig,
-            cardCode,
-            itemCode,
-            date: currentDate,
-            tenantKey,
-            requestPayload: sapRequestPayload,
-          });
+          priceData = await callRecorder.record(
+            {
+              target: 'sap',
+              method: 'POST',
+              path: '/b1s/v2/CompanyService_GetItemPrice',
+              data: sapRequestPayload,
+            },
+            () => this.sapPriceClient.fetchBusinessPartnerPrice({
+              sapConfig,
+              cardCode,
+              itemCode,
+              date: currentDate,
+              tenantKey,
+              requestPayload: sapRequestPayload,
+            })
+          );
         } else {
           const sapRequestPayload = {
             method: 'GET',
@@ -207,12 +219,19 @@ export class SyncLineItemPrices {
 
           auditTrail.payload_SAP.push(sapRequestPayload);
 
-          const sapItemData = await this.sapPriceClient.fetchItemPrices({
-            sapConfig,
-            itemCode,
-            tenantKey,
-            selectFields: itemSelectFields,
-          });
+          const sapItemData = await callRecorder.record(
+            {
+              target: 'sap',
+              method: 'GET',
+              path: buildSapItemPricesPath(itemCode, itemSelectFields),
+            },
+            () => this.sapPriceClient.fetchItemPrices({
+              sapConfig,
+              itemCode,
+              tenantKey,
+              selectFields: itemSelectFields,
+            })
+          );
           const selectedPrice = selectConfiguredItemPrice(
             sapItemData?.ItemPrices,
             fallbackPriceList,
@@ -237,12 +256,19 @@ export class SyncLineItemPrices {
         }
 
         const sapItemStockData = useBusinessPartnerPrice
-          ? await this.sapPriceClient.fetchItemPrices({
-            sapConfig,
-            itemCode,
-            tenantKey,
-            selectFields: itemSelectFields,
-          })
+          ? await callRecorder.record(
+            {
+              target: 'sap',
+              method: 'GET',
+              path: buildSapItemPricesPath(itemCode, itemSelectFields),
+            },
+            () => this.sapPriceClient.fetchItemPrices({
+              sapConfig,
+              itemCode,
+              tenantKey,
+              selectFields: itemSelectFields,
+            })
+          )
           : auditTrail.response_SAP[auditTrail.response_SAP.length - 1];
         const warehouseStockProperties = await this.credentialRepository.resolveWarehouseStockProperties({
           tenantModels,
@@ -309,16 +335,14 @@ export class SyncLineItemPrices {
         hubspotCredentials,
         tenantModels,
       });
-      const hubspotUpdate = await this.hubspotPriceClient.updateLineItems({
-        token,
-        enrichedLineItems,
-        tenantKey,
-      });
-      const hubspotProductUpdate = await this.hubspotPriceClient.updateProducts({
-        token,
-        enrichedLineItems,
-        tenantKey,
-      });
+      const hubspotUpdate = await callRecorder.record(
+        { target: 'hubspot', method: 'POST', path: '/crm/v3/objects/line_items/batch/update' },
+        () => this.hubspotPriceClient.updateLineItems({ token, enrichedLineItems, tenantKey })
+      );
+      const hubspotProductUpdate = await callRecorder.record(
+        { target: 'hubspot', method: 'POST', path: '/crm/v3/objects/products/batch/update' },
+        () => this.hubspotPriceClient.updateProducts({ token, enrichedLineItems, tenantKey })
+      );
 
       auditTrail.response_hubspot = {
         lineItems: {
@@ -337,12 +361,10 @@ export class SyncLineItemPrices {
       );
 
       if (dealId) {
-        dealUpdate = await this.hubspotPriceClient.updateDealAmount({
-          token,
-          dealId,
-          totalAmount,
-          tenantKey,
-        });
+        dealUpdate = await callRecorder.record(
+          { target: 'hubspot', method: 'PATCH', path: `/crm/v3/objects/deals/${dealId}` },
+          () => this.hubspotPriceClient.updateDealAmount({ token, dealId, totalAmount, tenantKey })
+        );
 
         auditTrail.response_hubspot.deal = {
           payload: dealUpdate.payload,

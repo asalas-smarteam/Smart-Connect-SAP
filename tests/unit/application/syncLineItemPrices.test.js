@@ -385,4 +385,57 @@ describe('SyncLineItemPrices', () => {
     expect(buildErrorResponseSnapshot).toHaveBeenCalledWith(hubspotError);
     expect(buildWebhookSyncErrorEntry).toHaveBeenCalled();
   });
+
+  it('records SAP and HubSpot traffic through the injected recorder', async () => {
+    const calls = [];
+    const createSapCallRecorder = () => ({
+      calls,
+      droppedCalls: 0,
+      record: async (options, run) => {
+        try {
+          const response = await run();
+          calls.push({ ...options, ok: true });
+          return response;
+        } catch (error) {
+          calls.push({ ...options, ok: false, error });
+          throw error;
+        }
+      },
+      wrap: (adapter) => adapter,
+    });
+
+    const { useCase } = createUseCase({ createSapCallRecorder });
+
+    await useCase.execute(
+      {
+        dealId: 'deal-1',
+        cardCode: 'C20000',
+        lineItems: [{ itemCode: 'A0001', id: 'line-1', quantity: 2 }],
+      },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: { client: { hubspot: { portalId: '12345' } } },
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    expect(calls.some((call) => call.target === 'sap' && call.ok === true)).toBe(true);
+    expect(calls.some((call) => call.target === 'hubspot'
+      && call.path === '/crm/v3/objects/line_items/batch/update')).toBe(true);
+  });
+
+  it('works without a recorder injected (noop default)', async () => {
+    const { useCase, hubspotPriceClient } = createUseCase();
+
+    await useCase.execute(
+      { dealId: 'deal-1', cardCode: 'C20000', lineItems: [{ itemCode: 'A0001', id: 'line-1' }] },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    expect(hubspotPriceClient.updateLineItems).toHaveBeenCalled();
+  });
 });
