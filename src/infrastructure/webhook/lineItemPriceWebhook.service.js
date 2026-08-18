@@ -569,7 +569,14 @@ const lineItemPriceWebhookService = {
 
     const { LineItemPriceWebhookEvent } = tenantModels;
     const duplicateFilter = buildDuplicateFilter(payload);
-    const duplicate = await LineItemPriceWebhookEvent.findOne(duplicateFilter)
+    // El $or va acá y NO dentro de buildDuplicateFilter: ese helper es compartido y la
+    // estrategia dealPriceList ya le agrega el mismo $or por su cuenta.
+    // Sin esto, un reintento de HubSpot tras un fallo nuestro se descartaba como duplicado y
+    // el precio no cargaba nunca.
+    const duplicate = await LineItemPriceWebhookEvent.findOne({
+      ...duplicateFilter,
+      $or: [{ isSend: true }, { errorMessage: null }],
+    })
       .select({ _id: 1 })
       .lean();
 
@@ -585,28 +592,46 @@ const lineItemPriceWebhookService = {
       };
     }
 
-    let createdEvent;
+    // El índice único cubre los 6 campos del filtro, así que un reintento NO puede crear un
+    // registro nuevo: hay que reutilizar el que quedó del intento fallido.
+    let createdEvent = await LineItemPriceWebhookEvent.findOne(duplicateFilter)
+      .select({ _id: 1 })
+      .lean();
 
-    try {
-      createdEvent = await LineItemPriceWebhookEvent.create({
-        payload,
-        isSend: false,
-        errorMessage: null,
-      });
-    } catch (error) {
-      if (error?.code === 11000) {
-        return {
-          skip: true,
-          payload: null,
-          executionId: null,
-          meta: {
-            skipped: true,
-            reason: 'duplicate_event',
-          },
-        };
+    if (createdEvent) {
+      await LineItemPriceWebhookEvent.updateOne(
+        { _id: createdEvent._id },
+        { $set: { isSend: false, errorMessage: null } }
+      );
+    } else {
+      try {
+        createdEvent = await LineItemPriceWebhookEvent.create({
+          payload,
+          isSend: false,
+          errorMessage: null,
+        });
+      } catch (error) {
+        if (error?.code === 11000) {
+          // Carrera con otro proceso que insertó el mismo evento: se reutiliza el suyo.
+          createdEvent = await LineItemPriceWebhookEvent.findOne(duplicateFilter)
+            .select({ _id: 1 })
+            .lean();
+
+          if (!createdEvent) {
+            return {
+              skip: true,
+              payload: null,
+              executionId: null,
+              meta: {
+                skipped: true,
+                reason: 'duplicate_event',
+              },
+            };
+          }
+        } else {
+          throw error;
+        }
       }
-
-      throw error;
     }
 
     try {

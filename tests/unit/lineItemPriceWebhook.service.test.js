@@ -214,6 +214,83 @@ describe('lineItemPriceWebhook.service', () => {
     expect(tenantModels.LineItemPriceWebhookEvent.create).not.toHaveBeenCalled();
   });
 
+  it('processes a HubSpot retry after a failed attempt instead of skipping it as duplicate', async () => {
+    const tenantModels = buildTenantModels();
+    const previous = { _id: 'event-previous' };
+
+    // Primer findOne: guard de duplicados con $or -> no hay duplicado "vivo".
+    // Segundo findOne: registro fallido previo con el mismo filtro -> se reutiliza.
+    tenantModels.LineItemPriceWebhookEvent.findOne = jest.fn()
+      .mockReturnValueOnce(leanResult(null))
+      .mockReturnValueOnce(leanResult(previous));
+
+    mockGetAccessToken.mockResolvedValue('hubspot-token');
+    mockHubspotGet.mockImplementation(async (_token, path) => {
+      if (path === '/crm/v3/objects/deals/64058987777') {
+        return {
+          id: '64058987777',
+          associations: {
+            companies: { results: [{ id: 'company-1' }] },
+            'line items': { results: [{ id: 'line-1' }] },
+          },
+        };
+      }
+      if (path === '/crm/v3/objects/companies/company-1') {
+        return { id: 'company-1', properties: { idsap: 'C20000' } };
+      }
+      return { id: 'line-1', properties: { hs_sku: 'A0001', quantity: '1' } };
+    });
+
+    const result = await lineItemPriceWebhookService.preparePayload(
+      {
+        eventId: 2073333923,
+        subscriptionId: 6955444,
+        portalId: 50249912,
+        appId: 36665006,
+        occurredAt: 1786997905997,
+        associationType: 'DEAL_TO_LINE_ITEM',
+        changeSource: 'USER',
+        fromObjectId: 64058987777,
+      },
+      { tenantModels, tenant: { client: { hubspot: { portalId: '50249912' } } } }
+    );
+
+    expect(result.skip).toBe(false);
+    expect(result.executionId).toBe('event-previous');
+    expect(tenantModels.LineItemPriceWebhookEvent.create).not.toHaveBeenCalled();
+    expect(tenantModels.LineItemPriceWebhookEvent.updateOne).toHaveBeenCalledWith(
+      { _id: 'event-previous' },
+      { $set: { isSend: false, errorMessage: null } }
+    );
+  });
+
+  it('still skips a resend of an already successful event', async () => {
+    const tenantModels = buildTenantModels();
+    tenantModels.LineItemPriceWebhookEvent.findOne = jest.fn()
+      .mockReturnValueOnce(leanResult({ _id: 'event-done' }));
+
+    const result = await lineItemPriceWebhookService.preparePayload(
+      {
+        eventId: 2073333923,
+        subscriptionId: 6955444,
+        portalId: 50249912,
+        appId: 36665006,
+        occurredAt: 1786997905997,
+        associationType: 'DEAL_TO_LINE_ITEM',
+        changeSource: 'USER',
+        fromObjectId: 64058987777,
+      },
+      { tenantModels, tenant: { client: { hubspot: { portalId: '50249912' } } } }
+    );
+
+    expect(result).toMatchObject({ skip: true, meta: { reason: 'duplicate_event' } });
+    // Sólo un registro ya enviado o en vuelo cuenta como duplicado: el $or es lo que
+    // distingue eso de un fallo nuestro reintentable.
+    expect(tenantModels.LineItemPriceWebhookEvent.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({ $or: [{ isSend: true }, { errorMessage: null }] })
+    );
+  });
+
   it('builds the legacy payload with two of three lines when one line 404s', async () => {
     const tenantModels = buildTenantModels();
 
