@@ -728,6 +728,138 @@ describe('SyncLineItemPrices', () => {
     }));
   });
 
+  // La ronda 2 reescribe líneas que la ronda 1 ya había escrito bien (la rama `zero_price`
+  // existe justo para eso), así que tiene que enriquecer EXACTAMENTE igual que la ronda 1. Si
+  // no pide la propiedad de misc a HubSpot, el uplift sale null y el precio crudo de SAP pisa
+  // el precio correcto: una pasada de SEGURIDAD escribiendo un campo de dinero equivocado.
+  it('applies the misc uplift when the reconciliation rewrites a line', async () => {
+    const {
+      useCase,
+      credentialRepository,
+      hubspotPriceClient,
+      sapPriceClient,
+    } = createUseCase();
+
+    credentialRepository.resolveMiscPriceCalculationConfig = jest.fn().mockResolvedValue({
+      enableMiscPriceCalculation: true,
+      originalPriceTargetProperty: 'safe_price_value',
+      miscSourceProperty: 'misc',
+      miscCalculationType: 'porcentual',
+    });
+    sapPriceClient.fetchBusinessPartnerPrice.mockResolvedValue({
+      Price: 100,
+      Currency: 'USD',
+      Discount: 0,
+    });
+    // La relectura ve price 0 (la escritura de la ronda 1 todavía no se refleja), y la caché de
+    // SAP la contradice: se dispara `zero_price` sobre una línea YA valorizada en 115.
+    hubspotPriceClient.readLineItems.mockResolvedValue({
+      lineItems: [{
+        id: 'line-1',
+        itemCode: 'A0001',
+        quantity: '2',
+        price: '0',
+        misc: '15',
+        properties: { misc: '15' },
+      }],
+      failures: [],
+    });
+
+    await useCase.execute(
+      {
+        dealId: 'deal-1',
+        cardCode: 'C20000',
+        lineItems: [{ itemCode: 'A0001', id: 'line-1', quantity: 2, misc: '15' }],
+      },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    // Sin la propiedad de misc en la relectura, `calculateUnitPriceWithMisc` no tiene de dónde
+    // leer el porcentaje y devuelve el precio crudo.
+    expect(hubspotPriceClient.readLineItems).toHaveBeenCalledWith({
+      token: 'hubspot-token',
+      lineItemIds: ['line-1'],
+      extraProperties: ['misc', 'price'],
+    });
+    expect(hubspotPriceClient.updateLineItems).toHaveBeenCalledTimes(2);
+    // La ronda 2 escribe el precio CON uplift (115), y `safe_price_value` sigue llevando la base
+    // de SAP (100) y no el precio final: es la base de la que parte el recálculo de misc.
+    expect(hubspotPriceClient.updateLineItems.mock.calls[1][0].enrichedLineItems).toEqual([
+      {
+        itemCode: 'A0001',
+        id: 'line-1',
+        quantity: 2,
+        Price: 115,
+        originalPrice: 100,
+        originalPriceTargetProperty: 'safe_price_value',
+        Currency: 'USD',
+        Discount: 0,
+        lineTotal: 230,
+        warehouseStockProperties: { A01_stock: 8 },
+      },
+    ]);
+  });
+
+  it('keeps the resolved SAP discount when the reconciliation rewrites a line', async () => {
+    const sapDiscountClient = {
+      fetchActiveDiscountGroups: jest.fn().mockResolvedValue([
+        {
+          ValidFrom: '2026-01-01T00:00:00Z',
+          ValidTo: '2026-12-31T00:00:00Z',
+          DiscountGroupLineCollection: [
+            { ObjectType: 'dgboItems', ObjectCode: 'A0001', Discount: 12 },
+          ],
+        },
+      ]),
+    };
+    const { useCase, credentialRepository, hubspotPriceClient } = createUseCase({
+      sapDiscountClient,
+    });
+
+    credentialRepository.resolveDiscountConfig = jest.fn().mockResolvedValue({
+      isRequired: true,
+      fieldMappings: { Discount: 'hs_discount_percentage' },
+    });
+    hubspotPriceClient.readLineItems.mockResolvedValue({
+      lineItems: [{ id: 'line-1', itemCode: 'A0001', quantity: '2', price: '0', properties: {} }],
+      failures: [],
+    });
+
+    await useCase.execute(
+      {
+        dealId: 'deal-1',
+        cardCode: 'C20000',
+        lineItems: [{ itemCode: 'A0001', id: 'line-1', quantity: 2 }],
+      },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    expect(hubspotPriceClient.updateLineItems).toHaveBeenCalledTimes(2);
+    // `_discountHsProperty` viaja igual en las dos rondas, así que un `Discount: 0` acá escribe
+    // "0" en HubSpot encima del 12 que la ronda 1 resolvió contra los grupos de descuento.
+    expect(hubspotPriceClient.updateLineItems.mock.calls[1][0].enrichedLineItems).toEqual([
+      {
+        itemCode: 'A0001',
+        id: 'line-1',
+        quantity: 2,
+        Price: 704.35,
+        Currency: 'C$',
+        Discount: 12,
+        lineTotal: 1408.7,
+        _discountHsProperty: 'hs_discount_percentage',
+        warehouseStockProperties: { A01_stock: 8 },
+      },
+    ]);
+  });
+
   it('returns an audit with the failed line and its stage', async () => {
     const { useCase, sapPriceClient } = createUseCase();
 

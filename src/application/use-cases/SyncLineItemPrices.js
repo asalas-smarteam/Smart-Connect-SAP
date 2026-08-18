@@ -270,6 +270,90 @@ export class SyncLineItemPrices {
     return { ...entry, source: 'sap' };
   }
 
+  // ÚNICA fuente del enriquecimiento de una línea, compartida por la ronda 1 y por la
+  // reconciliación. Antes cada ronda tenía su copia y las copias divergieron: la ronda 2 perdió
+  // el uplift de misc y el descuento de SAP, así que la pasada de SEGURIDAD escribía un precio
+  // equivocado encima de uno correcto. Con una sola función esa clase de deriva no puede volver.
+  //
+  // `lineItem` llega en dos formas: la del payload de la ronda 1 (`quantity` o `Quantity`) y la
+  // del lector tolerante de la ronda 2 (`quantity`, más los `extraProperties` en el nivel
+  // superior). Las dos se normalizan acá.
+  async buildEnrichedLineItem({
+    lineItem,
+    pricing,
+    tenantModels,
+    tenantKey,
+    taxSettings,
+    discountConfig,
+    activeDiscountGroups,
+    discountHsField,
+    miscPriceCalculationConfig,
+  }) {
+    const itemCode = toNonEmptyString(lineItem.itemCode);
+    const id = toNonEmptyString(lineItem.id);
+    const { priceData, sapItemData: sapItemStockData } = pricing;
+
+    const warehouseStockProperties = await this.credentialRepository.resolveWarehouseStockProperties({
+      tenantModels,
+      itemWarehouseInfoCollection: sapItemStockData?.ItemWarehouseInfoCollection,
+    });
+    const tax = taxSettings?.taxCodes?.find((entry) => toNonEmptyString(entry?.Code) === toNonEmptyString(sapItemStockData?.[taxSettings.fieldItem])) || {};
+
+    /*const discount = resolveTaxRate({
+      sapItemData: sapItemStockData,
+      taxSettings,
+      fallbackDiscount: normalizeNumber(priceData?.Discount, 0),
+    });*/
+    let finalDiscount = 0;
+
+    if (discountConfig?.isRequired && (activeDiscountGroups ?? []).length > 0) {
+      const sapDiscount = resolveDiscount(activeDiscountGroups, {
+        itemCode,
+        itemsGroupCode: sapItemStockData?.ItemsGroupCode,
+        currentDate: this.dateProvider(),
+      });
+      if (sapDiscount !== null) {
+        finalDiscount = sapDiscount;
+      }
+    }
+    const quantity = normalizeQuantity(lineItem.quantity ?? lineItem.Quantity);
+    const priceCalculation = calculateUnitPriceWithMisc({
+      sapPrice: priceData?.Price ?? 0,
+      lineItem,
+      config: miscPriceCalculationConfig,
+    });
+    const price = priceCalculation.price;
+    const lineTotal = roundCurrency(quantity * price);
+
+    if (priceCalculation.warning) {
+      this.logger.warn({
+        msg: priceCalculation.warning,
+        tenantKey,
+        itemCode,
+        lineItemId: id,
+      });
+    }
+
+    return {
+      itemCode,
+      id,
+      quantity,
+      Price: price,
+      ...(priceCalculation.originalPriceTargetProperty
+        ? {
+          originalPrice: priceCalculation.originalPrice,
+          originalPriceTargetProperty: priceCalculation.originalPriceTargetProperty,
+        }
+        : {}),
+      Currency: priceData?.Currency ?? null,
+      Discount: finalDiscount,
+      lineTotal,
+      ...(toNonEmptyString(tax.HSCode) ? { tax: tax.HSCode } : {}),
+      ...(discountHsField ? { _discountHsProperty: discountHsField } : {}),
+      warehouseStockProperties,
+    };
+  }
+
   // Segunda pasada de seguridad, UNA sola vez. Existe porque el índice de asociaciones de
   // HubSpot va unos segundos atrasado: cuando el asesor quita o agrega líneas, la lectura de
   // la ronda 1 puede traer una línea ya archivada (404) o perderse una recién creada.
@@ -290,15 +374,24 @@ export class SyncLineItemPrices {
     itemSelectFields,
     fallbackPriceList,
     useBusinessPartnerPrice,
-    miscPriceCalculationConfig,
-    taxSettings,
-    discountHsField,
     auditTrail,
-    tenantModels,
+    // Mismo objeto que usa la ronda 1: taxSettings, descuentos, misc, tenantModels y tenantKey
+    // viajan juntos para que las dos rondas no puedan enriquecer con configuraciones distintas.
+    enrichment,
   }) {
     const freshIds = await this.hubspotPriceClient.readDealLineItemIds({ token, dealId });
+    // El `miscSourceProperty` del tenant NO es una propiedad estándar de HubSpot: si no se pide
+    // acá, `calculateUnitPriceWithMisc` lo lee como null y devuelve el precio crudo de SAP.
+    const miscSourceProperty = enrichment?.miscPriceCalculationConfig
+      ?.enableMiscPriceCalculation === true
+      ? toNonEmptyString(enrichment.miscPriceCalculationConfig?.miscSourceProperty)
+      : null;
     const { lineItems: freshLines, failures: readFailures } = await this.hubspotPriceClient
-      .readLineItems({ token, lineItemIds: freshIds, extraProperties: ['price'] });
+      .readLineItems({
+        token,
+        lineItemIds: freshIds,
+        extraProperties: [miscSourceProperty, 'price'].filter(Boolean),
+      });
 
     const trigger = [];
 
@@ -363,42 +456,19 @@ export class SyncLineItemPrices {
       }
 
       // eslint-disable-next-line no-await-in-loop
-      const warehouseStockProperties = await this.credentialRepository
-        .resolveWarehouseStockProperties({
-          tenantModels,
-          itemWarehouseInfoCollection: pricing.sapItemData?.ItemWarehouseInfoCollection,
-        });
-      const tax = taxSettings?.taxCodes?.find(
-        (entry) => toNonEmptyString(entry?.Code)
-          === toNonEmptyString(pricing.sapItemData?.[taxSettings.fieldItem])
-      ) || {};
-      const quantity = normalizeQuantity(line.quantity);
-      const priceCalculation = calculateUnitPriceWithMisc({
-        sapPrice: pricing.priceData?.Price ?? 0,
+      const enrichedLine = await this.buildEnrichedLineItem({
         lineItem: line,
-        config: miscPriceCalculationConfig,
+        pricing,
+        ...enrichment,
       });
-      const price = priceCalculation.price;
 
-      enriched.push({
-        itemCode: line.itemCode,
-        id: String(line.id),
-        quantity,
-        Price: price,
-        ...(priceCalculation.originalPriceTargetProperty
-          ? {
-            originalPrice: priceCalculation.originalPrice,
-            originalPriceTargetProperty: priceCalculation.originalPriceTargetProperty,
-          }
-          : {}),
-        Currency: pricing.priceData?.Currency ?? null,
-        Discount: 0,
-        lineTotal: roundCurrency(quantity * price),
-        ...(toNonEmptyString(tax.HSCode) ? { tax: tax.HSCode } : {}),
-        ...(discountHsField ? { _discountHsProperty: discountHsField } : {}),
-        warehouseStockProperties,
+      enriched.push(enrichedLine);
+      priced.push({
+        id: enrichedLine.id,
+        itemCode: enrichedLine.itemCode,
+        price: enrichedLine.Price,
+        source: pricing.source,
       });
-      priced.push({ id: String(line.id), itemCode: line.itemCode, price, source: pricing.source });
     }
 
     if (enriched.length > 0) {
@@ -481,6 +551,17 @@ export class SyncLineItemPrices {
       const sapCache = new Map();
       const enrichedLineItems = [];
       const pricedLog = [];
+      // Contexto de enriquecimiento: lo comparten la ronda 1 y la reconciliación, así que las
+      // dos escriben con la MISMA configuración de misc, impuestos y descuentos.
+      const enrichment = {
+        tenantModels,
+        tenantKey,
+        taxSettings,
+        discountConfig,
+        activeDiscountGroups,
+        discountHsField,
+        miscPriceCalculationConfig,
+      };
 
       for (const lineItem of payload.lineItems) {
         const itemCode = toNonEmptyString(lineItem.itemCode);
@@ -522,69 +603,20 @@ export class SyncLineItemPrices {
           continue;
         }
 
-        const { priceData, sapItemData: sapItemStockData } = pricing;
-
-        const warehouseStockProperties = await this.credentialRepository.resolveWarehouseStockProperties({
-          tenantModels,
-          itemWarehouseInfoCollection: sapItemStockData?.ItemWarehouseInfoCollection,
-        });
-        const tax = taxSettings?.taxCodes?.find((entry) => toNonEmptyString(entry?.Code) === toNonEmptyString(sapItemStockData?.[taxSettings.fieldItem])) || {};
-        
-        /*const discount = resolveTaxRate({
-          sapItemData: sapItemStockData,
-          taxSettings,
-          fallbackDiscount: normalizeNumber(priceData?.Discount, 0),
-        });*/
-        let finalDiscount = 0;
-
-        if (discountConfig.isRequired && activeDiscountGroups.length > 0) {
-          const sapDiscount = resolveDiscount(activeDiscountGroups, {
-            itemCode,
-            itemsGroupCode: sapItemStockData?.ItemsGroupCode,
-            currentDate: this.dateProvider(),
-          });
-          if (sapDiscount !== null) {
-            finalDiscount = sapDiscount;
-          }
-        }
-        const quantity = normalizeQuantity(lineItem.quantity ?? lineItem.Quantity);
-        const priceCalculation = calculateUnitPriceWithMisc({
-          sapPrice: priceData?.Price ?? 0,
+        // eslint-disable-next-line no-await-in-loop
+        const enrichedLineItem = await this.buildEnrichedLineItem({
           lineItem,
-          config: miscPriceCalculationConfig,
-        });
-        const price = priceCalculation.price;
-        const lineTotal = roundCurrency(quantity * price);
-
-        if (priceCalculation.warning) {
-          this.logger.warn({
-            msg: priceCalculation.warning,
-            tenantKey,
-            itemCode,
-            lineItemId: id,
-          });
-        }
-
-        enrichedLineItems.push({
-          itemCode,
-          id,
-          quantity,
-          Price: price,
-          ...(priceCalculation.originalPriceTargetProperty
-            ? {
-              originalPrice: priceCalculation.originalPrice,
-              originalPriceTargetProperty: priceCalculation.originalPriceTargetProperty,
-            }
-            : {}),
-          Currency: priceData?.Currency ?? null,
-          Discount: finalDiscount,
-          lineTotal,
-          ...(toNonEmptyString(tax.HSCode) ? { tax: tax.HSCode } : {}),
-          ...(discountHsField ? { _discountHsProperty: discountHsField } : {}),
-          warehouseStockProperties,
+          pricing,
+          ...enrichment,
         });
 
-        pricedLog.push({ id, itemCode, price, source: pricing.source });
+        enrichedLineItems.push(enrichedLineItem);
+        pricedLog.push({
+          id: enrichedLineItem.id,
+          itemCode: enrichedLineItem.itemCode,
+          price: enrichedLineItem.Price,
+          source: pricing.source,
+        });
       }
 
       // Se empuja ANTES del fatal de abajo: si ninguna línea se valorizó, este es el único
@@ -643,8 +675,7 @@ export class SyncLineItemPrices {
           reconciliation = await this.reconcile({
             token, dealId, updatedIds, sapCache, callRecorder, sapConfig, cardCode,
             currentDate, tenantKey, itemSelectFields, fallbackPriceList,
-            useBusinessPartnerPrice, miscPriceCalculationConfig, taxSettings,
-            discountHsField, auditTrail, tenantModels,
+            useBusinessPartnerPrice, auditTrail, enrichment,
           });
         } catch (error) {
           this.logger.warn({
