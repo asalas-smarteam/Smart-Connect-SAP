@@ -164,6 +164,8 @@ describe('SyncLineItemPrices', () => {
           triggered: false,
           trigger: [],
           pricedCount: 0,
+          aborted: false,
+          failures: [],
         },
       },
     });
@@ -658,5 +660,47 @@ describe('SyncLineItemPrices', () => {
 
     expect(hubspotPriceClient.updateDealAmount).toHaveBeenCalledTimes(1);
     expect(hubspotPriceClient.updateDealAmount.mock.calls[0][0].totalAmount).toBe(1408.7);
+  });
+
+  it('still writes the deal amount when the reconciliation re-read fails', async () => {
+    const logger = { warn: jest.fn() };
+    const { useCase, hubspotPriceClient } = createUseCase({ logger });
+
+    hubspotPriceClient.readDealLineItemIds.mockRejectedValue(new Error('HubSpot deal read failed'));
+
+    // Que `execute` resuelva en vez de rechazar es parte de lo que se prueba: llegar a las
+    // aserciones con un `result` ya demuestra que la pasada de seguridad no tumbó la corrida.
+    const result = await useCase.execute(
+      { dealId: 'deal-1', cardCode: 'C20000', lineItems: [{ itemCode: 'A0001', id: 'line-1', quantity: 2 }] },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    // La ronda 1 ya había escrito los precios: su total no se pierde por una relectura caída.
+    expect(hubspotPriceClient.updateDealAmount).toHaveBeenCalledTimes(1);
+    expect(hubspotPriceClient.updateDealAmount.mock.calls[0][0].totalAmount).toBe(1408.7);
+    expect(result.meta.dealUpdated).toBe(true);
+    expect(result.meta.reconciliation).toEqual({
+      triggered: false,
+      trigger: [],
+      pricedCount: 0,
+      aborted: true,
+      failures: [
+        {
+          stage: 'reconciliation',
+          reason: 'HubSpot deal read failed',
+          status: null,
+          endpoint: null,
+        },
+      ],
+    });
+    expect(logger.warn).toHaveBeenCalledWith(expect.objectContaining({
+      tenantKey: 'tenant_1',
+      dealId: 'deal-1',
+      error: 'HubSpot deal read failed',
+    }));
   });
 });

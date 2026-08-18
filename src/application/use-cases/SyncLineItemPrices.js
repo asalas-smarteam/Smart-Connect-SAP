@@ -566,14 +566,42 @@ export class SyncLineItemPrices {
         ).filter(Boolean)
       );
 
-      const reconciliation = dealId
-        ? await this.reconcile({
-          token, dealId, updatedIds, sapCache, callRecorder, sapConfig, cardCode,
-          currentDate, tenantKey, itemSelectFields, fallbackPriceList,
-          useBusinessPartnerPrice, miscPriceCalculationConfig, taxSettings,
-          discountHsField, auditTrail, tenantModels,
-        })
-        : { triggered: false, trigger: [], priced: [], failures: [], enriched: [] };
+      // La reconciliación es una pasada de seguridad best-effort: si se cae (la relectura del
+      // deal SÍ lanza, por diseño), no puede tirar a la basura una ronda 1 que ya escribió los
+      // precios bien. Se registra el fallo, se marca `aborted` y la ejecución sigue para que el
+      // amount se escriba con lo que sí se valorizó.
+      let reconciliation = { triggered: false, trigger: [], priced: [], failures: [], enriched: [] };
+
+      if (dealId) {
+        try {
+          reconciliation = await this.reconcile({
+            token, dealId, updatedIds, sapCache, callRecorder, sapConfig, cardCode,
+            currentDate, tenantKey, itemSelectFields, fallbackPriceList,
+            useBusinessPartnerPrice, miscPriceCalculationConfig, taxSettings,
+            discountHsField, auditTrail, tenantModels,
+          });
+        } catch (error) {
+          this.logger.warn({
+            msg: 'Reconciliation pass aborted: deal line items could not be re-read',
+            tenantKey,
+            dealId,
+            error: error.message,
+          });
+          reconciliation = {
+            triggered: false,
+            trigger: [],
+            priced: [],
+            enriched: [],
+            aborted: true,
+            failures: [{
+              stage: 'reconciliation',
+              reason: error.message,
+              status: error?.details?.status ?? error?.response?.status ?? null,
+              endpoint: error?.details?.endpoint ?? null,
+            }],
+          };
+        }
+      }
 
       let dealUpdate = null;
       // El amount se escribe al cierre y una sola vez, con lo que se pudo valorizar en las dos
@@ -617,6 +645,9 @@ export class SyncLineItemPrices {
             triggered: reconciliation.triggered,
             trigger: reconciliation.trigger,
             pricedCount: reconciliation.priced.length,
+            // Distingue "no hizo falta correr" de "corrió y no pudo".
+            aborted: Boolean(reconciliation.aborted),
+            failures: reconciliation.failures,
           },
         },
       };
