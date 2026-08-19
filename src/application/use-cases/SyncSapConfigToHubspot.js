@@ -403,7 +403,17 @@ export class SyncSapConfigToHubspot {
         currentDate,
       });
 
-      record.rawSapData._resolvedDiscount = discount;
+      // `null` de resolveDiscount significa "los grupos se leyeron y ninguno
+      // aplica a este artículo", o sea 0. Dejarlo en null hacía que
+      // product.handler no escribiera nada y HubSpot conservara un descuento
+      // viejo para siempre: así quedaron 129 productos del tenant noelito con un
+      // 10% que SAP ya no tiene en ningún grupo activo.
+      //
+      // El caso "no pudimos evaluar" sigue distinguiéndose por AUSENCIA de la
+      // clave: los early returns de arriba no la escriben, y un fallo de lectura
+      // de los grupos revienta el sync antes de llegar acá. Esa es la misma
+      // convención que usa el enricher de lotes.
+      record.rawSapData._resolvedDiscount = discount ?? 0;
       record.rawSapData._discountHsProperty = hsField;
     });
   }

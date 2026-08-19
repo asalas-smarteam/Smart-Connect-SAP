@@ -231,7 +231,9 @@ describe('SyncLineItemPrices', () => {
     });
   });
 
-  it('uses configured SAP tax field as HubSpot line item discount for business partner prices', async () => {
+  // El campo de impuesto configurado entra al $select y decide el grupo de tasa de
+  // HubSpot, pero su Rate NUNCA es un descuento: el descuento sale de SAP o es 0.
+  it('injects the configured SAP tax field into $select without turning its rate into a discount', async () => {
     const { useCase, credentialRepository, sapPriceClient, hubspotPriceClient } = createUseCase();
 
     credentialRepository.resolveTenantTaxSettings.mockResolvedValue({
@@ -273,14 +275,14 @@ describe('SyncLineItemPrices', () => {
         expect.objectContaining({
           id: 'line-1',
           Price: 704.35,
-          Discount: 15,
+          Discount: 0,
         }),
       ],
       tenantKey: 'tenant_1',
     });
   });
 
-  it('uses configured SAP tax field as HubSpot line item discount with tenant price list', async () => {
+  it('keeps the discount at 0 for tenant price list prices even when the item has a tax rate', async () => {
     const { useCase, credentialRepository, sapPriceClient } = createUseCase();
 
     credentialRepository.resolveTenantTaxSettings.mockResolvedValue({
@@ -311,7 +313,7 @@ describe('SyncLineItemPrices', () => {
       expect.objectContaining({
         itemCode: 'A0001',
         Price: 704.35,
-        Discount: 15,
+        Discount: 0,
       }),
     ]);
   });

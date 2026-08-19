@@ -26,16 +26,6 @@ function normalizeNumber(value, fallback = 0) {
   return Number.isFinite(normalized) ? normalized : fallback;
 }
 
-function normalizeOptionalNumber(value) {
-  const rawValue = String(value ?? '').trim();
-  if (!rawValue) {
-    return null;
-  }
-
-  const normalized = Number(rawValue);
-  return Number.isFinite(normalized) ? normalized : null;
-}
-
 function normalizeQuantity(value) {
   const normalized = normalizeNumber(value, 0);
   return normalized > 0 ? normalized : 1;
@@ -93,25 +83,6 @@ function selectConfiguredItemPrice(itemPrices, priceList, itemCode) {
   }
 
   return selectedPrice;
-}
-
-function resolveTaxRate({ sapItemData, taxSettings, fallbackDiscount }) {
-  const taxFieldItem = toNonEmptyString(taxSettings?.fieldItem);
-  if (!taxFieldItem) {
-    return fallbackDiscount;
-  }
-
-  const taxCode = toNonEmptyString(sapItemData?.[taxFieldItem]);
-  if (!taxCode || !Array.isArray(taxSettings?.taxCodes)) {
-    return fallbackDiscount;
-  }
-
-  const taxCodeConfig = taxSettings.taxCodes.find(
-    (entry) => toNonEmptyString(entry?.Code) === taxCode
-  );
-  const taxRate = normalizeOptionalNumber(taxCodeConfig?.Rate);
-
-  return taxRate ?? fallbackDiscount;
 }
 
 // `unresolved` tiene que significar lo que dice su nombre. Dos razones por las que la simple
@@ -306,11 +277,9 @@ export class SyncLineItemPrices {
     });
     const tax = taxSettings?.taxCodes?.find((entry) => toNonEmptyString(entry?.Code) === toNonEmptyString(sapItemStockData?.[taxSettings.fieldItem])) || {};
 
-    /*const discount = resolveTaxRate({
-      sapItemData: sapItemStockData,
-      taxSettings,
-      fallbackDiscount: normalizeNumber(priceData?.Discount, 0),
-    });*/
+    // El descuento sale de SAP (grupos de descuento) o es 0. Nunca de la tasa de
+    // impuesto: eso era `resolveTaxRate`, que escribía el Rate del código de
+    // impuesto en el campo de descuento y se eliminó junto con este bloque.
     let finalDiscount = 0;
 
     if (discountConfig?.isRequired && (activeDiscountGroups ?? []).length > 0) {

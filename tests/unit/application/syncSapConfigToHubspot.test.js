@@ -246,4 +246,78 @@ describe('SyncSapConfigToHubspot', () => {
       hubspotUpdated: 1,
     }));
   });
+
+  describe('enrichRecordsWithDiscounts', () => {
+    // El grupo real del tenant noelito: vigente, para todos los socios, y con
+    // línea sólo para OTRO artículo.
+    const ACTIVE_GROUP = {
+      AbsEntry: 1,
+      Type: 'dgt_AllBPs',
+      ObjectCode: '0',
+      Active: 'tYES',
+      ValidFrom: '2026-08-10T00:00:00Z',
+      ValidTo: '2026-08-31T00:00:00Z',
+      DiscountGroupLineCollection: [
+        { ObjectType: 'dgboItems', ObjectCode: 'A10020139', Discount: 15 },
+      ],
+    };
+
+    function buildUseCase({ discountGroups = [ACTIVE_GROUP], isRequired = true } = {}) {
+      return new SyncSapConfigToHubspot({
+        discountConfigRepository: {
+          resolveDiscountConfig: jest.fn().mockResolvedValue({
+            isRequired,
+            fieldMappings: { Discount: 'hs_discount_percentage' },
+          }),
+        },
+        sapDiscountClient: {
+          fetchActiveDiscountGroups: jest.fn().mockResolvedValue(discountGroups),
+        },
+        dateProvider: () => new Date('2026-08-19T18:00:00.000Z'),
+      });
+    }
+
+    function buildTenantContext() {
+      return {
+        tenantModels: {
+          SapCredentials: {
+            find: () => ({ lean: async () => [{ serviceLayerBaseUrl: 'https://sap.example' }] }),
+          },
+        },
+      };
+    }
+
+    async function enrich(useCase, mappedRecords) {
+      await useCase.enrichRecordsWithDiscounts({
+        mappedRecords,
+        objectType: 'product',
+        config: { tenantKey: 'noelito' },
+        tenantContext: buildTenantContext(),
+      });
+    }
+
+    it('resolves 0 when SAP has no discount for the product, so a stale HubSpot value gets cleared', async () => {
+      const mappedRecords = [{ rawSapData: { ItemCode: 'P42010005', ItemsGroupCode: 106 } }];
+
+      await enrich(buildUseCase(), mappedRecords);
+
+      expect(mappedRecords[0].rawSapData._resolvedDiscount).toBe(0);
+    });
+
+    it('keeps the real discount when SAP does have one for the product', async () => {
+      const mappedRecords = [{ rawSapData: { ItemCode: 'A10020139', ItemsGroupCode: 100 } }];
+
+      await enrich(buildUseCase(), mappedRecords);
+
+      expect(mappedRecords[0].rawSapData._resolvedDiscount).toBe(15);
+    });
+
+    it('leaves the key absent when the tenant has discounts disabled, so HubSpot is not touched', async () => {
+      const mappedRecords = [{ rawSapData: { ItemCode: 'P42010005', ItemsGroupCode: 106 } }];
+
+      await enrich(buildUseCase({ isRequired: false }), mappedRecords);
+
+      expect(mappedRecords[0].rawSapData).not.toHaveProperty('_resolvedDiscount');
+    });
+  });
 });
