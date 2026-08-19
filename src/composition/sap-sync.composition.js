@@ -67,6 +67,7 @@ export function buildSyncSapConfigToHubspot() {
   const productSyncStrategyFactory = new ProductSyncStrategyFactory({
     oneToOneProductStrategy: new OneToOneProductStrategy({
       hubspotSyncTarget,
+      priceListConfigRepository: new TenantLineItemPriceConfigRepository(),
       logger,
     }),
     oneToManyProductStrategy: new OneToManyProductStrategy({

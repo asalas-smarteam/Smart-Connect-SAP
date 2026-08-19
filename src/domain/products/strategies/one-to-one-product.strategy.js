@@ -1,7 +1,13 @@
 import {
   KEEP_MAPPED_PRICE_FLAG,
+  PRODUCT_PRICE_SOURCES,
   PRODUCT_SYNC_STRATEGIES,
+  RESOLVED_PRODUCT_PRICE_KEY,
 } from '../product-sync-strategy.constants.js';
+import {
+  normalizeProductPriceSource,
+  resolveProductPriceFromItemPrices,
+} from '../product-price-source.service.js';
 
 function markRecordToKeepMappedPrice(record) {
   return {
@@ -33,10 +39,67 @@ function applyPriceAndCostConfig(record, { keepMappedPrice, dropCostField, costF
   return result;
 }
 
+// Adjunta el precio resuelto bajo rawSapData. Setea las DOS llaves a proposito:
+// selectedPrice porque es la guarda que ya existe en product.handler.js y otros
+// consumidores podrian leerla, y RESOLVED_PRODUCT_PRICE_KEY porque selectedPrice
+// es la fila cruda y el handler necesita el numero ya elegido segun priceField.
+// Si no hay precio para la lista devuelve el record intacto: el handler lo cera,
+// que es el comportamiento SET_ZERO.
+function applyResolvedItemPrice(record, { priceList, priceField }) {
+  const resolved = resolveProductPriceFromItemPrices({
+    itemPrices: record?.rawSapData?.ItemPrices,
+    priceList,
+    priceField,
+  });
+
+  if (!resolved) {
+    return record;
+  }
+
+  return {
+    ...record,
+    rawSapData: {
+      ...(record?.rawSapData ?? {}),
+      selectedPrice: resolved.row,
+      [RESOLVED_PRODUCT_PRICE_KEY]: resolved.price,
+    },
+  };
+}
+
 export class OneToOneProductStrategy {
-  constructor({ hubspotSyncTarget, logger = console }) {
+  constructor({ hubspotSyncTarget, priceListConfigRepository = null, logger = console }) {
     this.hubspotSyncTarget = hubspotSyncTarget;
+    this.priceListConfigRepository = priceListConfigRepository;
     this.logger = logger;
+  }
+
+  // Lee la config priceList UNA vez por corrida, no por producto.
+  // resolveTenantPriceList lanza cuando la config falta o su formato es
+  // invalido; aca eso no puede tumbar la corrida. Si se dejara propagar, el
+  // try/catch de execute() lo convertiria en failed: totalProducts y el tenant
+  // perderia tambien nombre y stock, no solo el precio. Devolver null = caer a
+  // SET_ZERO, mismo criterio que los enrichers.
+  async resolvePriceList({ tenantContext, tenantId }) {
+    if (typeof this.priceListConfigRepository?.resolveTenantPriceList !== 'function') {
+      this.logger.warn?.({
+        msg: 'requirePrice.source.from es itemPrices pero no hay priceListConfigRepository inyectado',
+        tenantId,
+      });
+      return null;
+    }
+
+    try {
+      return await this.priceListConfigRepository.resolveTenantPriceList({
+        tenantModels: tenantContext?.tenantModels,
+      });
+    } catch (error) {
+      this.logger.error?.({
+        msg: 'No se pudo resolver la lista de precios del tenant; los precios quedan en 0',
+        tenantId,
+        error: error.message,
+      });
+      return null;
+    }
   }
 
   async execute({
@@ -53,11 +116,38 @@ export class OneToOneProductStrategy {
     const requirePriceValue = strategyConfig.requirePrice?.value;
     const requireCostFlag = strategyConfig.requireCost?.flag;
     const costField = strategyConfig.requireCost?.field;
-    const recordsToSend = records.map((record) => applyPriceAndCostConfig(record, {
-      keepMappedPrice: requirePriceValue,
-      dropCostField: !requireCostFlag,
-      costField,
-    }));
+    const priceSource = normalizeProductPriceSource(strategyConfig.requirePrice, {
+      logger: this.logger,
+    });
+    // null cubre los dos casos en los que no hay que resolver nada: la fuente es
+    // 'mapped', o la config del tenant no se pudo leer.
+    const resolvedPriceList = priceSource.from === PRODUCT_PRICE_SOURCES.ITEM_PRICES
+      ? await this.resolvePriceList({ tenantContext, tenantId })
+      : null;
+    let productsWithoutPrice = 0;
+
+    const recordsToSend = records.map((record) => {
+      const base = applyPriceAndCostConfig(record, {
+        keepMappedPrice: requirePriceValue,
+        dropCostField: !requireCostFlag,
+        costField,
+      });
+
+      if (resolvedPriceList === null) {
+        return base;
+      }
+
+      const withPrice = applyResolvedItemPrice(base, {
+        priceList: resolvedPriceList,
+        priceField: priceSource.priceField,
+      });
+
+      if (withPrice === base) {
+        productsWithoutPrice += 1;
+      }
+
+      return withPrice;
+    });
 
     this.logger.info?.({
       msg: 'Starting product sync strategy',
@@ -67,6 +157,9 @@ export class OneToOneProductStrategy {
       requirePrice: requirePriceValue,
       requireCost: requireCostFlag,
       costField,
+      priceSource: priceSource.from,
+      priceList: resolvedPriceList,
+      productsWithoutPrice,
     });
 
     try {
