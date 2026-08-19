@@ -122,6 +122,10 @@ describe('SyncSapConfigToHubspot', () => {
         hubspotFailed: 0,
         hubspotCreated: 1,
         hubspotUpdated: 0,
+        // Un flujo que no descarta nada igual reporta el par en cero: el
+        // SyncLog persiste estos campos tal cual y no deben quedar undefined.
+        hubspotSkipped: 0,
+        hubspotSkippedReasons: [],
         hubspotErrors: [],
       },
     }));
@@ -319,5 +323,89 @@ describe('SyncSapConfigToHubspot', () => {
 
       expect(mappedRecords[0].rawSapData).not.toHaveProperty('_resolvedDiscount');
     });
+  });
+});
+
+// El desglose nace en el handler de facturas y tiene que llegar entero hasta el
+// SyncLog: si se queda en el objeto de metrics, no queda registro en la base.
+describe('SyncSapConfigToHubspot skip reporting', () => {
+  function buildInvoiceRun(hubspotResult) {
+    const syncLog = { _id: 'log-1' };
+    const syncLogRepository = {
+      start: jest.fn().mockResolvedValue(syncLog),
+      finish: jest.fn().mockResolvedValue(null),
+    };
+    const useCase = new SyncSapConfigToHubspot({
+      sapDataSource: {
+        fetchData: jest.fn().mockResolvedValue([{ NumAtCard: 'HS-DEAL-1' }, { NumAtCard: 'OC-9' }]),
+      },
+      mappingRepository: {
+        ensureDefaultMappings: jest.fn().mockResolvedValue([]),
+        findMappings: jest.fn().mockResolvedValue([{ sourceField: 'NumAtCard', targetField: 'num_at_card' }]),
+        mapRecords: jest.fn().mockResolvedValue([{ properties: {} }, { properties: {} }]),
+      },
+      hubspotSyncTarget: { send: jest.fn().mockResolvedValue(hubspotResult) },
+      syncLogRepository,
+      clientConfigRepository: {
+        findById: jest.fn(),
+        markSyncSucceeded: jest.fn().mockResolvedValue(null),
+        markSyncFailed: jest.fn(),
+      },
+      hubspotCredentialRepository: {
+        findByClientConfig: jest.fn().mockResolvedValue({ _id: 'cred-1' }),
+        findById: jest.fn(),
+      },
+      dateProvider: () => new Date('2026-08-19T18:06:05.571Z'),
+    });
+
+    return { useCase, syncLog, syncLogRepository };
+  }
+
+  it('writes updated, skipped and the reason breakdown into the sync log', async () => {
+    const { useCase, syncLog, syncLogRepository } = buildInvoiceRun({
+      sent: 1,
+      failed: 0,
+      created: 0,
+      updated: 1,
+      skipped: 1,
+      skippedReasons: [{ reason: 'no_deal_in_num_at_card', count: 1 }],
+    });
+
+    const result = await useCase.execute({
+      config: createConfig({ objectType: 'invoice' }),
+      tenantContext: { tenantKey: 'tenant-a', tenantModels: {} },
+    });
+
+    expect(syncLogRepository.finish).toHaveBeenLastCalledWith(syncLog, expect.objectContaining({
+      status: 'completed',
+      recordsProcessed: 2,
+      sent: 1,
+      updated: 1,
+      skipped: 1,
+      skippedReasons: [{ reason: 'no_deal_in_num_at_card', count: 1 }],
+    }));
+    expect(result.metrics).toEqual(expect.objectContaining({
+      hubspotUpdated: 1,
+      hubspotSkipped: 1,
+      hubspotSkippedReasons: [{ reason: 'no_deal_in_num_at_card', count: 1 }],
+    }));
+  });
+
+  // Los flujos que no descartan nada (contactos, empresas, productos) no
+  // devuelven estas claves y deben seguir escribiendo ceros, no undefined.
+  it('falls back to zero for the flows that never skip', async () => {
+    const { useCase, syncLog, syncLogRepository } = buildInvoiceRun({
+      sent: 2, failed: 0, created: 2, updated: 0,
+    });
+
+    await useCase.execute({
+      config: createConfig(),
+      tenantContext: { tenantKey: 'tenant-a', tenantModels: {} },
+    });
+
+    expect(syncLogRepository.finish).toHaveBeenLastCalledWith(syncLog, expect.objectContaining({
+      skipped: 0,
+      skippedReasons: [],
+    }));
   });
 });

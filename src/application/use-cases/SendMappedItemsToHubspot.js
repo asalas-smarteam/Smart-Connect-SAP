@@ -445,12 +445,23 @@ export class SendMappedItemsToHubspot {
     let sent = 0;
     let failed = 0;
     let updated = 0;
+    let skipped = 0;
+    // Motivo -> cuántas facturas se descartaron por él. Se guarda como array de
+    // pares en el SyncLog: una clave dinámica de Mongo es un riesgo innecesario
+    // y así el desglose se lee igual de bien desde la base.
+    const skippedByReason = new Map();
     const errors = [];
 
     for (const item of mappedItems) {
       try {
         const token = await getToken();
-        const result = await handler.process({ token, item, clientConfig, tenantModels });
+        const result = await handler.process({
+          token,
+          item,
+          clientConfig,
+          tenantModels,
+          logger: this.logger,
+        });
 
         if (result?.status === 'failed') {
           failed += 1;
@@ -458,6 +469,15 @@ export class SendMappedItemsToHubspot {
             payloadHubspot: item?.properties ?? null,
             responseHubspot: result?.hubspotResponse ?? result?.error?.details?.hubspotResponse ?? null,
           });
+          continue;
+        }
+
+        // Un descarte NO es un envío: contarlo como `sent` es lo que hacía que
+        // una corrida sin efecto se viera idéntica a una exitosa.
+        if (result?.status === 'skipped') {
+          skipped += 1;
+          const reason = result?.reason ?? 'unknown';
+          skippedByReason.set(reason, (skippedByReason.get(reason) ?? 0) + 1);
           continue;
         }
 
@@ -475,7 +495,21 @@ export class SendMappedItemsToHubspot {
       }
     }
 
-    return { ok: true, sent, failed, created: 0, updated, errors };
+    const skippedReasons = Array.from(
+      skippedByReason,
+      ([reason, count]) => ({ reason, count })
+    );
+
+    this.logger?.info?.({
+      msg: 'Sync de facturas terminado',
+      procesadas: mappedItems.length,
+      movidas: updated,
+      descartadas: skipped,
+      fallidas: failed,
+      motivos: skippedReasons,
+    });
+
+    return { ok: true, sent, failed, created: 0, updated, skipped, skippedReasons, errors };
   }
 
   async finalizeCreatedProductBatch({ createdResults, createdItems, clientConfig, tenantModels }) {
