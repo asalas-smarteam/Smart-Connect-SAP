@@ -1,6 +1,9 @@
 import * as hubspotClient from '../hubspotClient.js';
 import tenantConfigurationService from '#infrastructure/config/tenantConfiguration.service.js';
-import { KEEP_MAPPED_PRICE_FLAG } from '#domain/products/product-sync-strategy.constants.js';
+import {
+  KEEP_MAPPED_PRICE_FLAG,
+  RESOLVED_PRODUCT_PRICE_KEY,
+} from '#domain/products/product-sync-strategy.constants.js';
 import { WAREHOUSE_STOCK_KEY } from '#domain/warehouses/warehouse-stock-strategy.constants.js';
 import { BATCH_EXPIRY_KEY } from '#domain/batches/batch-expiry.constants.js';
 import { buildExclusiveDiscountProperties } from '#domain/products/discount-properties.service.js';
@@ -97,6 +100,20 @@ export async function preprocess({ item, tenantModels, preprocessContext }) {
       item.properties,
       buildExclusiveDiscountProperties(discountHsProperty, resolvedDiscount)
     );
+  }
+
+  // Va ANTES de la guarda de selectedPrice a proposito: la strategy setea las
+  // dos llaves, y si la guarda corriera primero haria `return` sin escribir
+  // nunca el precio. selectedPrice es la fila cruda de ItemPrices; esta llave es
+  // el numero ya elegido segun priceField, que es lo unico que preprocess puede
+  // escribir sin volver a decidir.
+  const resolvedProductPrice = rawSapData?.[RESOLVED_PRODUCT_PRICE_KEY];
+
+  if (Number.isFinite(resolvedProductPrice)) {
+    priceFields.forEach((field) => {
+      item.properties[field] = resolvedProductPrice;
+    });
+    return;
   }
 
   if (item?.rawSapData?.selectedPrice || item?.rawSapData?.[KEEP_MAPPED_PRICE_FLAG]) {
