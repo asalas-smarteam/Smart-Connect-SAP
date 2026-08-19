@@ -17,6 +17,7 @@ import TenantWebhookRuntimeRepository from '#infrastructure/database/repositorie
 import { getWebhookFailureNotificationConfig } from '#infrastructure/config/webhookFailureNotification.config.js';
 import hubspotClient from '#infrastructure/hubspot/hubspot-client.adapter.js';
 import HubspotWebhookAdapter from '#infrastructure/hubspot/HubspotWebhookAdapter.js';
+import { buildPublishIntegrationStatus } from '#infrastructure/hubspot/dealIntegrationStatus.service.js';
 import { buildNotifyWebhookFailure } from '#infrastructure/hubspot/webhookFailureNotifier.service.js';
 import logger from '#infrastructure/logger/logger.adapter.js';
 import MongooseWebhookEventRepository from '#infrastructure/repositories/MongooseWebhookEventRepository.js';
@@ -176,6 +177,13 @@ export function buildProcessWebhookDealEventBatch({
     resolveEventPayload,
     logger,
   }),
+  publishIntegrationStatus = buildPublishIntegrationStatus({
+    hubspotClient,
+    hubspotWebhookAdapter: new HubspotWebhookAdapter(),
+    getWebhookFailureNotificationConfig,
+    resolveEventPayload,
+    logger,
+  }),
 } = {}) {
   return new ProcessWebhookDealEventBatch({
     webhookEventRepository,
@@ -185,5 +193,6 @@ export function buildProcessWebhookDealEventBatch({
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
     notifyWebhookFailure,
+    publishIntegrationStatus,
   });
 }

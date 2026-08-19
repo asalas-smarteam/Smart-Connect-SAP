@@ -17,19 +17,40 @@ import {
 } from '../batch-expiry.constants.js';
 import { classifyBatch, sortBatches, roundQuantity } from '../batch-expiry.service.js';
 
-// OData v2 serializa Edm.DateTime como "/Date(1766707200000)/".
+// Gateway serializa Edm.DateTime como "/Date(1766707200000)/", PERO el
+// transporte ya lo convirtio a ISO-8601 antes de que la fila llegue aca
+// (odataV2Normalizer.normalizeODataV2Scalar corre dentro de fetchAll), asi que
+// en produccion la forma cruda NUNCA se ve: la real es "2030-11-01T00:00:00.000Z".
+// Se aceptan las dos porque cualquiera de las dos capas puede cambiar, y porque
+// aceptar solo la cruda es exactamente lo que dejo todas las fechas en null en
+// la primera corrida contra el S/4 de QA.
 export function parseODataDate(value) {
   if (value instanceof Date) {
     return Number.isNaN(value.getTime()) ? null : value;
   }
 
-  const match = /\/Date\((-?\d+)/.exec(String(value ?? ''));
+  const raw = String(value ?? '').trim();
 
-  if (!match) {
+  if (!raw) {
     return null;
   }
 
-  const date = new Date(Number(match[1]));
+  const match = /\/Date\((-?\d+)/.exec(raw);
+
+  if (match) {
+    const date = new Date(Number(match[1]));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  // Se exige forma ISO en vez de dejar adivinar a new Date(): new Date('1160.000')
+  // no es invalida, es el ano 1160, asi que un campo mal ruteado (una cantidad,
+  // por ejemplo) se leeria como un lote vencido hace nueve siglos en vez de
+  // quedar como "sin fecha".
+  if (!/^\d{4}-\d{2}-\d{2}([T\s]|$)/.test(raw)) {
+    return null;
+  }
+
+  const date = new Date(raw);
   return Number.isNaN(date.getTime()) ? null : date;
 }
 

@@ -1,5 +1,6 @@
 import { resolveErrorMessageText } from '#application/services/error-message.service.js';
 import { buildContactEmployeeFailureNote } from '#application/services/contact-employee-failures.service.js';
+import { INTEGRATION_STATUS_KEYS } from '#domain/webhooks/integration-status.constants.js';
 
 function emptySummary() {
   return {
@@ -16,6 +17,8 @@ const POST_SAP_FAILURE_STATUS = 'sap_created_hubspot_error';
 
 async function noopNotifyWebhookFailure() {}
 
+async function noopPublishIntegrationStatus() {}
+
 export class ProcessWebhookDealEventBatch {
   constructor({
     webhookEventRepository,
@@ -25,6 +28,7 @@ export class ProcessWebhookDealEventBatch {
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
     notifyWebhookFailure = noopNotifyWebhookFailure,
+    publishIntegrationStatus = noopPublishIntegrationStatus,
   }) {
     this.webhookEventRepository = webhookEventRepository;
     this.processWebhookDealEvent = processWebhookDealEvent;
@@ -33,6 +37,7 @@ export class ProcessWebhookDealEventBatch {
     this.buildWebhookSyncErrorEntry = buildWebhookSyncErrorEntry;
     this.buildErrorResponseSnapshot = buildErrorResponseSnapshot;
     this.notifyWebhookFailure = notifyWebhookFailure;
+    this.publishIntegrationStatus = publishIntegrationStatus;
   }
 
   async execute({ tenantModels, tenantId, tenantKey, portalId } = {}) {
@@ -121,6 +126,13 @@ export class ProcessWebhookDealEventBatch {
       // está completado. Y solo cuando markCompleted funcionó: el otro camino ya
       // deja el evento marcado con su propio error.
       if (markedCompleted) {
+        await this.safelyPublishIntegrationStatus({
+          event,
+          status: INTEGRATION_STATUS_KEYS.COMPLETED,
+          tenantModels,
+          portalId,
+        });
+
         await this.notifyContactEmployeeFailures({
           event,
           result,
@@ -210,6 +222,25 @@ export class ProcessWebhookDealEventBatch {
     }
   }
 
+  // Este archivo ya tiene safelyHandleProcessingError porque un error de bookkeeping se escapó
+  // del bucle y abortó el resto del batch. La publicación del estado no puede reabrir ese
+  // agujero: el servicio inyectado se traga sus propios errores, pero el default del
+  // constructor puede reemplazarse y un doble de test no tiene por qué respetar el contrato.
+  // Acá corre siempre DESPUÉS del bookkeeping, así que lo único correcto ante un fallo es
+  // dejarlo en el log y seguir con el resto del batch.
+  async safelyPublishIntegrationStatus({ event, status, tenantModels, portalId }) {
+    try {
+      await this.publishIntegrationStatus({ event, status, tenantModels, portalId });
+    } catch (error) {
+      this.logger.error({
+        msg: 'Failed to publish integration status',
+        eventId: String(event?._id),
+        status,
+        error: resolveErrorMessageText(error),
+      });
+    }
+  }
+
   // Sibling of the error.sapOrderCreated branch in handleProcessingError:
   // here processWebhookDealEvent already succeeded (SAP order created) and
   // only the local bookkeeping (markCompleted) failed, so the event is marked
@@ -252,6 +283,14 @@ export class ProcessWebhookDealEventBatch {
       docNum: result?.docNum ?? null,
       error: lastError,
     });
+
+    // SAP ya tiene el documento: reenviar lo duplicaría, así que el asesor tiene que escalar.
+    await this.safelyPublishIntegrationStatus({
+      event,
+      status: INTEGRATION_STATUS_KEYS.ERROR_SUPPORT,
+      tenantModels,
+      portalId,
+    });
   }
 
   async handleProcessingError({ error, event, tenantId, tenantKey, tenantModels, portalId, summary }) {
@@ -280,6 +319,13 @@ export class ProcessWebhookDealEventBatch {
         docNum: error.sapOrderResult?.docNum ?? null,
         error: error.message,
       });
+
+      await this.safelyPublishIntegrationStatus({
+        event,
+        status: INTEGRATION_STATUS_KEYS.ERROR_SUPPORT,
+        tenantModels,
+        portalId,
+      });
       return;
     }
 
@@ -305,6 +351,14 @@ export class ProcessWebhookDealEventBatch {
       summary.errored += 1;
       this.appendErrorDetails(summary, event, error);
       await this.notifyWebhookFailure({ event, lastError, tenantModels, portalId });
+      // `errored` es el único estado reenviable: no hay documento en SAP, así que el asesor
+      // corrige la data y vuelve a mandar. Este es el valor que se lo habilita.
+      await this.safelyPublishIntegrationStatus({
+        event,
+        status: INTEGRATION_STATUS_KEYS.ERROR_RETRY,
+        tenantModels,
+        portalId,
+      });
     }
 
     this.logger.error({

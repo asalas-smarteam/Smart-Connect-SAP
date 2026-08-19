@@ -4,6 +4,7 @@ import {
   S4BatchMasterStrategy,
 } from '../../../src/domain/batches/sources/s4-batch-master.strategy.js';
 import { BATCH_STATUS } from '../../../src/domain/batches/batch-expiry.constants.js';
+import { normalizeODataV2Response } from '../../../src/infrastructure/sap/transport/odataV2Normalizer.js';
 
 const NOW = new Date('2026-08-13T00:00:00Z');
 const strategy = new S4BatchMasterStrategy();
@@ -34,10 +35,29 @@ describe('parseODataDate', () => {
     expect(parseODataDate('/Date(1766707200000)/').toISOString()).toBe('2025-12-26T00:00:00.000Z');
   });
 
+  // REGRESION: esta es la forma que llega en produccion. El transporte ya
+  // convirtio /Date(ms)/ a ISO antes de que la fila entre a buildIndex, y
+  // aceptar solo la forma cruda dejaba TODAS las fechas en null: los productos
+  // salian con "sin fecha" en lotes_detalle y las cuatro propiedades escalares
+  // de vencimiento vacias, sin ningun error en el log.
+  it('convierte el ISO-8601 que emite el normalizador del transporte', () => {
+    expect(parseODataDate('2030-11-01T00:00:00.000Z').toISOString())
+      .toBe('2030-11-01T00:00:00.000Z');
+    expect(parseODataDate('2030-11-01').toISOString()).toBe('2030-11-01T00:00:00.000Z');
+  });
+
   it('devuelve null para null, vacio y basura', () => {
     expect(parseODataDate(null)).toBeNull();
     expect(parseODataDate('')).toBeNull();
     expect(parseODataDate('no es una fecha')).toBeNull();
+  });
+
+  // new Date('1160.000') NO es invalida: es el ano 1160. Sin el guardia de
+  // forma ISO, una cantidad mal ruteada se leeria como un lote vencido hace
+  // nueve siglos en vez de quedar como "sin fecha".
+  it('no acepta un numero suelto como fecha', () => {
+    expect(parseODataDate('1160.000')).toBeNull();
+    expect(parseODataDate('2030')).toBeNull();
   });
 
   it('deja pasar un Date que ya venga construido', () => {
@@ -192,5 +212,88 @@ describe('S4BatchMasterStrategy.resolveBatches', () => {
 
   it('requiresRemoteFetch es true', () => {
     expect(strategy.requiresRemoteFetch()).toBe(true);
+  });
+});
+
+// El resto de este archivo alimenta buildIndex con fixtures escritas a mano en
+// el formato CRUDO de Gateway, que es justamente lo que la estrategia nunca ve:
+// S4BatchResolver.fetchBatchRows delega en transport.fetchAll, y fetchAll pasa
+// cada pagina por normalizeODataV2Response. Este bloque cierra esa costura
+// haciendo correr el normalizador REAL sobre una respuesta REAL del S/4 de QA.
+describe('S4BatchMasterStrategy contra la salida real del transporte', () => {
+  // Respuesta textual de API_BATCH_SRV/Batch y A_MatlStkInAcctMod para el
+  // material 80003291, capturada del S/4 de QA el 2026-08-18.
+  const GATEWAY_BATCH_PAYLOAD = {
+    d: {
+      results: [
+        {
+          __metadata: { id: "…Batch(Material='80003291',BatchIdentifyingPlant='',Batch='0000026047')", type: 'cds_api_batch_srv.BatchType' },
+          Material: '80003291', BatchIdentifyingPlant: '', Batch: '0000026047',
+          ShelfLifeExpirationDate: '/Date(1919721600000)/', ManufactureDate: '/Date(1764201600000)/',
+        },
+        {
+          __metadata: { id: "…Batch(Material='80003291',BatchIdentifyingPlant='',Batch='OFFGRADE')", type: 'cds_api_batch_srv.BatchType' },
+          Material: '80003291', BatchIdentifyingPlant: '', Batch: 'OFFGRADE',
+          ShelfLifeExpirationDate: null, ManufactureDate: null,
+        },
+      ],
+    },
+  };
+
+  const GATEWAY_STOCK_PAYLOAD = {
+    d: {
+      results: [
+        {
+          __metadata: { type: 'API_MATERIAL_STOCK_SRV.A_MatlStkInAcctModType' },
+          Material: '80003291', Plant: 'CPDO', StorageLocation: '0203', Batch: '0000026047',
+          InventorySpecialStockType: '', InventoryStockType: '01',
+          MatlWrhsStkQtyInMatlBaseUnit: '1160.000',
+        },
+        {
+          __metadata: { type: 'API_MATERIAL_STOCK_SRV.A_MatlStkInAcctModType' },
+          Material: '80003291', Plant: 'CPDO', StorageLocation: '0203', Batch: 'OFFGRADE',
+          InventorySpecialStockType: '', InventoryStockType: '01',
+          MatlWrhsStkQtyInMatlBaseUnit: '7073.500',
+        },
+      ],
+    },
+  };
+
+  function resolveThroughTransport() {
+    const config = strategy.normalizeConfig({});
+    const index = strategy.buildIndex(
+      {
+        stockRows: normalizeODataV2Response(GATEWAY_STOCK_PAYLOAD),
+        batchRows: normalizeODataV2Response(GATEWAY_BATCH_PAYLOAD),
+      },
+      { config, now: NOW }
+    );
+    return strategy.resolveBatches({ record: { rawSapData: { Product: '80003291' } }, index });
+  }
+
+  it('el normalizador entrega ISO, no /Date(ms)/ — la premisa de este bloque', () => {
+    const [row] = normalizeODataV2Response(GATEWAY_BATCH_PAYLOAD);
+    expect(row.ShelfLifeExpirationDate).toBe('2030-11-01T00:00:00.000Z');
+  });
+
+  // REGRESION del primer run contra el S/4 de QA: el lote llegaba con cantidad
+  // y bodega correctas pero SIN fecha, porque parseODataDate solo aceptaba la
+  // forma cruda. HubSpot quedo con lotes_detalle en "sin fecha" y
+  // fecha_vencimiento_proxima / dias_para_vencer / lote_proximo_vencer en null.
+  it('conserva la fecha de caducidad al pasar por el normalizador real', () => {
+    const [lote] = resolveThroughTransport();
+
+    expect(lote.batch).toBe('0000026047');
+    expect(lote.expirationDate).toBeInstanceOf(Date);
+    expect(lote.expirationDate.toISOString().slice(0, 10)).toBe('2030-11-01');
+    expect(lote.status).not.toBe(BATCH_STATUS.SIN_FECHA);
+    expect(lote.daysToExpiry).toBeGreaterThan(0);
+  });
+
+  it('el lote que de verdad no tiene fecha en el maestro sigue quedando sin fecha', () => {
+    const offgrade = resolveThroughTransport().find((b) => b.batch === 'OFFGRADE');
+
+    expect(offgrade.expirationDate).toBeNull();
+    expect(offgrade.status).toBe(BATCH_STATUS.SIN_FECHA);
   });
 });

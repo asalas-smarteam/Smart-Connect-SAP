@@ -169,6 +169,25 @@ export async function seedCreateFieldsHubspot({ hubspotCredential, sapFlavor = D
     },
     { objectType: 'deal', label: 'Doc Entry SAP', name: 'sap_docentry' },
     { objectType: 'deal', label: 'Doc Num SAP', name: 'sap_docnum' },
+    // El asesor mueve esta propiedad a `retry` para disparar el workflow de reintento; los
+    // otros tres valores los escribe el integrador al cerrar el evento. El ciclo cierra solo:
+    // el único que devuelve el valor a `error_retry` es quien sabe de verdad que volvió a
+    // fallar, así que no puede quedar trabado en un valor que ya no dispara nada.
+    //
+    // `retry` es el único que el integrador NUNCA escribe.
+    {
+      objectType: 'deal',
+      label: 'Estado integracion SAP',
+      name: 'sap_integration_status',
+      type: 'enumeration',
+      fieldType: 'select',
+      options: [
+        { label: 'Completado', value: 'completed' },
+        { label: 'Error - reintentar', value: 'error_retry' },
+        { label: 'Error - revisar con soporte', value: 'error_support' },
+        { label: 'Reintentar', value: 'retry' },
+      ],
+    },
     { objectType: 'products', label: 'Código de producto', name: 'itemCode' },
   ];
 

@@ -244,4 +244,75 @@ describe('MongooseWebhookEventRepository', () => {
     const [, { $set }] = updateOne.mock.calls[0];
     expect(Object.keys($set)).not.toContain('payload.payloadSAP');
   });
+
+  // El cupo de dedup lo libera SOLO `errored`, que es el único estado reenviable. Se calcula
+  // del status y no se pone en `false` a secas porque markFailed también se llama con
+  // `waiting`: el camino de liberación de safelyHandleProcessingError. Un evento que sigue en
+  // cola liberando su cupo dejaría entrar un segundo envío en paralelo, que es exactamente el
+  // agujero que el índice único viene a tapar.
+  describe('dedupActive', () => {
+    function runMarkFailed({ eventType, status }) {
+      const updateOne = jest.fn().mockResolvedValue({});
+      const repository = new MongooseWebhookEventRepository({
+        WebhookEvent: { updateOne },
+        batchSize: 1,
+      });
+
+      return repository
+        .markFailed({ _id: 'event-1', eventType }, { status, retries: 1, lastError: 'boom' })
+        .then(() => updateOne.mock.calls[0][1].$set);
+    }
+
+    it('lo libera cuando el evento queda errored', async () => {
+      const $set = await runMarkFailed({ eventType: 'createDeal', status: 'errored' });
+
+      expect($set.dedupActive).toBe(false);
+    });
+
+    it('lo mantiene cuando el evento vuelve a la cola en waiting', async () => {
+      const $set = await runMarkFailed({ eventType: 'createDeal', status: 'waiting' });
+
+      expect($set.dedupActive).toBe(true);
+    });
+
+    it('lo mantiene cuando SAP ya creó el documento', async () => {
+      const $set = await runMarkFailed({
+        eventType: 'createQuotation',
+        status: 'sap_created_hubspot_error',
+      });
+
+      expect($set.dedupActive).toBe(true);
+    });
+
+    it('no lo escribe para updateQuotation, que no participa del dedup', async () => {
+      const $set = await runMarkFailed({ eventType: 'updateQuotation', status: 'errored' });
+
+      expect(Object.keys($set)).not.toContain('dedupActive');
+    });
+
+    it('no lo escribe para un evento legacy sin eventType', async () => {
+      const $set = await runMarkFailed({ eventType: undefined, status: 'errored' });
+
+      expect(Object.keys($set)).not.toContain('dedupActive');
+    });
+
+    // markCompleted NUNCA debe tocar dedupActive: si un cambio futuro lo pusiera en `false`
+    // ahí, un deal ya sincronizado con SAP se volvería reenviable, y en el flujo createDeal
+    // eso es una orden duplicada sin ninguna red que lo atrape (ese flujo no escribe
+    // SapDocumentLink; el índice único es su única protección). A diferencia de markFailed,
+    // que sí libera el cupo cuando el estado es errored, completed nunca libera nada.
+    it('markCompleted no escribe dedupActive, así que nunca libera el cupo de un deal ya sincronizado', async () => {
+      const updateOne = jest.fn().mockResolvedValue({});
+      const repository = new MongooseWebhookEventRepository({
+        WebhookEvent: { updateOne },
+        batchSize: 1,
+      });
+      const event = { _id: 'event-1', eventType: 'createDeal' };
+
+      await repository.markCompleted(event, { docEntry: 10, docNum: 20, cardCode: 'CL001' });
+
+      const [, { $set }] = updateOne.mock.calls[0];
+      expect(Object.keys($set)).not.toContain('dedupActive');
+    });
+  });
 });

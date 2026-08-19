@@ -1,4 +1,8 @@
 import { resolveErrorMessageText } from '#application/services/error-message.service.js';
+import {
+  DEDUPLICATED_EVENT_TYPES,
+  RESENDABLE_STATUS,
+} from '#infrastructure/webhook/webhookEvent.service.js';
 
 // Defense in depth: ProcessWebhookDealEventBatch already normalizes lastError
 // before calling markFailed, but this keeps any future caller from repeating
@@ -14,6 +18,20 @@ function toSafeLastError(lastError) {
   }
 
   return resolveErrorMessageText(lastError);
+}
+
+// Deriva el cupo de dedup del estado destino en vez de recibirlo del llamador: el batch llama
+// a markFailed con tres estados distintos (`errored`, `sap_created_hubspot_error` y `waiting`
+// en el camino de liberación) y solo el primero libera el cupo. Se consulta
+// DEDUPLICATED_EVENT_TYPES en vez de mirar si el documento ya trae el campo, así los eventos
+// que quedaron sin backfillear se corrigen solos la primera vez que pasan por acá -- y
+// updateQuotation nunca lo recibe, que es lo que le permite repetirse.
+function resolveDedupActive(eventType, status) {
+  if (!DEDUPLICATED_EVENT_TYPES.has(eventType)) {
+    return undefined;
+  }
+
+  return status !== RESENDABLE_STATUS;
 }
 
 export class MongooseWebhookEventRepository {
@@ -103,6 +121,12 @@ export class MongooseWebhookEventRepository {
       retries: failure.retries,
       lastError: toSafeLastError(failure.lastError),
     };
+
+    const dedupActive = resolveDedupActive(event?.eventType, failure.status);
+
+    if (dedupActive !== undefined) {
+      updates.dedupActive = dedupActive;
+    }
 
     if (failure.sapResult) {
       updates['payload.sapResult'] = {

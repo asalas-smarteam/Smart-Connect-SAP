@@ -530,4 +530,153 @@ describe('ProcessWebhookDealEventBatch', () => {
       expect(notifyWebhookFailure).not.toHaveBeenCalled();
     });
   });
+
+  describe('publicación del estado de integración', () => {
+    const tenantModels = { WebhookEvent: {} };
+
+    function buildUseCase({ event, processWebhookDealEvent, markCompleted, publishIntegrationStatus }) {
+      const repository = {
+        claimWaiting: jest.fn().mockResolvedValue([event]),
+        markCompleted: markCompleted || jest.fn(),
+        markFailed: jest.fn(),
+      };
+      const useCase = new ProcessWebhookDealEventBatch({
+        webhookEventRepository: repository,
+        processWebhookDealEvent,
+        logger: { info: jest.fn(), error: jest.fn(), warn: jest.fn() },
+        maxRetries: 3,
+        buildWebhookSyncErrorEntry: jest.fn(),
+        buildErrorResponseSnapshot: jest.fn(),
+        notifyWebhookFailure: jest.fn(),
+        publishIntegrationStatus,
+      });
+
+      return { useCase, repository };
+    }
+
+    it('publica completed cuando el evento se marca completado', async () => {
+      const event = { _id: 'event-1', payload: { deal: { hs_object_id: 'deal-1' } } };
+      const publishIntegrationStatus = jest.fn().mockResolvedValue(undefined);
+      const { useCase } = buildUseCase({
+        event,
+        processWebhookDealEvent: jest.fn().mockResolvedValue({
+          cardCode: 'C20000',
+          docEntry: 10,
+          docNum: 20,
+        }),
+        publishIntegrationStatus,
+      });
+
+      await useCase.execute({ tenantModels, portalId: 'portal-id' });
+
+      expect(publishIntegrationStatus).toHaveBeenCalledWith({
+        event,
+        status: 'completed',
+        tenantModels,
+        portalId: 'portal-id',
+      });
+    });
+
+    // retries: 2 con maxRetries: 3 deja nextRetries en 3, que ya no es menor al máximo: el
+    // evento va a `errored`, el único estado que habilita el reenvío.
+    it('publica errorRetry cuando el evento agota los retries', async () => {
+      const event = { _id: 'event-1', retries: 2, maxRetries: 3, payload: { deal: {} } };
+      const publishIntegrationStatus = jest.fn().mockResolvedValue(undefined);
+      const { useCase, repository } = buildUseCase({
+        event,
+        processWebhookDealEvent: jest.fn().mockRejectedValue(new Error('SAP timeout')),
+        publishIntegrationStatus,
+      });
+
+      await useCase.execute({ tenantModels, portalId: 'portal-id' });
+
+      expect(repository.markFailed).toHaveBeenCalledWith(
+        event,
+        expect.objectContaining({ status: 'errored' })
+      );
+      expect(publishIntegrationStatus).toHaveBeenCalledWith({
+        event,
+        status: 'errorRetry',
+        tenantModels,
+        portalId: 'portal-id',
+      });
+    });
+
+    it('no publica nada cuando al evento le quedan retries', async () => {
+      const event = { _id: 'event-1', retries: 0, maxRetries: 3, payload: { deal: {} } };
+      const publishIntegrationStatus = jest.fn().mockResolvedValue(undefined);
+      const { useCase } = buildUseCase({
+        event,
+        processWebhookDealEvent: jest.fn().mockRejectedValue(new Error('SAP timeout')),
+        publishIntegrationStatus,
+      });
+
+      await useCase.execute({ tenantModels, portalId: 'portal-id' });
+
+      expect(publishIntegrationStatus).not.toHaveBeenCalled();
+    });
+
+    it('publica errorSupport cuando SAP ya había creado el documento', async () => {
+      const event = { _id: 'event-1', retries: 0, maxRetries: 3, payload: { deal: {} } };
+      const publishIntegrationStatus = jest.fn().mockResolvedValue(undefined);
+      const { useCase } = buildUseCase({
+        event,
+        processWebhookDealEvent: jest.fn().mockRejectedValue(
+          Object.assign(new Error('HubSpot down'), {
+            sapOrderCreated: true,
+            sapOrderResult: { docEntry: 10, docNum: 20 },
+          })
+        ),
+        publishIntegrationStatus,
+      });
+
+      await useCase.execute({ tenantModels, portalId: 'portal-id' });
+
+      expect(publishIntegrationStatus).toHaveBeenCalledWith({
+        event,
+        status: 'errorSupport',
+        tenantModels,
+        portalId: 'portal-id',
+      });
+    });
+
+    it('publica errorSupport cuando el bookkeeping falla después de crear en SAP', async () => {
+      const event = { _id: 'event-1', payload: { deal: {} } };
+      const publishIntegrationStatus = jest.fn().mockResolvedValue(undefined);
+      const { useCase } = buildUseCase({
+        event,
+        processWebhookDealEvent: jest.fn().mockResolvedValue({ docEntry: 10, docNum: 20 }),
+        markCompleted: jest.fn().mockRejectedValue(new Error('Mongo down')),
+        publishIntegrationStatus,
+      });
+
+      await useCase.execute({ tenantModels, portalId: 'portal-id' });
+
+      expect(publishIntegrationStatus).toHaveBeenCalledWith({
+        event,
+        status: 'errorSupport',
+        tenantModels,
+        portalId: 'portal-id',
+      });
+      // markCompleted falló, así que el evento NO está completado: no puede publicarse también
+      // `completed` o la propiedad mentiría sobre el estado del documento.
+      expect(publishIntegrationStatus).toHaveBeenCalledTimes(1);
+    });
+
+    // Este archivo ya tiene safelyHandleProcessingError porque un error de bookkeeping se
+    // escapó del bucle y abortó el resto del batch. El publicador no puede reabrir ese agujero:
+    // aunque el servicio se trague sus propios errores, acá va el segundo cinturón.
+    it('un fallo del publicador no aborta el batch ni cambia el resumen', async () => {
+      const event = { _id: 'event-1', payload: { deal: { hs_object_id: 'deal-1' } } };
+      const { useCase } = buildUseCase({
+        event,
+        processWebhookDealEvent: jest.fn().mockResolvedValue({ docEntry: 10, docNum: 20 }),
+        publishIntegrationStatus: jest.fn().mockRejectedValue(new Error('HubSpot 500')),
+      });
+
+      const summary = await useCase.execute({ tenantModels, portalId: 'portal-id' });
+
+      expect(summary).toMatchObject({ processed: 1, completed: 1, errored: 0 });
+    });
+  });
 });
