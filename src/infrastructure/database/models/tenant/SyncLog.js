@@ -30,6 +30,29 @@ export const syncLogSchema = new Schema(
       type: Number,
       default: 0,
     },
+    // `sent` por sí solo no dice si la corrida tuvo efecto: un handler puede
+    // descartar cada registro y terminar en verde. Estos tres campos son lo que
+    // permite auditar una corrida sin volver a leer el código.
+    updated: {
+      type: Number,
+      default: 0,
+    },
+    skipped: {
+      type: Number,
+      default: 0,
+    },
+    skippedReasons: {
+      type: [
+        new Schema(
+          {
+            reason: { type: String, required: true },
+            count: { type: Number, default: 0 },
+          },
+          { _id: false }
+        ),
+      ],
+      default: [],
+    },
     errorMessage: {
       type: Schema.Types.Mixed,
       default: null,

@@ -353,11 +353,36 @@ export async function startSyncLog({
   });
 }
 
+// El Mongo de producción es anterior a la 5.0 y rechaza las claves con `$` al
+// frente; un solo par inválido tumba el `$set` COMPLETO y se pierden también el
+// status y el errorMessage. El desglose se sanea antes de escribirlo aunque hoy
+// los motivos sean una lista cerrada en el código.
+const SAFE_SKIP_REASON = /^[A-Za-z0-9_-]+$/;
+
+function sanitizeSkippedReasons(skippedReasons) {
+  if (!Array.isArray(skippedReasons)) {
+    return [];
+  }
+
+  return skippedReasons
+    .filter((entry) => entry
+      && typeof entry === 'object'
+      && typeof entry.reason === 'string'
+      && SAFE_SKIP_REASON.test(entry.reason))
+    .map((entry) => ({
+      reason: entry.reason,
+      count: Number.isFinite(Number(entry.count)) ? Number(entry.count) : 0,
+    }));
+}
+
 export async function finishSyncLog(syncLog, {
   status,
   recordsProcessed = 0,
   sent = 0,
   failed = 0,
+  updated = 0,
+  skipped = 0,
+  skippedReasons = [],
   errorMessage = null,
   errors = [],
   finishedAt = new Date(),
@@ -376,6 +401,13 @@ export async function finishSyncLog(syncLog, {
     failed: Number.isFinite(Number(failed))
       ? Number(failed)
       : 0,
+    updated: Number.isFinite(Number(updated))
+      ? Number(updated)
+      : 0,
+    skipped: Number.isFinite(Number(skipped))
+      ? Number(skipped)
+      : 0,
+    skippedReasons: sanitizeSkippedReasons(skippedReasons),
     errorMessage: errorMessage ?? null,
     errors: Array.isArray(errors) ? serializeLogValue(errors) ?? [] : [],
     finishedAt,

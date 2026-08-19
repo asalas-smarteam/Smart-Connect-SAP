@@ -183,9 +183,13 @@ export class B1ServiceLayerTransport {
       // raises it to 100). When a caller ends up with fewer rows than SAP holds,
       // the first thing worth knowing is whether the nextLink chain was followed
       // at all or the read stopped on page one -- so the page count is logged.
+      // La URL va aparte del path: es lo único que deja constancia del $filter
+      // y del $select con los que se pidió, y sin eso un rowCount 0 no se puede
+      // diagnosticar sin reproducir la corrida entera.
       logger.info('B1 Service Layer collection fetched', {
         tenantKey: sapSessionManager.resolveTenantKey(this.config),
         path: path ?? initialUrl,
+        url: initialUrl,
         pages,
         rowCount: items.length,
       });

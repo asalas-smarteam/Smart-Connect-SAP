@@ -185,4 +185,19 @@ describe('B1ServiceLayerTransport', () => {
       expect.objectContaining({ path: '/SalesPersons', pages: 2, rowCount: 2 })
     );
   });
+
+  // Sin la URL no queda registro del $filter que realmente se mandó, que es
+  // justo el dato que hace falta cuando una corrida devuelve 0 filas.
+  it('logs the full requested URL, not just the path', async () => {
+    const url = 'https://sap.example.com:50000/b1s/v2/Invoices?$select=NumAtCard&$filter=UpdateDate%20ge%202026-08-19T00:00:00Z';
+    mockAxiosGet.mockResolvedValueOnce({ data: { value: [{ DocNum: 1 }] } });
+
+    const transport = new B1ServiceLayerTransport({ config });
+    await transport.fetchAll({ url, path: '/Invoices' });
+
+    expect(logger.info).toHaveBeenCalledWith(
+      'B1 Service Layer collection fetched',
+      expect.objectContaining({ path: '/Invoices', url, rowCount: 1 })
+    );
+  });
 });

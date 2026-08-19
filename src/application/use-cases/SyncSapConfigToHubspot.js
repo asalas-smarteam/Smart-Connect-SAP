@@ -260,6 +260,9 @@ export class SyncSapConfigToHubspot {
         recordsProcessed: metrics.recordsProcessed,
         sent: metrics.hubspotSent,
         failed: metrics.hubspotFailed,
+        updated: metrics.hubspotUpdated,
+        skipped: metrics.hubspotSkipped,
+        skippedReasons: metrics.hubspotSkippedReasons,
         errors: metrics.hubspotErrors,
         finishedAt: this.dateProvider(),
       });
@@ -318,6 +321,13 @@ export class SyncSapConfigToHubspot {
     const hubspotCreated = hubspotResult?.created ?? 0;
     const hubspotUpdated = hubspotResult?.updated ?? Math.max(hubspotSent - hubspotCreated, 0);
     const hubspotErrors = Array.isArray(hubspotResult?.errors) ? hubspotResult.errors : [];
+    // Solo el flujo de facturas descarta registros hoy. Los demás no devuelven
+    // estas claves y tienen que quedar en cero, nunca en undefined, porque el
+    // SyncLog las persiste tal cual.
+    const hubspotSkipped = Number(hubspotResult?.skipped) || 0;
+    const hubspotSkippedReasons = Array.isArray(hubspotResult?.skippedReasons)
+      ? hubspotResult.skippedReasons
+      : [];
 
     return {
       recordsProcessed,
@@ -325,6 +335,8 @@ export class SyncSapConfigToHubspot {
       hubspotFailed,
       hubspotCreated,
       hubspotUpdated,
+      hubspotSkipped,
+      hubspotSkippedReasons,
       hubspotErrors,
     };
   }
@@ -459,6 +471,10 @@ export class SyncSapConfigToHubspot {
         failed: result?.failed ?? 0,
         created: result?.created ?? 0,
         updated: result?.updated ?? Math.max((result?.sent ?? 0) - (result?.created ?? 0), 0),
+        // Este re-armado es explícito campo por campo: una clave que no se
+        // liste acá se pierde en silencio antes de llegar al SyncLog.
+        skipped: result?.skipped ?? 0,
+        skippedReasons: Array.isArray(result?.skippedReasons) ? result.skippedReasons : [],
         errors: Array.isArray(result?.errors) ? result.errors : [],
         recordsProcessed: mappedRecords.length,
       };
@@ -468,6 +484,8 @@ export class SyncSapConfigToHubspot {
         failed: mappedRecords.length,
         created: 0,
         updated: 0,
+        skipped: 0,
+        skippedReasons: [],
         errors: [],
         recordsProcessed: mappedRecords.length,
       };
