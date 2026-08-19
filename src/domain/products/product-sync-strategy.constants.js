@@ -31,3 +31,24 @@ export const DEFAULT_PRODUCT_SYNC_PATTERNS = Object.freeze({
   uniqueCodePattern: '{itemCode}__PL_{priceListValue}',
   namePattern: '{itemName} - {priceListName}',
 });
+
+// De donde sale el precio de un producto en la strategy oneToOne.
+// 'mapped' = del campo de cabecera que puso el FieldMapping (comportamiento
+// historico: requirePrice.value decide conservar-o-cerar). 'itemPrices' = de la
+// fila de ItemPrices cuyo PriceList coincide con la config priceList del tenant.
+// El default es 'mapped' a proposito: un tenant sin la llave `source` no cambia
+// de comportamiento.
+export const PRODUCT_PRICE_SOURCES = Object.freeze({
+  MAPPED: 'mapped',
+  ITEM_PRICES: 'itemPrices',
+});
+
+export const DEFAULT_PRODUCT_PRICE_SOURCE = PRODUCT_PRICE_SOURCES.MAPPED;
+
+export const DEFAULT_PRODUCT_PRICE_FIELD = 'Price';
+
+// Llave bajo la que la strategy adjunta el precio ya resuelto (un numero), para
+// que product.handler.js lo escriba en los campos de fieldsPricesHS en vez de
+// ponerlos en 0. Mismo contrato que WAREHOUSE_STOCK_KEY y BATCH_EXPIRY_KEY:
+// alguien resuelve y adjunta bajo rawSapData, preprocess traduce a propiedades.
+export const RESOLVED_PRODUCT_PRICE_KEY = '_resolvedProductPrice';
