@@ -116,14 +116,83 @@ describe('SapSyncDataAdapter flavor routing', () => {
     })).rejects.toThrow('SAP credentials not found for S4_ODATA mode');
   });
 
-  it('still returns null for unknown integration modes', async () => {
+  // Antes devolvía null, y ese null llegaba al sync como "SAP no tenía datos".
+  // Ver el bloque de abajo: ahora falla nombrando el modo.
+  it('fails instead of returning null for unknown integration modes', async () => {
     const adapter = new SapSyncDataAdapter();
-    const result = await adapter.fetchData({
+
+    await expect(adapter.fetchData({
       clientConfigId: 'config-1',
       tenantContext: { tenantModels: buildTenantModels('SOMETHING_ELSE') },
       fetchOptions: {},
+    })).rejects.toThrow(/SOMETHING_ELSE/);
+  });
+});
+
+// Una config cuyo modo no resuelve devolvía null en silencio: el sync la leía
+// como "SAP no tenía datos" y cerraba el SyncLog en verde con 0 registros y sin
+// error. Así estuvo una semana la tarea de facturas de Distelsa, apuntando a un
+// integrationModeId que no existía en ninguna base.
+describe('SapSyncDataAdapter unusable configuration', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  function buildModels(config) {
+    return {
+      ClientConfig: { findById: () => ({ populate: async () => config }) },
+      SapCredentials: { find: () => ({ lean: async () => [] }) },
+    };
+  }
+
+  it('fails naming the config when the integration mode does not resolve', async () => {
+    const adapter = new SapSyncDataAdapter();
+
+    await expect(adapter.fetchData({
+      clientConfigId: 'cfg-1',
+      tenantContext: {
+        tenantModels: buildModels({
+          _id: 'cfg-1',
+          clientName: 'Obtener Facturas',
+          integrationModeId: null,
+        }),
+      },
+    })).rejects.toThrow(/Obtener Facturas.*cfg-1/s);
+  });
+
+  it('fails when the mode resolves to a name this adapter cannot route', async () => {
+    const adapter = new SapSyncDataAdapter();
+
+    await expect(adapter.fetchData({
+      clientConfigId: 'cfg-1',
+      tenantContext: {
+        tenantModels: buildModels({
+          _id: 'cfg-1',
+          clientName: 'Obtener Facturas',
+          integrationModeId: { name: 'FTP_DROP' },
+        }),
+      },
+    })).rejects.toThrow(/FTP_DROP/);
+  });
+
+  it('fails when the client config id does not exist at all', async () => {
+    const adapter = new SapSyncDataAdapter();
+
+    await expect(adapter.fetchData({
+      clientConfigId: 'cfg-fantasma',
+      tenantContext: { tenantModels: buildModels(null) },
+    })).rejects.toThrow(/cfg-fantasma/);
+  });
+
+  it('never resolves to null, so an empty read can only mean SAP returned nothing', async () => {
+    mockServiceLayerExecute.mockResolvedValue([]);
+
+    const adapter = new SapSyncDataAdapter();
+    const result = await adapter.fetchData({
+      clientConfigId: 'config-1',
+      tenantContext: { tenantModels: buildTenantModels('SERVICE_LAYER') },
     });
 
-    expect(result).toBeNull();
+    expect(result).toEqual([]);
   });
 });

@@ -20,11 +20,18 @@ export class SapSyncDataAdapter {
         select: 'name',
       });
 
+      // Devolver null acá era indistinguible de "SAP no tenía registros": el
+      // sync cerraba el SyncLog en verde con 0 registros y sin error. Una config
+      // que no se puede leer es una falla de configuración y tiene que quedar
+      // registrada como tal, en SyncLog.errorMessage y en ClientConfig.lastError.
       if (!config) {
-        return null;
+        throw new Error(`ClientConfig ${clientConfigId} no existe en este tenant`);
       }
 
-      switch (config?.integrationModeId?.name) {
+      const modeName = config?.integrationModeId?.name;
+      const configLabel = `"${config.clientName ?? 'sin nombre'}" (${config._id})`;
+
+      switch (modeName) {
         case 'STORE_PROCEDURE':
           return spMode.execute(config);
         case 'SQL_SCRIPT':
@@ -36,10 +43,20 @@ export class SapSyncDataAdapter {
         case 'S4_ODATA':
           return this.fetchS4ODataData({ config, SapCredentials, fetchOptions });
         default:
-          return null;
+          // Se distinguen los dos casos porque el arreglo es distinto: una
+          // referencia rota se corrige apuntando la config al modo correcto; un
+          // nombre desconocido significa que ese modo no está implementado.
+          throw new Error(
+            modeName
+              ? `El ClientConfig ${configLabel} usa el modo de integracion "${modeName}", que este adaptador no sabe leer`
+              : `El ClientConfig ${configLabel} no tiene un modo de integracion valido: integrationModeId ${config.integrationModeId ?? 'ausente'} no resuelve a ningun IntegrationMode del tenant`
+          );
       }
     } catch (error) {
-      logger.error('Error fetching SAP data', { error });
+      logger.error('Error fetching SAP data', {
+        clientConfigId,
+        error: error.message,
+      });
       throw new Error(`Failed to fetch SAP data: ${error.message}`);
     }
   }
