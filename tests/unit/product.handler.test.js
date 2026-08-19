@@ -309,6 +309,96 @@ describe('product.handler preprocess', () => {
       expect(item.properties).toEqual({});
     });
   });
+
+  describe('_resolvedProductPrice puesto por OneToOneProductStrategy', () => {
+    function buildTenantModels(priceFields) {
+      return {
+        Configuration: {
+          findOneAndUpdate: jest.fn().mockResolvedValue({
+            key: 'fieldsPricesHS',
+            value: priceFields,
+            userUpdated: 'admin',
+          }),
+        },
+      };
+    }
+
+    it('escribe el precio resuelto en el campo de precio en vez de 0', async () => {
+      const item = {
+        properties: {},
+        rawSapData: { _warehouseStock: {}, _resolvedProductPrice: 36.607143 },
+      };
+
+      await preprocess({ item, tenantModels: buildTenantModels(['hs_price_gtq']) });
+
+      expect(item.properties.hs_price_gtq).toBe(36.607143);
+    });
+
+    it('escribe el mismo precio en todos los campos de fieldsPricesHS', async () => {
+      const item = {
+        properties: {},
+        rawSapData: { _warehouseStock: {}, _resolvedProductPrice: 36.607143 },
+      };
+
+      await preprocess({ item, tenantModels: buildTenantModels(['hs_price_gtq', 'hs_price_usd']) });
+
+      expect(item.properties.hs_price_gtq).toBe(36.607143);
+      expect(item.properties.hs_price_usd).toBe(36.607143);
+    });
+
+    it('gana sobre selectedPrice: la guarda de selectedPrice no puede cortar antes', async () => {
+      const item = {
+        properties: {},
+        rawSapData: {
+          _warehouseStock: {},
+          _resolvedProductPrice: 36.607143,
+          selectedPrice: { PriceList: 1, Price: 36.607143 },
+        },
+      };
+
+      await preprocess({ item, tenantModels: buildTenantModels(['hs_price_gtq']) });
+
+      expect(item.properties.hs_price_gtq).toBe(36.607143);
+    });
+
+    it('sigue cerando cuando la llave no esta (regresion del comportamiento actual)', async () => {
+      const item = { properties: {}, rawSapData: { _warehouseStock: {} } };
+
+      await preprocess({ item, tenantModels: buildTenantModels(['hs_price_gtq']) });
+
+      expect(item.properties.hs_price_gtq).toBe(0);
+    });
+
+    it('cera cuando la llave viene en null o NaN, que es la ruta SET_ZERO', async () => {
+      const withNull = { properties: {}, rawSapData: { _warehouseStock: {}, _resolvedProductPrice: null } };
+      const withNaN = { properties: {}, rawSapData: { _warehouseStock: {}, _resolvedProductPrice: Number.NaN } };
+
+      await preprocess({ item: withNull, tenantModels: buildTenantModels(['hs_price_gtq']) });
+      await preprocess({ item: withNaN, tenantModels: buildTenantModels(['hs_price_gtq']) });
+
+      expect(withNull.properties.hs_price_gtq).toBe(0);
+      expect(withNaN.properties.hs_price_gtq).toBe(0);
+    });
+
+    it('no interfiere con el stock por bodega ni con los lotes', async () => {
+      const item = {
+        properties: {},
+        rawSapData: {
+          _resolvedProductPrice: 36.607143,
+          _warehouseStock: { gt00_onhand: 12 },
+          [BATCH_EXPIRY_KEY]: { lotes_vigentes: 3 },
+        },
+      };
+
+      await preprocess({ item, tenantModels: buildTenantModels(['hs_price_gtq']) });
+
+      expect(item.properties).toEqual({
+        gt00_onhand: 12,
+        lotes_vigentes: 3,
+        hs_price_gtq: 36.607143,
+      });
+    });
+  });
 });
 
 describe('product.handler + lotes de caducidad', () => {
