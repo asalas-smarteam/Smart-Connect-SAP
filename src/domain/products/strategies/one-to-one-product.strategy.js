@@ -119,16 +119,36 @@ export class OneToOneProductStrategy {
     const priceSource = normalizeProductPriceSource(strategyConfig.requirePrice, {
       logger: this.logger,
     });
+    const priceComesFromItemPrices = priceSource.from === PRODUCT_PRICE_SOURCES.ITEM_PRICES;
     // null cubre los dos casos en los que no hay que resolver nada: la fuente es
     // 'mapped', o la config del tenant no se pudo leer.
-    const resolvedPriceList = priceSource.from === PRODUCT_PRICE_SOURCES.ITEM_PRICES
+    const resolvedPriceList = priceComesFromItemPrices
       ? await this.resolvePriceList({ tenantContext, tenantId })
       : null;
+    // requirePrice.value y source.from responden preguntas distintas: "quiero un
+    // precio" vs "de donde sale". Cuando source.from es itemPrices, la resolucion
+    // gana (asi lo define el spec) y keepMappedPrice NO se aplica, sin importar si
+    // la lista se pudo resolver o no: si se aplicara en el caso de fallo,
+    // resucitaria el precio de la corrida anterior, que es justo el bug que
+    // SET_ZERO existe para evitar.
+    const keepMappedPrice = Boolean(requirePriceValue) && !priceComesFromItemPrices;
+
+    if (requirePriceValue && priceComesFromItemPrices) {
+      this.logger.warn?.({
+        msg: 'requirePrice.value se ignora: requirePrice.source.from declara itemPrices y la resolucion gana',
+        tenantId,
+      });
+    }
+
+    // Solo tiene sentido hablar de "resuelta o no" cuando efectivamente se
+    // intento resolver (source itemPrices). Para 'mapped' no hay nada que
+    // resolver, asi que no cuenta como una resolucion fallida.
+    const priceListResolved = priceComesFromItemPrices ? resolvedPriceList !== null : true;
     let productsWithoutPrice = 0;
 
     const recordsToSend = records.map((record) => {
       const base = applyPriceAndCostConfig(record, {
-        keepMappedPrice: requirePriceValue,
+        keepMappedPrice,
         dropCostField: !requireCostFlag,
         costField,
       });
@@ -159,6 +179,7 @@ export class OneToOneProductStrategy {
       costField,
       priceSource: priceSource.from,
       priceList: resolvedPriceList,
+      priceListResolved,
       productsWithoutPrice,
     });
 

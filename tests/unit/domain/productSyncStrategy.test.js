@@ -397,4 +397,131 @@ describe('OneToOneProductStrategy', () => {
     // Y el campo de costo sigue llegando, que es lo que ese tenant necesita.
     expect(sentRecords[0].properties.hs_cost_of_goods_sold).toBe(150);
   });
+
+  function findStartLogCall(logger) {
+    return logger.info.mock.calls.find(([payload]) => payload?.msg === 'Starting product sync strategy');
+  }
+
+  it('reporta priceListResolved: true cuando la lista se resuelve', async () => {
+    const { strategy, logger } = buildStrategyWithPriceList({ priceList: 1 });
+
+    await strategy.execute({
+      mappedRecords: [buildProductRecord(ITEM_PRICES)],
+      config: {},
+      objectType: 'product',
+      tenantContext: { tenantModels: {} },
+      credentials: {},
+      strategyConfig: ITEM_PRICES_CONFIG,
+    });
+
+    const startCall = findStartLogCall(logger);
+    expect(startCall[0]).toMatchObject({ priceListResolved: true });
+  });
+
+  it('reporta priceListResolved: false y priceList: null cuando resolveTenantPriceList lanza', async () => {
+    const { strategy, logger } = buildStrategyWithPriceList({ throws: true });
+
+    await strategy.execute({
+      mappedRecords: [buildProductRecord(ITEM_PRICES)],
+      config: {},
+      objectType: 'product',
+      tenantContext: { tenantModels: {} },
+      credentials: {},
+      strategyConfig: ITEM_PRICES_CONFIG,
+    });
+
+    const startCall = findStartLogCall(logger);
+    expect(startCall[0]).toMatchObject({ priceListResolved: false, priceList: null });
+  });
+
+  it('requirePrice.value:true + source itemPrices: usa el precio resuelto y no marca KEEP_MAPPED_PRICE_FLAG', async () => {
+    const { hubspotSyncTarget, strategy, logger } = buildStrategyWithPriceList({ priceList: 1 });
+
+    await strategy.execute({
+      mappedRecords: [buildProductRecord(ITEM_PRICES)],
+      config: {},
+      objectType: 'product',
+      tenantContext: { tenantModels: {} },
+      credentials: {},
+      strategyConfig: {
+        strategy: PRODUCT_SYNC_STRATEGIES.ONE_TO_ONE_PRODUCT,
+        requirePrice: { value: true, field: '', source: { from: 'itemPrices' } },
+      },
+    });
+
+    const sentRecords = hubspotSyncTarget.send.mock.calls[0][0].mappedRecords;
+    expect(sentRecords[0].rawSapData[RESOLVED_PRODUCT_PRICE_KEY]).toBe(36.607143);
+    expect(sentRecords[0].rawSapData).not.toHaveProperty(KEEP_MAPPED_PRICE_FLAG);
+    expect(logger.warn).toHaveBeenCalled();
+  });
+
+  it('requirePrice.value:true + source itemPrices sin fila para la lista: no queda ni precio resuelto ni KEEP_MAPPED_PRICE_FLAG', async () => {
+    const { hubspotSyncTarget, strategy, logger } = buildStrategyWithPriceList({ priceList: 3 });
+
+    await strategy.execute({
+      mappedRecords: [buildProductRecord(ITEM_PRICES)],
+      config: {},
+      objectType: 'product',
+      tenantContext: { tenantModels: {} },
+      credentials: {},
+      strategyConfig: {
+        strategy: PRODUCT_SYNC_STRATEGIES.ONE_TO_ONE_PRODUCT,
+        requirePrice: { value: true, field: '', source: { from: 'itemPrices' } },
+      },
+    });
+
+    const sentRecords = hubspotSyncTarget.send.mock.calls[0][0].mappedRecords;
+    expect(sentRecords[0].rawSapData).not.toHaveProperty(RESOLVED_PRODUCT_PRICE_KEY);
+    expect(sentRecords[0].rawSapData).not.toHaveProperty(KEEP_MAPPED_PRICE_FLAG);
+    expect(logger.warn).toHaveBeenCalled();
+  });
+
+  it('requirePrice.value:true + source itemPrices con N productos: el warn se emite una sola vez', async () => {
+    const { strategy, logger } = buildStrategyWithPriceList({ priceList: 1 });
+
+    await strategy.execute({
+      mappedRecords: [
+        buildProductRecord(ITEM_PRICES),
+        buildProductRecord(ITEM_PRICES),
+        buildProductRecord(ITEM_PRICES),
+      ],
+      config: {},
+      objectType: 'product',
+      tenantContext: { tenantModels: {} },
+      credentials: {},
+      strategyConfig: {
+        strategy: PRODUCT_SYNC_STRATEGIES.ONE_TO_ONE_PRODUCT,
+        requirePrice: { value: true, field: '', source: { from: 'itemPrices' } },
+      },
+    });
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('requirePrice.value:true sin source: sigue marcando KEEP_MAPPED_PRICE_FLAG y no avisa (regresion)', async () => {
+    const { hubspotSyncTarget, strategy } = buildStrategy();
+    const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
+    strategy.logger = logger;
+
+    await strategy.execute({
+      mappedRecords: [
+        {
+          properties: { hs_sku: 'SKU-1', hs_price_nio: 150 },
+          rawSapData: { ItemCode: 'SKU-1', MovingAveragePrice: 150 },
+        },
+      ],
+      config: {},
+      objectType: 'product',
+      tenantContext: {},
+      credentials: {},
+      strategyConfig: {
+        strategy: PRODUCT_SYNC_STRATEGIES.ONE_TO_ONE_PRODUCT,
+        requirePrice: { value: true, field: '' },
+      },
+    });
+
+    const sentRecords = hubspotSyncTarget.send.mock.calls[0][0].mappedRecords;
+    expect(sentRecords[0].rawSapData[KEEP_MAPPED_PRICE_FLAG]).toBe(true);
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
 });
