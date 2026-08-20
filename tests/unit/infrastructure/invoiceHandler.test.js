@@ -23,7 +23,7 @@ jest.unstable_mockModule('../../../src/infrastructure/config/updateDealStage.con
   getUpdateDealStageConfig: mockGetUpdateDealStageConfig,
 }));
 
-const { process: processInvoice, SKIP_REASONS } = await import(
+const { process: processInvoice, extractOrderBaseEntries, SKIP_REASONS } = await import(
   '../../../src/infrastructure/hubspot/handlers/invoice.handler.js'
 );
 
@@ -150,5 +150,44 @@ describe('invoice.handler skip reasons', () => {
       error: '400 invalid dealstage',
     }));
     expect(logger.error).toHaveBeenCalled();
+  });
+});
+
+describe('invoice.handler extractOrderBaseEntries', () => {
+  // Verificado en SBO_DISTELSA_PROD: la factura 1024440 trae el mismo BaseEntry en sus tres
+  // lineas. Sin deduplicar, el reconciliador movería el mismo negocio tres veces.
+  it('deduplica el mismo BaseEntry repetido en varias lineas', () => {
+    expect(extractOrderBaseEntries([
+      { BaseType: 17, BaseEntry: 28967 },
+      { BaseType: 17, BaseEntry: 28967 },
+      { BaseType: 17, BaseEntry: 28967 },
+    ])).toEqual([28967]);
+  });
+
+  // Los DocEntry de SAP son secuencias por objeto: la cotizacion 500 y la orden 500 coexisten.
+  // Sin este filtro, una factura copiada de una cotizacion moveria el negocio de otra orden.
+  it('descarta las lineas que no vienen de una orden', () => {
+    expect(extractOrderBaseEntries([
+      { BaseType: 23, BaseEntry: 55410 },
+      { BaseType: 17, BaseEntry: 28987 },
+      { BaseType: 13, BaseEntry: 999 },
+    ])).toEqual([28987]);
+  });
+
+  it('devuelve varios BaseEntry cuando la factura consolida ordenes distintas', () => {
+    expect(extractOrderBaseEntries([
+      { BaseType: 17, BaseEntry: 28987 },
+      { BaseType: 17, BaseEntry: 28991 },
+    ])).toEqual([28987, 28991]);
+  });
+
+  it('devuelve un array vacio para entradas sin lineas de orden', () => {
+    expect(extractOrderBaseEntries(null)).toEqual([]);
+    expect(extractOrderBaseEntries(undefined)).toEqual([]);
+    expect(extractOrderBaseEntries('no es un array')).toEqual([]);
+    expect(extractOrderBaseEntries([])).toEqual([]);
+    expect(extractOrderBaseEntries([{ BaseType: 17, BaseEntry: null }])).toEqual([]);
+    expect(extractOrderBaseEntries([{ BaseType: 17 }])).toEqual([]);
+    expect(extractOrderBaseEntries([{ BaseType: 17, BaseEntry: 'abc' }])).toEqual([]);
   });
 });
