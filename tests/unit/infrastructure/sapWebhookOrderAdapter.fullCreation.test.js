@@ -2,6 +2,7 @@ import { jest } from '@jest/globals';
 import SapWebhookOrderAdapter from '../../../src/infrastructure/sap/SapWebhookOrderAdapter.js';
 import FullMappedBusinessPartnerPayloadStrategy
   from '../../../src/domain/business-partners/strategies/full-mapped-bp-payload.strategy.js';
+import { mapHubspotToSapFields } from '../../../src/domain/orders/order-builder.service.js';
 
 function buildAdapter(requestImpl) {
   const adapter = new SapWebhookOrderAdapter();
@@ -85,6 +86,48 @@ describe('findOrCreateBusinessPartner — payload con la strategy fullMapped', (
     expect(postCall[1].data).not.toHaveProperty('BPAddresses');
     expect(postCall[1].data.CardType).toBe('C');
     expect(postCall[1].data.Frozen).toBe('tNO');
+  });
+});
+
+// El merge `{ ...mappedContact, ...mappedCompany }` (SapWebhookOrderAdapter.js linea ~339) le da
+// prioridad a la company por estar despues en el spread. Antes del fix a mapHubspotToSapFields,
+// un texto "null" mal serializado por el workflow de la company SI generaba la clave en
+// mappedCompany, y esa clave ganaba la mezcla aunque el contacto trajera el valor real. Ahora
+// mapHubspotToSapFields filtra ese sentinel antes de que llegue aca: mappedCompany nunca tiene la
+// clave, asi que el spread deja pasar el valor del contacto. Este test fija ese comportamiento de
+// punta a punta (pasando por mapHubspotToSapFields real, no un mapeado a mano) porque el efecto
+// depende de que la clave este AUSENTE, no de que valga null.
+describe('findOrCreateBusinessPartner — el merge company+contact ante un valor sucio de la company', () => {
+  it('cuando la company manda el texto "null" y el contacto un valor real, el payload final lleva el del contacto', async () => {
+    const companyMappings = [{ sourceField: 'U_ACO_Telefono2', targetField: 'phone' }];
+    const contactMappings = [{ sourceField: 'U_ACO_Telefono2', targetField: 'mobilephone' }];
+
+    const mappedCompany = mapHubspotToSapFields({ phone: 'null' }, companyMappings);
+    const mappedContact = mapHubspotToSapFields({ mobilephone: '8888-1234' }, contactMappings);
+
+    // Confirma la premisa: el sentinel filtrado deja la clave ausente, no en null.
+    expect(mappedCompany).not.toHaveProperty('U_ACO_Telefono2');
+    expect(mappedContact.U_ACO_Telefono2).toBe('8888-1234');
+
+    const adapter = buildAdapter(async (config, { method, path }) => {
+      if (method === 'get' && path.startsWith("/BusinessPartners('")) {
+        const error = new Error('not found');
+        error.response = { status: 404 };
+        throw error;
+      }
+      if (method === 'get') { return { value: [] }; }
+      return { CardCode: 'CL999' };
+    });
+
+    await adapter.findOrCreateBusinessPartner({
+      ...BASE_ARGS,
+      mappedCompany: { CardName: 'ACME', ...mappedCompany },
+      mappedContact,
+      payloadStrategy: new FullMappedBusinessPartnerPayloadStrategy(),
+    });
+
+    const postCall = adapter.request.mock.calls.find(([, options]) => options.method === 'post');
+    expect(postCall[1].data.U_ACO_Telefono2).toBe('8888-1234');
   });
 });
 
