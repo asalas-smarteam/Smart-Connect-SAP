@@ -4,6 +4,7 @@ import {
   buildOrderPayload,
   buildQuotationLineUpdates,
   buildQuotationPayload,
+  mapHubspotToSapFields,
   normalizeDocumentSpecialLines,
 } from '../../../src/domain/orders/order-builder.service.js';
 
@@ -447,5 +448,21 @@ describe('order-builder.service buildOrderPayload toma la cabecera del mapeo', (
     expect(payload.CardCode).toBe('CL00129');
     expect(payload.PaymentGroupCode).toBe(3);
     expect(payload.DocumentLines).toEqual(documentLines);
+  });
+
+  // Un valor de puros espacios es la misma basura que '' o los textos "null"/"undefined":
+  // mapHubspotToSapFields ya lo descarta (ver mapHubspotToSapFields.test.js), asi que por el
+  // momento en que mappedDealFields llega a buildOrderPayload la clave ya no esta. Se pasa por
+  // el mapeador de verdad, no a mano, porque eso es lo que asegura que el builder nunca ve el
+  // valor sucio en el flujo real (el bug que motivo este test era justamente que SI lo veia).
+  it('un valor de solo espacios en el mapeo no llega al payload', () => {
+    const mappedDealFields = mapHubspotToSapFields(
+      { comments: '   ' },
+      [{ sourceField: 'Comments', targetField: 'comments' }]
+    );
+
+    const payload = buildOrderPayload({ cardCode: 'CL00129', documentLines, mappedDealFields });
+
+    expect(payload).not.toHaveProperty('Comments');
   });
 });

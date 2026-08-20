@@ -382,8 +382,13 @@ describe('order-builder.service buildOrderPayload', () => {
   });
 
   // Comments/U_ACO_Telefono/U_ACO_Telefono2/Address/Address2 no son parametros de
-  // buildOrderPayload: ahora salen unicamente del derrame de mappedDealFields. Esa cobertura
-  // vive en quotationBuilder.test.js ("buildOrderPayload toma la cabecera del mapeo").
+  // buildOrderPayload: ahora salen unicamente del derrame de mappedDealFields. La cobertura de
+  // "el campo llega cuando se provee" se traslado a quotationBuilder.test.js ("buildOrderPayload
+  // toma la cabecera del mapeo"), incluyendo el caso de un valor de solo espacios que se omite.
+  // Esa omision de solo-espacios ya NO depende de un recorte hecho aca: ahora es
+  // mapHubspotToSapFields quien descarta el valor antes de que llegue a mappedDealFields
+  // (ver tests/unit/domain/mapHubspotToSapFields.test.js), asi que alcanza a los 4 tenants y a
+  // todos los contextos, no solo a estos cinco campos de orders-quotations.
 
   it('adds PaymentGroupCode when an integer is provided and omits it otherwise', () => {
     const documentLines = [

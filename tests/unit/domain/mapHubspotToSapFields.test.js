@@ -84,3 +84,68 @@ describe('mapHubspotToSapFields descarta los textos "null" y "undefined"', () =>
     expect(mapped).toEqual({ U_ACO_Telefono: '+50583635946' });
   });
 });
+
+// Afecta a los 4 tenants y a todos los contextos (deal/product/contact/company): un valor de
+// puros espacios es la misma basura que '' o los textos "null"/"undefined" ya cubiertos arriba,
+// y viene de la misma fuente (un workflow de HubSpot mal configurado).
+describe('mapHubspotToSapFields descarta los valores de solo espacios en blanco', () => {
+  const mappings = [
+    { sourceField: 'U_ACO_Telefono2', targetField: 'numero_de_contacto_secundario' },
+  ];
+
+  it.each(['   ', '\t', '\n', ' \t\n '])(
+    'no produce la clave cuando el valor es %p',
+    (value) => {
+      const mapped = mapHubspotToSapFields(
+        { numero_de_contacto_secundario: value },
+        mappings
+      );
+
+      expect(mapped).not.toHaveProperty('U_ACO_Telefono2');
+    }
+  );
+
+  it('no avisa en warn: no es un texto reconocible de configuracion, es simplemente vacio', () => {
+    const logger = { warn: jest.fn() };
+
+    mapHubspotToSapFields(
+      { numero_de_contacto_secundario: '   ' },
+      mappings,
+      { logger }
+    );
+
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('conserva un texto legitimo con espacio final tal cual, sin recortarlo', () => {
+    const mapped = mapHubspotToSapFields(
+      { numero_de_contacto_secundario: 'texto ' },
+      mappings
+    );
+
+    expect(mapped.U_ACO_Telefono2).toBe('texto ');
+  });
+
+  it.each([
+    ['un numero', 0],
+    ['un booleano false', false],
+    ['un numero comun', 42],
+  ])('sigue mapeando %s aunque sea falsy', (_label, value) => {
+    const mapped = mapHubspotToSapFields(
+      { numero_de_contacto_secundario: value },
+      mappings
+    );
+
+    expect(mapped.U_ACO_Telefono2).toBe(value);
+  });
+
+  it('sigue mapeando un array tal cual', () => {
+    const value = ['a', 'b'];
+    const mapped = mapHubspotToSapFields(
+      { numero_de_contacto_secundario: value },
+      mappings
+    );
+
+    expect(mapped.U_ACO_Telefono2).toBe(value);
+  });
+});

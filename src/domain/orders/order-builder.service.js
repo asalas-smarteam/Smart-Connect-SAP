@@ -17,6 +17,19 @@ function isEmptyTextSentinel(value) {
   return typeof value === 'string' && EMPTY_TEXT_SENTINELS.has(value.trim().toLowerCase());
 }
 
+// Un valor de puros espacios (o tabs/saltos de linea) es la misma clase de basura que ''
+// o los textos "null"/"undefined": la propiedad de HubSpot esta vacia mas alla de como el
+// workflow la haya serializado. Se descarta en silencio igual que '', sin warn: no es un
+// texto reconocible como error de configuracion, es simplemente vacio.
+//
+// El valor que SI viaja no se recorta aca: esta funcion solo decide si la clave se agrega,
+// nunca transforma el valor guardado. Un 'texto ' con espacio final tiene que llegar a SAP
+// tal cual. Solo strings entran a este chequeo; numeros, booleanos (incluido 0 y false) y
+// arrays no son texto y siguen viajando sin tocar.
+function isBlankString(value) {
+  return typeof value === 'string' && value.trim() === '';
+}
+
 export function mapHubspotToSapFields(source, mappings, { logger = null } = {}) {
   const mapped = {};
 
@@ -46,7 +59,7 @@ export function mapHubspotToSapFields(source, mappings, { logger = null } = {}) 
       continue;
     }
 
-    if (value !== null && typeof value !== 'undefined' && value !== '') {
+    if (value !== null && typeof value !== 'undefined' && !isBlankString(value)) {
       mapped[sourceField] = value;
     }
   }
