@@ -208,6 +208,48 @@ describe('order-builder.service buildOrderFromQuotationPayload', () => {
       /At least one quotation line/
     );
   });
+
+  it('derrama los campos mapeados del contexto orders-quotations en la cabecera', () => {
+    const payload = buildOrderFromQuotationPayload({
+      cardCode: 'CL00129',
+      baseEntry: 12345,
+      baseLines: [0],
+      mappedDealFields: { NumAtCard: 'OC #P06485', Comments: 'Comentario del comprador' },
+    });
+
+    expect(payload.NumAtCard).toBe('OC #P06485');
+    expect(payload.Comments).toBe('Comentario del comprador');
+  });
+
+  // La regla que pidió el cliente: sin valor en HubSpot, el campo no viaja y SAP lo deja nulo.
+  // Nunca un default del integrador.
+  it('no inventa NumAtCard ni Comments cuando el mapeo no produjo valores', () => {
+    const payload = buildOrderFromQuotationPayload({
+      cardCode: 'CL00129',
+      baseEntry: 12345,
+      baseLines: [0],
+    });
+
+    expect(payload).not.toHaveProperty('NumAtCard');
+    expect(payload).not.toHaveProperty('Comments');
+  });
+
+  it('no deja que el derrame pise lo que el builder posee', () => {
+    const payload = buildOrderFromQuotationPayload({
+      cardCode: 'CL00129',
+      baseEntry: 12345,
+      baseLines: [0],
+      mappedDealFields: {
+        CardCode: 'HACKED',
+        DocumentLines: [{ ItemCode: 'X' }],
+        DocDueDate: '2026-07-21',
+      },
+    });
+
+    expect(payload.CardCode).toBe('CL00129');
+    expect(payload.DocumentLines).toEqual([{ BaseType: 23, BaseEntry: 12345, BaseLine: 0 }]);
+    expect(payload.DocDueDate).toBe('2026-07-21');
+  });
 });
 
 describe('order-builder.service buildQuotationLineUpdates', () => {
