@@ -1,4 +1,8 @@
-import { buildQuotationLineUpdates } from '#domain/orders/order-builder.service.js';
+import {
+  buildQuotationLineUpdates,
+  mapHubspotToSapFields,
+  pickMappedHeaderFields,
+} from '#domain/orders/order-builder.service.js';
 import { PermanentWebhookError } from '#shared/errors/index.js';
 import { createNoopSapCallRecorder } from '../services/sap-call-audit.service.js';
 import { resolveEventPayload } from '../services/webhook-payload.service.js';
@@ -98,15 +102,23 @@ export class ProcessHubspotUpdateQuotation {
         logger: this.logger,
       });
 
+      const mappedDeal = mapHubspotToSapFields(
+        deal || {},
+        mappings.dealOrdersQuotationsMappings,
+        { logger: this.logger }
+      );
+
+      // El PATCH solo lleva lo que el workflow mando en ESTE evento: mapHubspotToSapFields no
+      // produce clave para una propiedad ausente o vacia. Asi, editar lineas en HubSpot no pisa
+      // los campos de cabecera que un usuario haya corregido a mano en SAP.
+      //
+      // DocDueDate queda deliberadamente afuera: pickMappedHeaderFields lo excluye porque en los
+      // builders lo resuelve resolveDocDueDate. Mover el vencimiento de un documento ya creado en
+      // SAP es una decision distinta de sincronizar sus lineas.
       const patchPayload = {
+        ...pickMappedHeaderFields(mappedDeal, { documentLineCount: lineUpdates.length }),
         DocumentLines: lineUpdates,
       };
-
-      // Only overwrite SAP's existing Comments when HubSpot actually sent one.
-      const comments = toNonEmptyString(deal?.comments);
-      if (comments) {
-        patchPayload.Comments = comments;
-      }
 
       // Re-map the deal owner to its SAP salesperson in case it changed in HubSpot.
       const slpCode = await resolveDocumentSlpCode({

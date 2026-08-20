@@ -107,7 +107,10 @@ export function normalizeDocumentSpecialLines(value, { afterLineNumber = 0 } = {
   ];
 }
 
-function pickMappedHeaderFields(mappedDealFields, { documentLineCount = 0 } = {}) {
+// Exportada porque el PATCH de ProcessHubspotUpdateQuotation la necesita: sin ella, un mapeo
+// podria pisar CardCode o DocumentLines en la actualizacion de una oferta, y DocumentSpecialLines
+// llegaria como texto plano en vez de como la coleccion que SAP espera.
+export function pickMappedHeaderFields(mappedDealFields, { documentLineCount = 0 } = {}) {
   const fields = {};
 
   for (const [field, value] of Object.entries(mappedDealFields || {})) {

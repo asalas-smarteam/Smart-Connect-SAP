@@ -593,26 +593,46 @@ describe('ProcessHubspotUpdateQuotation', () => {
     expect(result).toMatchObject({ docEntry: 12345, docNum: 8001, dealId: '59680314911' });
   });
 
-  it('does not overwrite the existing SAP Comments when the deal has no comments', async () => {
+  // El PATCH solo lleva lo que el workflow mando en ESTE evento. Editar lineas en HubSpot no
+  // debe pisar la cabecera que un usuario haya corregido a mano en SAP.
+  it('no manda ningun campo de cabecera cuando el payload no los trae', async () => {
+    const context = buildContext();
+    context.mappings.dealOrdersQuotationsMappings = [
+      { sourceField: 'Comments', targetField: 'comments' },
+      { sourceField: 'NumAtCard', targetField: 'orden_de_compra' },
+    ];
     const deps = buildDeps();
+    deps.runtimeRepository = buildRuntimeRepository(context);
     const useCase = new ProcessHubspotUpdateQuotation(deps);
 
     const result = await useCase.execute({ event: updateEvent, tenantModels });
 
     const patch = deps.sapQuotationAdapter.updateQuotation.mock.calls[0][0].patchPayload;
     expect(patch).not.toHaveProperty('Comments');
+    expect(patch).not.toHaveProperty('NumAtCard');
+    expect(patch).toHaveProperty('DocumentLines');
     expect(result.sapAudit.auditTrail.payload_SAP.quotation).not.toHaveProperty('Comments');
   });
 
-  it('patches Comments with deal.comments when the deal provides one', async () => {
+  it('manda los campos de cabecera que vienen mapeados y presentes en el payload', async () => {
+    const context = buildContext();
+    context.mappings.dealOrdersQuotationsMappings = [
+      { sourceField: 'Comments', targetField: 'comments' },
+      { sourceField: 'NumAtCard', targetField: 'orden_de_compra' },
+    ];
     const deps = buildDeps();
+    deps.runtimeRepository = buildRuntimeRepository(context);
     const useCase = new ProcessHubspotUpdateQuotation(deps);
 
     const event = {
       ...updateEvent,
       payload: {
         ...updateEvent.payload,
-        deal: { ...updateEvent.payload.deal, comments: 'Comentario para el comprador y prueba' },
+        deal: {
+          ...updateEvent.payload.deal,
+          comments: 'Comentario para el comprador y prueba',
+          orden_de_compra: 'OC #P06485',
+        },
       },
     };
 
@@ -620,6 +640,34 @@ describe('ProcessHubspotUpdateQuotation', () => {
 
     const patch = deps.sapQuotationAdapter.updateQuotation.mock.calls[0][0].patchPayload;
     expect(patch.Comments).toBe('Comentario para el comprador y prueba');
+    expect(patch.NumAtCard).toBe('OC #P06485');
+  });
+
+  // pickMappedHeaderFields protege los campos que el PATCH posee, igual que en los builders.
+  it('no deja que un mapeo pise CardCode ni DocumentLines en el PATCH', async () => {
+    const context = buildContext();
+    context.mappings.dealOrdersQuotationsMappings = [
+      { sourceField: 'CardCode', targetField: 'card_code' },
+      { sourceField: 'DocumentLines', targetField: 'lineas' },
+    ];
+    const deps = buildDeps();
+    deps.runtimeRepository = buildRuntimeRepository(context);
+    const useCase = new ProcessHubspotUpdateQuotation(deps);
+
+    const event = {
+      ...updateEvent,
+      payload: {
+        ...updateEvent.payload,
+        deal: { ...updateEvent.payload.deal, card_code: 'HACKED', lineas: 'basura' },
+      },
+    };
+
+    await useCase.execute({ event, tenantModels });
+
+    const patch = deps.sapQuotationAdapter.updateQuotation.mock.calls[0][0].patchPayload;
+    expect(patch).not.toHaveProperty('CardCode');
+    expect(patch.DocumentLines).not.toBe('basura');
+    expect(Array.isArray(patch.DocumentLines)).toBe(true);
   });
 
   it('fails in a controlled way when there is no quotation link for the deal', async () => {
