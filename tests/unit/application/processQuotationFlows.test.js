@@ -744,4 +744,62 @@ describe('ProcessHubspotConvertQuotationToOrder', () => {
       DocumentLines: [{ BaseType: 23, BaseEntry: 12345, BaseLine: 0 }],
     });
   });
+
+  // El bug reportado por el cliente: la orden llevaba un literal del integrador en Comments
+  // y un HS-DEAL-<dealId> fabricado en NumAtCard.
+  it('no manda un Comments default ni un NumAtCard fabricado', async () => {
+    const deps = buildDeps();
+    deps.sapDocumentLinkRepository.findByDeal
+      .mockResolvedValueOnce({
+        cardCode: 'CL00129',
+        sapDocEntry: 12345,
+        sapDocNum: 8001,
+        lines: [{ sapLineNum: 0 }],
+      })
+      .mockResolvedValueOnce(null);
+    const useCase = new ProcessHubspotConvertQuotationToOrder(deps);
+
+    await useCase.execute({ event: convertEvent, tenantModels });
+
+    const { orderPayload } = deps.sapOrderAdapter.createOrder.mock.calls[0][0];
+    expect(orderPayload).not.toHaveProperty('Comments');
+    expect(orderPayload).not.toHaveProperty('NumAtCard');
+  });
+
+  it('toma Comments y NumAtCard del FieldMapping del contexto orders-quotations', async () => {
+    const context = buildContext();
+    context.mappings.dealOrdersQuotationsMappings = [
+      { sourceField: 'Comments', targetField: 'comments' },
+      { sourceField: 'NumAtCard', targetField: 'orden_de_compra' },
+    ];
+    const deps = buildDeps();
+    deps.runtimeRepository = buildRuntimeRepository(context);
+    deps.sapDocumentLinkRepository.findByDeal
+      .mockResolvedValueOnce({
+        cardCode: 'CL00129',
+        sapDocEntry: 12345,
+        sapDocNum: 8001,
+        lines: [{ sapLineNum: 0 }],
+      })
+      .mockResolvedValueOnce(null);
+    const useCase = new ProcessHubspotConvertQuotationToOrder(deps);
+
+    const event = {
+      ...convertEvent,
+      payload: {
+        ...convertEvent.payload,
+        deal: {
+          hs_object_id: '59680314911',
+          comments: 'Comentario real del comprador',
+          orden_de_compra: 'OC #P06485',
+        },
+      },
+    };
+
+    await useCase.execute({ event, tenantModels });
+
+    const { orderPayload } = deps.sapOrderAdapter.createOrder.mock.calls[0][0];
+    expect(orderPayload.Comments).toBe('Comentario real del comprador');
+    expect(orderPayload.NumAtCard).toBe('OC #P06485');
+  });
 });
