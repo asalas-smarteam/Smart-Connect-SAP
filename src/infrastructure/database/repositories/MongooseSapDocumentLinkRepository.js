@@ -13,6 +13,24 @@ export class MongooseSapDocumentLinkRepository {
     return typeof query?.lean === 'function' ? query.lean() : query;
   }
 
+  // Entrada de la reconciliación de facturas: la factura trae el DocEntry de su orden en
+  // DocumentLines[].BaseEntry, y desde el link se llega al dealId. documentType va fijo en
+  // 'order' porque los DocEntry de SAP son secuencias por objeto: sin ese filtro, el DocEntry
+  // 500 de una cotización matchearía con la orden 500, que es otro documento.
+  async findByOrderDocEntry({ SapDocumentLink, hubspotCredentialId, sapDocEntry }) {
+    if (!SapDocumentLink || !Number.isInteger(sapDocEntry)) {
+      return null;
+    }
+
+    const query = SapDocumentLink.findOne({
+      hubspotCredentialId,
+      documentType: 'order',
+      sapDocEntry,
+    });
+
+    return typeof query?.lean === 'function' ? query.lean() : query;
+  }
+
   async create({ SapDocumentLink, link }) {
     if (!SapDocumentLink || !link) {
       return null;
