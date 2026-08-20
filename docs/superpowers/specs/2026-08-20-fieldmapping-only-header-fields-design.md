@@ -128,10 +128,16 @@ vencimiento no se actualiza** aunque el tenant la tenga mapeada. Se acepta: move
 vencimiento de un documento ya creado en SAP es una decisión distinta de sincronizar sus líneas, y
 ningún tenant que use `updateQuotation` mapea `DocDueDate` hoy.
 
-**Esta pieza cierra un item que quedó abierto en la rama anterior.** Ahí se detectó que
+**Esta pieza cierra a medias un item que quedó abierto en la rama anterior.** Ahí se detectó que
 `updateQuotation` nunca escribe `NumAtCard`, así que si el usuario llena la OC después de creada la
-oferta, en SAP la oferta queda sin el campo y el pedido con él. Con el derrame, en cuanto Distelsa
-tenga su fila de `NumAtCard`, el PATCH también lo lleva y el desfase desaparece.
+oferta, en SAP la oferta queda sin el campo y el pedido con él. El derrame hace que el PATCH lleve
+`NumAtCard` cuando el mapeo existe **y** el evento trae la propiedad — pero no alcanza para cerrar el
+desfase de Distelsa: según `docs/superpowers/specs/2026-08-19-comments-numatcard-invoice-lineage-design.md`,
+el workflow de Distelsa manda la propiedad de la orden de compra recién en `convertQuotationToOrder`,
+nunca en `updateQuotation`. Aunque Distelsa tenga su fila de `NumAtCard <- orden_de_compra`, sus
+eventos de `updateQuotation` no traen esa propiedad, así que el PATCH no la lleva y el desfase sigue
+igual. El PATCH llevaría `NumAtCard` sólo si el workflow además empieza a mandar esa propiedad en los
+eventos de actualización, que hoy no hace.
 
 ### 4. El mapeador descarta los textos `"null"` y `"undefined"`, con rastro
 
@@ -153,10 +159,23 @@ necesitan pasar el logger. Los otros catorce quedan sin tocar.
 
 | tenant | qué le cambia |
 |---|---|
-| `noelito` | Sus cinco campos pasan del código al mapeo, mismo valor. Y deja de escribir `"null"` en `U_ACO_Telefono2` y `Address`. |
-| `printer` | Nada funcional. Sus `Address`/`Address2` ya venían del mapeo; deja de existir el override que nunca se activaba. |
-| `distelsa` | `updateQuotation` pasa a leer `Comments` por mapeo en vez de la propiedad literal. Mismo valor, porque su fila es `Comments <- comments`. |
-| `amc` | Nada. Sus eventos no traen ninguna de las propiedades involucradas y sus configs están inactivas. |
+| `noelito` | Sus cinco campos pasan del código al mapeo. **El valor no es el mismo:** el camino viejo pasaba por `toNonEmptyString` (`String(value ?? '').trim()`) y el nuevo manda el valor crudo, sin recortar y sin convertir a string. Un `Address2` escrito a mano con un espacio o salto de línea final ahora viaja con eso incluido. Además deja de escribir `"null"` en `U_ACO_Telefono2` y `Address`. |
+| `printer` | Nada funcional. Sus `Address`/`Address2` ya venían del derrame de `pickMappedHeaderFields` desde antes de este spec (`fd6f66c`), que nunca pasó por `toNonEmptyString`: el valor ya era crudo, así que ahí sí no cambia nada. Sólo deja de existir el override que nunca se activaba. |
+| `distelsa` | `updateQuotation` pasa a leer `Comments` por mapeo en vez de `toNonEmptyString(deal?.comments)`. **El valor no es el mismo** por el mismo motivo que Noelito: deja de recortarse. |
+| `amc` | Nada. Medido, no supuesto: se sondearon sus `WebhookEvents` de producción (2 eventos) y ninguna de las propiedades involucradas (`comments`, `numero_de_contacto_primario`, `numero_de_contacto_secundario`, `direccion_de_facturacion`, `direccion_de_entrega`) está presente en `payload.deal`. Sus `ClientConfigs` además están inactivas. Ver "Antes de reactivar amc" más abajo. |
+
+**Sobre "el valor no es el mismo":** el cambio es intencional y no se revierte — que el valor del cliente viaje tal cual es la decisión tomada (ver pieza 4 y alternativas descartadas). Falla ruidosamente si el valor crudo excede el ancho de una columna en SAP (Service Layer rechaza el documento completo), lo cual es preferible a un recorte silencioso que esconda el dato real que el cliente escribió.
+
+### Antes de reactivar amc
+
+`amc` usa el flujo `createDeal`. Los cinco parámetros eliminados de `buildOrderPayload` eran, para
+`amc`, la única fuente de cabecera además de `CardCode`/`DocDueDate`/`DocumentLines`/
+`SalesPersonCode` — no le pegan hoy porque sus `ClientConfigs` están inactivas y ninguna de esas
+propiedades viaja en sus eventos. Si se reactivan sus configs y su workflow empieza a mandar
+`comments` u otra propiedad de cabecera, el código ya no la lee por nombre fijo: hay que crear la
+fila de `FieldMapping` correspondiente **primero**. Es el mismo orden que se siguió con `noelito`
+en este mismo spec: primero las filas, después el código. Reactivar sin las filas repetiría, para
+`amc`, exactamente el riesgo silencioso que este spec cerró para `noelito`.
 
 ## Alternativas descartadas
 
@@ -174,9 +193,23 @@ propiedades mal. Contradice el principio acordado de que un payload mal armado s
 teléfono y dirección de entrega en silencio. Es la razón por la que la carga de las filas fue el
 primer paso y no el último.
 
-**Mandar toda la cabecera mapeada en cada PATCH de `updateQuotation`.** Dejaría a HubSpot como fuente
-única de verdad y SAP nunca divergiría, pero cualquier corrección manual en SAP se perdería en la
-siguiente edición de líneas desde HubSpot. Descartada por decisión del dueño del proyecto.
+**Mandar la cabecera mapeada incondicionalmente en cada PATCH de `updateQuotation`, incluidos los
+campos vacíos.** Esto es lo que se descartó — no "mandar toda la cabecera mapeada", que es
+justamente lo que `ProcessHubspotUpdateQuotation` sí hace (pieza 3). Mandar cada campo mapeado
+_aunque no tenga valor en el evento_ dejaría a HubSpot como fuente única de verdad y SAP nunca
+divergiría, pero cualquier corrección manual en SAP se perdería en la siguiente edición de líneas
+desde HubSpot. Descartada por decisión del dueño del proyecto.
+
+Lo que sí se implementó es derramar la cabecera mapeada completa y confiar en que
+`mapHubspotToSapFields` filtra los campos vacíos (no produce clave para `null`, `undefined`, `''` ni
+los sentinels de texto) para que un campo ausente en el evento no se pise en SAP. Esa protección es
+más débil de lo que parece: depende de que el workflow **no mande** el campo en absoluto, no de que
+HubSpot mande deltas. `printer` es el caso que lo deja claro — su payload es un snapshot completo del
+deal con unas 90 propiedades, la mayoría en `null`; ese workflow serializa el negocio entero en cada
+evento, no un delta. Si un workflow empezara a mandar explícitamente una propiedad vacía en vez de
+omitirla, `mapHubspotToSapFields` la sigue filtrando por su propio criterio de vacío, pero el diseño
+no se apoya en que el workflow mande menos: se apoya en que el mapeador filtre lo vacío sin importar
+cuánto mande el workflow.
 
 **Sembrar las cinco filas de Noelito en `defaultClientConfigMappings.service.js`.**
 `numero_de_contacto_primario` y `direccion_de_entrega` son nombres de propiedad específicos de ese
