@@ -69,6 +69,25 @@ function getAdditionalFieldsByObjectType(objectType) {
     .filter((field) => field && SAP_FIELD_PATTERN.test(field));
 }
 
+// Campos que una tarea necesita por diseño, y que por eso NO viajan como FieldMapping: si
+// dependieran de una fila del admin, un tenant que la borre rompería la tarea en silencio.
+//
+// La reconciliación de facturas resuelve el negocio de HubSpot por el linaje de SAP
+// (DocumentLines[].BaseEntry con BaseType 17 apuntando al DocEntry de la orden), así que sin
+// DocumentLines no puede identificar ninguna orden y descartaría todas las facturas.
+//
+// Este mecanismo SOLO existe acá, en buildServiceLayerUrl: sólo cubre objectType 'invoice' en
+// modo SERVICE_LAYER. Una ClientConfig de facturas en STORE_PROCEDURE, SQL_SCRIPT, API o
+// S4_ODATA nunca pasa por este builder, así que nunca trae DocumentLines y descarta el 100%
+// de las facturas sin que nada lo señale.
+const requiredFieldsByObjectType = {
+  invoice: ['DocumentLines'],
+};
+
+function getRequiredFieldsByObjectType(objectType) {
+  return requiredFieldsByObjectType[objectType] ?? [];
+}
+
 function sanitizeControlledFilter(filter) {
   const value = cleanValue(filter);
   if (!value) return '';
@@ -153,10 +172,22 @@ export function buildServiceLayerUrl(clientConfig, mappings, options = {}) {
 
   const selectFields = sanitizeSelectFields(mappings);
   const additionalFields = getAdditionalFieldsByObjectType(clientConfig?.objectType);
-  const mergedSelectFields = Array.from(new Set([...selectFields, ...additionalFields]));
-  if (mergedSelectFields.length === 0) {
+  // El guard corre SOLO sobre lo que viene de configuración (mappings + campos
+  // adicionales por env). requiredFields se agrega DESPUÉS: si entrara antes, un
+  // objectType con requiredFields (hoy solo 'invoice') nunca podría disparar este
+  // error, y un tenant sin ningún mapping activo de facturas pasaría con un $select
+  // que trae igual algo (DocumentLines), leería registros y enviaría cero sin que
+  // nada lo señale — el SyncLog queda "completado" en silencio.
+  if (selectFields.length === 0 && additionalFields.length === 0) {
     throw new Error('At least one active mapping with a valid sourceField is required');
   }
+
+  const requiredFields = getRequiredFieldsByObjectType(clientConfig?.objectType);
+  const mergedSelectFields = Array.from(new Set([
+    ...selectFields,
+    ...additionalFields,
+    ...requiredFields,
+  ]));
 
   const queryParts = [`$select=${mergedSelectFields.join(',')}`];
   const configFilters = clientConfig?.filters;

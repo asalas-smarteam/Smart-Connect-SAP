@@ -468,6 +468,12 @@ export class SendMappedItemsToHubspot {
           errors.push({
             payloadHubspot: item?.properties ?? null,
             responseHubspot: result?.hubspotResponse ?? result?.error?.details?.hubspotResponse ?? null,
+            // invoice.handler devuelve `error` como string y `movedDealIds` con los
+            // negocios que ya se movieron antes de que reventara: sin esto acá, esa
+            // carga útil solo queda en app.log y un fallo parcial no se puede
+            // resolver a mano desde el SyncLog.
+            error: result?.error ?? null,
+            movedDealIds: Array.isArray(result?.movedDealIds) ? result.movedDealIds : [],
           });
           continue;
         }
@@ -503,7 +509,10 @@ export class SendMappedItemsToHubspot {
     this.logger?.info?.({
       msg: 'Sync de facturas terminado',
       procesadas: mappedItems.length,
-      movidas: updated,
+      // Cuenta FACTURAS con al menos un negocio movido, no negocios: una factura
+      // consolidada que mueve tres negocios suma 1 acá. `updated` (la clave que
+      // persiste el SyncLog) no cambia de significado, solo la etiqueta del log.
+      facturasConNegocioMovido: updated,
       descartadas: skipped,
       fallidas: failed,
       motivos: skippedReasons,

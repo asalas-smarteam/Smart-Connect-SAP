@@ -9,7 +9,6 @@ import {
   resolveEventPayload,
 } from '../services/webhook-payload.service.js';
 import {
-  buildDealNumAtCard,
   buildSapDocumentLinkLines,
   createDocumentAuditTrail,
   mergeHubspotResponses,
@@ -168,7 +167,6 @@ export class ProcessHubspotCreateQuotation {
         slpCode,
         paymentGroupCode,
         mappedDealFields: mappedDeal,
-        numAtCard: buildDealNumAtCard(dealId),
         comments: deal?.comments,
       });
       auditTrail.payload_SAP.quotation = quotationPayload;

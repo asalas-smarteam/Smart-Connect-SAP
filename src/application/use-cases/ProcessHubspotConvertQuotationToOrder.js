@@ -6,7 +6,6 @@ import { PermanentWebhookError } from '#shared/errors/index.js';
 import { createNoopSapCallRecorder } from '../services/sap-call-audit.service.js';
 import { resolveEventPayload } from '../services/webhook-payload.service.js';
 import {
-  buildDealNumAtCard,
   createDocumentAuditTrail,
   mergeHubspotResponses,
   resolveDocumentSlpCode,
@@ -114,8 +113,6 @@ export class ProcessHubspotConvertQuotationToOrder {
         baseEntry: quotationLink.sapDocEntry,
         baseLines: quotationLink.lines,
         slpCode,
-        numAtCard: buildDealNumAtCard(dealId),
-        comments: 'Pedido creado desde oferta SAP por etapa Orden de Compra en HubSpot',
         mappedDealFields: mappedDeal,
       });
       auditTrail.payload_SAP.order = orderPayload;

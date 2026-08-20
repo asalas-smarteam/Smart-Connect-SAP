@@ -69,6 +69,20 @@ sapDocumentLinkSchema.index(
   { unique: true }
 );
 
+// Entrada de la reconciliación de facturas por linaje SAP. No es único: nada impide dos links
+// apuntando al mismo DocEntry si algo se reprocesa, y un índice único ahí rechazaría la
+// escritura entera en vez de dejarla pasar. Ante duplicados, findByOrderDocEntry hace un
+// findOne sin sort: la lectura toma uno de los dos de forma arbitraria, nadie "decide".
+//
+// No necesita backfill: sapDocEntry se escribe desde que existe la colección, así que el
+// índice cubre los links que ya están en producción. autoIndex está activo en
+// mongoose.createConnection (tenantDatabase.js:38), así que se crea solo en los cuatro tenants.
+sapDocumentLinkSchema.index({
+  hubspotCredentialId: 1,
+  documentType: 1,
+  sapDocEntry: 1,
+});
+
 export function createSapDocumentLinkModel(connection) {
   return (
     connection.models.SapDocumentLink

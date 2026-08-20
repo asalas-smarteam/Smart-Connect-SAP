@@ -62,8 +62,11 @@ export const DEFAULT_INVENTORY_TRANSFER_REQUEST_PRODUCT_MAPPINGS = [
   { sourceField: 'WarehouseCode', targetField: 'towhscode', sourceContext: 'inventory-transfer-request', includeInServiceLayerSelect: false },
 ];
 
-// Invoices are not pushed to a HubSpot object; the mappings only drive the SAP $select so
-// the reconciler can read NumAtCard (HS-DEAL-<dealId>) and identify the deal to update.
+// Invoices are not pushed to a HubSpot object; the mappings only drive the SAP $select. El
+// negocio se resuelve por el linaje SAP (DocumentLines[].BaseEntry), no por NumAtCard: ese campo
+// es la orden de compra del cliente y sólo viaja al log. DocumentLines NO va aquí a propósito,
+// va como campo estructural en serviceLayerUrlBuilder.js para que borrar una fila del admin no
+// rompa la reconciliación en silencio.
 export const DEFAULT_INVOICE_MAPPINGS = [
   { sourceField: 'NumAtCard', targetField: 'num_at_card', sourceContext: 'businessPartner' },
   { sourceField: 'DocEntry', targetField: 'sap_docentry', sourceContext: 'businessPartner' },

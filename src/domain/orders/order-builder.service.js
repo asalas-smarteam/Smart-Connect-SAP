@@ -408,7 +408,6 @@ export function buildQuotationPayload({
   slpCode = null,
   paymentGroupCode = null,
   mappedDealFields = {},
-  numAtCard = null,
   comments = null,
 }) {
   if (!documentLines.length) {
@@ -430,11 +429,6 @@ export function buildQuotationPayload({
     payload.PaymentGroupCode = paymentGroupCode;
   }
 
-  const resolvedNumAtCard = toNonEmptyString(numAtCard);
-  if (resolvedNumAtCard) {
-    payload.NumAtCard = resolvedNumAtCard;
-  }
-
   const resolvedComments = toNonEmptyString(comments);
   if (resolvedComments) {
     payload.Comments = resolvedComments;
@@ -443,15 +437,18 @@ export function buildQuotationPayload({
   return payload;
 }
 
-// Only DocDueDate is taken from mappedDealFields here: the rest of the header is copied by
-// SAP from the base quotation, so the mapped fields are deliberately not spread in.
+// La cabecera la copia SAP de la cotización base, así que aquí sólo viajan los campos que el
+// tenant mapeó en el contexto deal/orders-quotations. Ese derrame es la ÚNICA fuente de
+// NumAtCard, Comments y de cualquier campo extra que el workflow de HubSpot agregue después.
+//
+// No hay parámetros numAtCard/comments a propósito: un parámetro se aplica DESPUÉS del derrame
+// y por lo tanto le gana al mapeo. Eso es exactamente lo que hacía que este builder mandara un
+// literal del integrador en Comments y un HS-DEAL-<dealId> fabricado en NumAtCard.
 export function buildOrderFromQuotationPayload({
   cardCode,
   baseEntry,
   baseLines,
   slpCode = null,
-  numAtCard = null,
-  comments = null,
   mappedDealFields = {},
 }) {
   const normalizedBaseEntry = baseEntry === null || typeof baseEntry === 'undefined'
@@ -477,6 +474,7 @@ export function buildOrderFromQuotationPayload({
   }
 
   const payload = {
+    ...pickMappedHeaderFields(mappedDealFields, { documentLineCount: documentLines.length }),
     CardCode: cardCode,
     DocDueDate: resolveDocDueDate({ mappedDeal: mappedDealFields }),
     DocumentLines: documentLines,
@@ -484,16 +482,6 @@ export function buildOrderFromQuotationPayload({
 
   if (Number.isInteger(slpCode)) {
     payload.SalesPersonCode = slpCode;
-  }
-
-  const resolvedNumAtCard = toNonEmptyString(numAtCard);
-  if (resolvedNumAtCard) {
-    payload.NumAtCard = resolvedNumAtCard;
-  }
-
-  const resolvedComments = toNonEmptyString(comments);
-  if (resolvedComments) {
-    payload.Comments = resolvedComments;
   }
 
   return payload;

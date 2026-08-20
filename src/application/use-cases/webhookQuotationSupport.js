@@ -376,8 +376,3 @@ export function buildSapDocumentLinkLines({ lineItems, documentLines, responseLi
     };
   });
 }
-
-export function buildDealNumAtCard(dealId) {
-  const normalized = toNonEmptyString(dealId);
-  return normalized ? `HS-DEAL-${normalized}` : null;
-}
