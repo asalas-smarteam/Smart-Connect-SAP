@@ -48,4 +48,19 @@ describe('MongooseSapDocumentLinkRepository.findByOrderDocEntry', () => {
       sapDocEntry: 1,
     })).resolves.toBeNull();
   });
+
+  // Si hubspotCredentialId llegara undefined, Mongoose lo descarta del filtro y la
+  // consulta se abre a todos los links de orden del tenant: podría mover el negocio
+  // equivocado a cerrado-ganado.
+  it('devuelve null sin consultar cuando falta hubspotCredentialId', async () => {
+    const { model, findOne } = buildModel({ dealId: 'x' });
+
+    await expect(repository.findByOrderDocEntry({
+      SapDocumentLink: model,
+      hubspotCredentialId: undefined,
+      sapDocEntry: 28987,
+    })).resolves.toBeNull();
+
+    expect(findOne).not.toHaveBeenCalled();
+  });
 });

@@ -18,7 +18,10 @@ export class MongooseSapDocumentLinkRepository {
   // 'order' porque los DocEntry de SAP son secuencias por objeto: sin ese filtro, el DocEntry
   // 500 de una cotización matchearía con la orden 500, que es otro documento.
   async findByOrderDocEntry({ SapDocumentLink, hubspotCredentialId, sapDocEntry }) {
-    if (!SapDocumentLink || !Number.isInteger(sapDocEntry)) {
+    // Sin este chequeo, un hubspotCredentialId undefined desaparece del filtro (Mongoose
+    // lo descarta) y la consulta se abre a TODOS los links de orden del tenant, lo que
+    // puede mover el negocio equivocado a cerrado-ganado.
+    if (!SapDocumentLink || !hubspotCredentialId || !Number.isInteger(sapDocEntry)) {
       return null;
     }
 
