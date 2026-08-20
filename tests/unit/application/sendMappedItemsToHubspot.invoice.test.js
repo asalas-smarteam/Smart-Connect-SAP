@@ -36,9 +36,9 @@ describe('SendMappedItemsToHubspot invoice counters', () => {
   it('keeps skipped out of sent and breaks the reasons down', async () => {
     const handler = {
       process: jest.fn()
-        .mockResolvedValueOnce({ status: 'skipped', reason: 'no_deal_in_num_at_card' })
-        .mockResolvedValueOnce({ status: 'skipped', reason: 'order_link_not_found', dealId: '1' })
-        .mockResolvedValueOnce({ status: 'updated', dealId: '2' }),
+        .mockResolvedValueOnce({ status: 'skipped', reason: 'no_order_base_entry' })
+        .mockResolvedValueOnce({ status: 'skipped', reason: 'order_link_not_found' })
+        .mockResolvedValueOnce({ status: 'updated', dealId: '2', dealIds: ['2'] }),
     };
 
     const result = await execute(buildUseCase(handler), items);
@@ -53,7 +53,7 @@ describe('SendMappedItemsToHubspot invoice counters', () => {
     }));
     expect(result.skippedReasons).toEqual(
       expect.arrayContaining([
-        { reason: 'no_deal_in_num_at_card', count: 1 },
+        { reason: 'no_order_base_entry', count: 1 },
         { reason: 'order_link_not_found', count: 1 },
       ])
     );
@@ -62,14 +62,14 @@ describe('SendMappedItemsToHubspot invoice counters', () => {
 
   it('aggregates repeated reasons into a single counted entry', async () => {
     const handler = {
-      process: jest.fn().mockResolvedValue({ status: 'skipped', reason: 'no_deal_in_num_at_card' }),
+      process: jest.fn().mockResolvedValue({ status: 'skipped', reason: 'no_order_base_entry' }),
     };
 
     const result = await execute(buildUseCase(handler), items);
 
     expect(result.sent).toBe(0);
     expect(result.skipped).toBe(3);
-    expect(result.skippedReasons).toEqual([{ reason: 'no_deal_in_num_at_card', count: 3 }]);
+    expect(result.skippedReasons).toEqual([{ reason: 'no_order_base_entry', count: 3 }]);
   });
 
   // Un handler que devuelve 'skipped' sin motivo no debe romper el conteo ni
@@ -86,8 +86,8 @@ describe('SendMappedItemsToHubspot invoice counters', () => {
   it('counts failures apart from skips and keeps their errors', async () => {
     const handler = {
       process: jest.fn()
-        .mockResolvedValueOnce({ status: 'failed', dealId: '1', error: 'boom' })
-        .mockResolvedValueOnce({ status: 'updated', dealId: '2' })
+        .mockResolvedValueOnce({ status: 'failed', error: 'boom', movedDealIds: [] })
+        .mockResolvedValueOnce({ status: 'updated', dealId: '2', dealIds: ['2'] })
         .mockResolvedValueOnce({ status: 'skipped', reason: 'order_link_not_found' }),
     };
 
@@ -99,8 +99,28 @@ describe('SendMappedItemsToHubspot invoice counters', () => {
     expect(result.errors).toHaveLength(1);
   });
 
+  // El commit que agregó movedDealIds existe justamente para poder resolver a mano un fallo
+  // parcial de una factura consolidada: sin esto en la entrada de errors, esa carga útil
+  // solo vive en app.log y nunca llega al SyncLog.
+  it('carries the handler error message and movedDealIds into the error entry', async () => {
+    const handler = {
+      process: jest.fn().mockResolvedValue({
+        status: 'failed', error: '429 rate limited', movedDealIds: ['111'],
+      }),
+    };
+
+    const result = await execute(buildUseCase(handler), [items[0]]);
+
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        error: '429 rate limited',
+        movedDealIds: ['111'],
+      }),
+    ]);
+  });
+
   it('passes its logger down so the handler reasons reach the app log', async () => {
-    const handler = { process: jest.fn().mockResolvedValue({ status: 'updated', dealId: '2' }) };
+    const handler = { process: jest.fn().mockResolvedValue({ status: 'updated', dealId: '2', dealIds: ['2'] }) };
     const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
 
     await execute(buildUseCase(handler, { logger }), [items[0]]);
