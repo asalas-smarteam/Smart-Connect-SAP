@@ -381,51 +381,9 @@ describe('order-builder.service buildOrderPayload', () => {
     });
   });
 
-  it('adds Comments when deal comments are provided and omits them when empty', () => {
-    const documentLines = [
-      {
-        ItemCode: 'A56010004',
-        Quantity: 1,
-      },
-    ];
-
-    const withComments = buildOrderPayload({
-      cardCode: 'CL99999',
-      documentLines,
-      comments: 'COMENTARIO DE PRUEBA',
-    });
-    expect(withComments.Comments).toBe('COMENTARIO DE PRUEBA');
-
-    const withoutComments = buildOrderPayload({
-      cardCode: 'CL99999',
-      documentLines,
-      comments: '   ',
-    });
-    expect(withoutComments).not.toHaveProperty('Comments');
-  });
-
-  it('adds phone and address fields when provided and omits them when null or empty', () => {
-    const documentLines = [
-      {
-        ItemCode: 'A56010004',
-        Quantity: 1,
-      },
-    ];
-
-    const payload = buildOrderPayload({
-      cardCode: 'CL99999',
-      documentLines,
-      U_ACO_Telefono: '+50589496681',
-      U_ACO_Telefono2: null,
-      Address: '',
-      Address2: 'En Ferretería Noelito, sobre la carretera',
-    });
-
-    expect(payload.U_ACO_Telefono).toBe('+50589496681');
-    expect(payload.Address2).toBe('En Ferretería Noelito, sobre la carretera');
-    expect(payload).not.toHaveProperty('U_ACO_Telefono2');
-    expect(payload).not.toHaveProperty('Address');
-  });
+  // Comments/U_ACO_Telefono/U_ACO_Telefono2/Address/Address2 no son parametros de
+  // buildOrderPayload: ahora salen unicamente del derrame de mappedDealFields. Esa cobertura
+  // vive en quotationBuilder.test.js ("buildOrderPayload toma la cabecera del mapeo").
 
   it('adds PaymentGroupCode when an integer is provided and omits it otherwise', () => {
     const documentLines = [

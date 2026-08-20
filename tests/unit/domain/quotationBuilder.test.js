@@ -401,26 +401,51 @@ describe('order-builder.service buildQuotationLineUpdates', () => {
   });
 });
 
-describe('order-builder.service buildOrderPayload conserva su parametro comments', () => {
-  // amc y noelito NO tienen mapeo de Comments en deal/orders-quotations: para ellos este
-  // parametro es la unica fuente del campo. No unificarlo con el derrame de los otros builders.
-  it('manda Comments desde el parametro aunque no haya ningun campo mapeado', () => {
+describe('order-builder.service buildOrderPayload toma la cabecera del mapeo', () => {
+  const documentLines = [{ ItemCode: 'A01', Quantity: 1, UnitPrice: 10 }];
+
+  // Los cinco campos que antes se leian por nombre fijo desde el codigo. Son los de noelito:
+  // sus filas de FieldMapping ya estan cargadas en produccion.
+  it('derrama los cinco campos que antes venian hardcodeados', () => {
     const payload = buildOrderPayload({
       cardCode: 'CL00129',
-      documentLines: [{ ItemCode: 'A01', Quantity: 1, UnitPrice: 10 }],
-      mappedDealFields: {},
-      comments: 'Comentario del negocio en HubSpot',
+      documentLines,
+      mappedDealFields: {
+        Comments: 'llevar el dia de maniana',
+        U_ACO_Telefono: '+50583635946',
+        U_ACO_Telefono2: '+50588887777',
+        Address: 'Managua centro',
+        Address2: 'Jalapa contiguo al mercado',
+      },
     });
 
-    expect(payload.Comments).toBe('Comentario del negocio en HubSpot');
+    expect(payload).toMatchObject({
+      Comments: 'llevar el dia de maniana',
+      U_ACO_Telefono: '+50583635946',
+      U_ACO_Telefono2: '+50588887777',
+      Address: 'Managua centro',
+      Address2: 'Jalapa contiguo al mercado',
+    });
   });
 
-  it('no manda Comments cuando el negocio no trae ninguno', () => {
+  it('no inventa ninguno de esos campos cuando el mapeo no produjo valores', () => {
+    const payload = buildOrderPayload({ cardCode: 'CL00129', documentLines });
+
+    for (const field of ['Comments', 'U_ACO_Telefono', 'U_ACO_Telefono2', 'Address', 'Address2']) {
+      expect(payload).not.toHaveProperty(field);
+    }
+  });
+
+  it('no deja que el derrame pise lo que el builder posee', () => {
     const payload = buildOrderPayload({
       cardCode: 'CL00129',
-      documentLines: [{ ItemCode: 'A01', Quantity: 1, UnitPrice: 10 }],
+      documentLines,
+      paymentGroupCode: 3,
+      mappedDealFields: { CardCode: 'HACKED', PaymentGroupCode: 99, DocumentLines: [] },
     });
 
-    expect(payload).not.toHaveProperty('Comments');
+    expect(payload.CardCode).toBe('CL00129');
+    expect(payload.PaymentGroupCode).toBe(3);
+    expect(payload.DocumentLines).toEqual(documentLines);
   });
 });

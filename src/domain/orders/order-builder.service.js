@@ -386,11 +386,6 @@ export function buildOrderPayload({
   slpCode = null,
   paymentGroupCode = null,
   mappedDealFields = {},
-  comments = null,
-  U_ACO_Telefono = null,
-  U_ACO_Telefono2 = null,
-  Address = null,
-  Address2 = null,
 }) {
   if (!documentLines.length) {
     throw new PermanentWebhookError('At least one line_item is required to create SAP Order');
@@ -409,19 +404,6 @@ export function buildOrderPayload({
 
   if (Number.isInteger(paymentGroupCode)) {
     payload.PaymentGroupCode = paymentGroupCode;
-  }
-
-  const resolvedComments = toNonEmptyString(comments);
-  if (resolvedComments) {
-    payload.Comments = resolvedComments;
-  }
-
-  const optionalFields = { U_ACO_Telefono, U_ACO_Telefono2, Address, Address2 };
-  for (const [field, value] of Object.entries(optionalFields)) {
-    const resolved = toNonEmptyString(value);
-    if (resolved) {
-      payload[field] = resolved;
-    }
   }
 
   return payload;
