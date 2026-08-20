@@ -42,6 +42,8 @@ Sondeado el 2026-08-19 contra `SBO_DISTELSA_PROD`, sólo lecturas:
   cuyo `NumAtCard` es `HS-DEAL-64175519381`.
 - **Las OC propias del cliente traen caracteres especiales**: `"OC #P06485"`, `"O/C 50471"`,
   `"OC-4504297314"`. Relevante sólo para las alternativas descartadas.
+- **SAP copia `NumAtCard` de la cotización base a la orden.** 12 de 12 órdenes con cotización base
+  coinciden exactamente con su base, incluidas conversiones nativas del cliente.
 - **15 de 18 facturas de hoy son pedidos propios del cliente** (`NumAtCard` con su OC, `null` o
   `""`). Sólo 3 nacieron en HubSpot. Esto decide el nivel de log de los descartes.
 
@@ -93,6 +95,12 @@ Si falta cualquiera de las dos, `mapHubspotToSapFields` no produce la clave (des
 `undefined` y `''` en `order-builder.service.js:20`), el builder no agrega `NumAtCard` al payload
 y SAP deja el campo como esté. O sea: vacío en HubSpot ⇒ vacío en SAP, sin default y sin error.
 
+**El FieldMapping es la única autoridad sobre este campo.** Si una propiedad no llega en
+`payload.deal`, es un error de configuración del workflow de HubSpot y se corrige en HubSpot. El
+código no lo compensa, no lo adivina y no inventa un valor de reemplazo: deja de mandar el campo y
+el error queda visible en SAP como campo vacío. Es el mismo criterio que ya se aplica cuando un
+FieldMapping del cliente provoca un error en SAP — se hace visible, no se parchea desde el código.
+
 Los cambios:
 
 - **Cotización** (`ProcessHubspotCreateQuotation.js:171`): se quita
@@ -102,9 +110,23 @@ Los cambios:
   deje de haber dos fuentes para el mismo campo, donde la explícita pisa a la del mapeo en
   silencio. Esa duplicación es la causa raíz del bug.
 - **Orden desde cotización** (`ProcessHubspotConvertQuotationToOrder.js:117`): pasa a
-  `numAtCard: mappedDeal.NumAtCard`. Aquí el paso explícito **sí** hace falta, porque este builder
-  a propósito no derrama los campos mapeados (SAP copia la cabecera de la cotización base). Sigue
-  habiendo una sola fuente: `mappedDeal`.
+  `numAtCard: mappedDeal.NumAtCard`. Aquí el paso explícito **sí** hace falta, y el motivo es
+  puramente mecánico: `buildOrderFromQuotationPayload` a propósito no derrama los campos mapeados
+  —sólo toma `DocDueDate`— porque SAP copia la cabecera de la cotización base
+  (`order-builder.service.js:445`). Sin el paso a mano, el valor del mapeo no llegaría nunca a ese
+  payload. Sigue habiendo una sola fuente: `mappedDeal`.
+
+  **Verificado en producción:** SAP copia `NumAtCard` de la cotización base a la orden. En 12 de 12
+  órdenes con cotización base el valor coincide exactamente, incluidos casos nativos del cliente
+  sin intervención de la integración (`OC 4500093438` en la orden 25308, `OC-13265` en la 25307).
+  Dos consecuencias:
+
+  - Para Distelsa, cuya cotización queda con `NumAtCard` vacío, el paso explícito es el que pone
+    la OC del usuario en la orden.
+  - Para un tenant cuyo workflow mande la propiedad en la creación de cotización pero no en la
+    conversión, `mappedDeal.NumAtCard` queda `undefined`, no se manda el campo, y SAP hereda el de
+    la cotización. La orden termina con el valor correcto igual. Es una red de seguridad, no una
+    excusa para no configurar el workflow.
 - Se borra `buildDealNumAtCard` de `webhookQuotationSupport.js:380`.
 
 `buildOrderPayload` (orden directa, sin cotización) ya funciona así hoy: no tiene parámetro
