@@ -67,8 +67,14 @@ export async function process({ token, item, clientConfig, tenantModels, logger 
   const numAtCard = item?.rawSapData?.NumAtCard ?? item?.properties?.num_at_card ?? null;
   const sapDocNum = item?.rawSapData?.DocNum ?? item?.properties?.sap_docnum ?? null;
 
+  // Declarados afuera del try para que el catch pueda reportar, ante un fallo a mitad de
+  // camino en una factura consolidada, que ordenes ya se resolvieron y que negocios ya se
+  // movieron antes de que reventara.
+  let baseEntries = [];
+  const movedDealIds = [];
+
   try {
-    const baseEntries = extractOrderBaseEntries(item?.rawSapData?.DocumentLines);
+    baseEntries = extractOrderBaseEntries(item?.rawSapData?.DocumentLines);
 
     if (!baseEntries.length) {
       // Una factura que no nació de un pedido es lo esperado, no una anomalía.
@@ -123,6 +129,10 @@ export async function process({ token, item, clientConfig, tenantModels, logger 
 
     for (const dealId of dealIds) {
       await hubspotClient.updateDeal(token, dealId, { properties: { dealstage } });
+      // Se registra apenas HubSpot confirma el update, no al final del loop: si un
+      // dealId posterior revienta (un 429 es el caso mas probable en este repo), el
+      // catch necesita saber cuales ya quedaron movidos.
+      movedDealIds.push(dealId);
     }
 
     logger?.info?.({
@@ -134,13 +144,18 @@ export async function process({ token, item, clientConfig, tenantModels, logger 
 
     return { status: 'updated', dealId: dealIds[0], dealIds };
   } catch (error) {
+    // En una factura consolidada, `movedDealIds` puede ser un subconjunto de `dealIds`:
+    // el fallo llego a mitad de camino y esos negocios ya se movieron en HubSpot, asi
+    // que el log tiene que decir cuales para poder resolverlo a mano.
     logger?.error?.({
       msg: 'Error procesando una factura en el sync de facturas',
       numAtCard,
       sapDocNum,
+      baseEntries,
+      movedDealIds,
       error: error.message,
     });
-    return { status: 'failed', error: error.message };
+    return { status: 'failed', error: error.message, movedDealIds };
   }
 }
 

@@ -166,6 +166,34 @@ describe('invoice.handler reconciliacion por linaje SAP', () => {
     }));
     expect(logger.error).toHaveBeenCalled();
   });
+
+  // Con dos BaseEntry, el primer updateDeal resuelve y el segundo revienta (un 429 es el caso
+  // mas probable en este repo): el negocio 1 ya se movio en HubSpot y no hay reintento por
+  // item, asi que el log y el retorno tienen que dejar constancia de cual quedo movido.
+  it('reporta los negocios ya movidos cuando una factura consolidada falla a mitad de camino', async () => {
+    mockFindByOrderDocEntry
+      .mockResolvedValueOnce({ dealId: '111' })
+      .mockResolvedValueOnce({ dealId: '222' });
+    mockUpdateDeal
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('429 rate limited'));
+    const logger = buildLogger();
+
+    const result = await processInvoice({
+      token: 't', item: buildInvoice({ baseEntries: [28987, 28991] }),
+      clientConfig, tenantModels, logger,
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      status: 'failed', error: '429 rate limited', movedDealIds: ['111'],
+    }));
+    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({
+      movedDealIds: ['111'],
+      baseEntries: [28987, 28991],
+      numAtCard: 'OC #P06485',
+      sapDocNum: 1024453,
+    }));
+  });
 });
 
 describe('invoice.handler extractOrderBaseEntries', () => {
