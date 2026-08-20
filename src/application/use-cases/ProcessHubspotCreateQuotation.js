@@ -158,7 +158,11 @@ export class ProcessHubspotCreateQuotation {
         hubspotCredentials,
         logger: this.logger,
       });
-      const mappedDeal = mapHubspotToSapFields(deal || {}, mappings.dealOrdersQuotationsMappings);
+      const mappedDeal = mapHubspotToSapFields(
+        deal || {},
+        mappings.dealOrdersQuotationsMappings,
+        { logger: this.logger }
+      );
       const groupCodeDefaults = await this.runtimeRepository.resolveGroupCodeDefaults(tenantModels);
       const paymentGroupCode = resolvePaymentGroupCode({ mappedDeal, groupCodeDefaults });
       const quotationPayload = buildQuotationPayload({
@@ -167,7 +171,6 @@ export class ProcessHubspotCreateQuotation {
         slpCode,
         paymentGroupCode,
         mappedDealFields: mappedDeal,
-        comments: deal?.comments,
       });
       auditTrail.payload_SAP.quotation = quotationPayload;
 

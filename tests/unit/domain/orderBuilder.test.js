@@ -203,6 +203,32 @@ describe('order-builder.service mapDocumentLines', () => {
     expect(lines[1]).not.toHaveProperty('U_MESES_GARANTIA');
   });
 
+  // mapDocumentLines calls mapHubspotToSapFields for lineMappings without passing a logger
+  // today, so a "null"/"undefined" text sentinel on a LINE field is discarded without any
+  // trace. This is the only path with zero coverage of that warn (buildOrderPayload/
+  // buildQuotationPayload cover the header path via mapHubspotToSapFields.test.js).
+  it('warns when a line field mapping is discarded for arriving as the text "null"', () => {
+    const logger = { warn: jest.fn() };
+
+    const lines = mapDocumentLines({
+      productMappings,
+      lineMappings: [{ sourceField: 'U_TEXTO_LIBRE', targetField: 'u_texto_libre' }],
+      taxCodes: [],
+      logger,
+      lineItems: [
+        { hs_sku: 'A56010004', quantity: '1', price: '19.21', u_texto_libre: 'null' },
+      ],
+    });
+
+    expect(lines[0]).not.toHaveProperty('U_TEXTO_LIBRE');
+    expect(logger.warn).toHaveBeenCalledWith({
+      msg: 'Propiedad de HubSpot descartada por llegar como el texto "null"/"undefined"',
+      sapField: 'U_TEXTO_LIBRE',
+      hubspotProperty: 'u_texto_libre',
+      value: 'null',
+    });
+  });
+
   it('does not let lineMappings clobber the line fields owned by the builder', () => {
     const lines = mapDocumentLines({
       productMappings,
@@ -381,51 +407,14 @@ describe('order-builder.service buildOrderPayload', () => {
     });
   });
 
-  it('adds Comments when deal comments are provided and omits them when empty', () => {
-    const documentLines = [
-      {
-        ItemCode: 'A56010004',
-        Quantity: 1,
-      },
-    ];
-
-    const withComments = buildOrderPayload({
-      cardCode: 'CL99999',
-      documentLines,
-      comments: 'COMENTARIO DE PRUEBA',
-    });
-    expect(withComments.Comments).toBe('COMENTARIO DE PRUEBA');
-
-    const withoutComments = buildOrderPayload({
-      cardCode: 'CL99999',
-      documentLines,
-      comments: '   ',
-    });
-    expect(withoutComments).not.toHaveProperty('Comments');
-  });
-
-  it('adds phone and address fields when provided and omits them when null or empty', () => {
-    const documentLines = [
-      {
-        ItemCode: 'A56010004',
-        Quantity: 1,
-      },
-    ];
-
-    const payload = buildOrderPayload({
-      cardCode: 'CL99999',
-      documentLines,
-      U_ACO_Telefono: '+50589496681',
-      U_ACO_Telefono2: null,
-      Address: '',
-      Address2: 'En Ferretería Noelito, sobre la carretera',
-    });
-
-    expect(payload.U_ACO_Telefono).toBe('+50589496681');
-    expect(payload.Address2).toBe('En Ferretería Noelito, sobre la carretera');
-    expect(payload).not.toHaveProperty('U_ACO_Telefono2');
-    expect(payload).not.toHaveProperty('Address');
-  });
+  // Comments/U_ACO_Telefono/U_ACO_Telefono2/Address/Address2 no son parametros de
+  // buildOrderPayload: ahora salen unicamente del derrame de mappedDealFields. La cobertura de
+  // "el campo llega cuando se provee" se traslado a quotationBuilder.test.js ("buildOrderPayload
+  // toma la cabecera del mapeo"), incluyendo el caso de un valor de solo espacios que se omite.
+  // Esa omision de solo-espacios ya NO depende de un recorte hecho aca: ahora es
+  // mapHubspotToSapFields quien descarta el valor antes de que llegue a mappedDealFields
+  // (ver tests/unit/domain/mapHubspotToSapFields.test.js), asi que alcanza a los 4 tenants y a
+  // todos los contextos, no solo a estos cinco campos de orders-quotations.
 
   it('adds PaymentGroupCode when an integer is provided and omits it otherwise', () => {
     const documentLines = [

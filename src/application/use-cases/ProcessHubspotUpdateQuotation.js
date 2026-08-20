@@ -1,4 +1,9 @@
-import { buildQuotationLineUpdates } from '#domain/orders/order-builder.service.js';
+import {
+  buildQuotationLineUpdates,
+  IMMUTABLE_ON_PATCH_FIELDS,
+  mapHubspotToSapFields,
+  pickMappedHeaderFields,
+} from '#domain/orders/order-builder.service.js';
 import { PermanentWebhookError } from '#shared/errors/index.js';
 import { createNoopSapCallRecorder } from '../services/sap-call-audit.service.js';
 import { resolveEventPayload } from '../services/webhook-payload.service.js';
@@ -98,15 +103,45 @@ export class ProcessHubspotUpdateQuotation {
         logger: this.logger,
       });
 
+      const mappedDeal = mapHubspotToSapFields(
+        deal || {},
+        mappings.dealOrdersQuotationsMappings,
+        { logger: this.logger }
+      );
+
+      // El PATCH solo lleva lo que el workflow mando en ESTE evento: mapHubspotToSapFields no
+      // produce clave para una propiedad ausente o vacia. Asi, editar lineas en HubSpot no pisa
+      // los campos de cabecera que un usuario haya corregido a mano en SAP.
+      //
+      // Tres campos quedan afuera del PATCH aunque el tenant los tenga mapeados, por tres motivos
+      // distintos:
+      // - DocDueDate (via RESERVED_HEADER_FIELDS): lo resuelve resolveDocDueDate en los builders.
+      //   Mover el vencimiento de un documento ya creado es una decision distinta de sincronizar
+      //   sus lineas, y ningun tenant que usa este flujo lo mapea hoy.
+      // - PaymentGroupCode (via RESERVED_HEADER_FIELDS): este caso de uso no llama a
+      //   resolvePaymentGroupCode (solo los flujos de creacion lo hacen), asi que aunque el tenant
+      //   lo mapee, la condicion de pago que HubSpot tenga hoy nunca llega a esta oferta: si el
+      //   usuario la cambia en HubSpot, SAP conserva la vieja indefinidamente.
+      // - Series/DocNum/DocDate/TaxDate/DocType/DocEntry (via IMMUTABLE_ON_PATCH_FIELDS): son
+      //   identidad o fechas de creacion de un documento que en este flujo YA existe en SAP.
+      //   Mandarlos en un PATCH arriesga que Service Layer rechace el PATCH completo, con lo que
+      //   la sincronizacion de lineas tampoco aterriza.
+      //
+      // El ancla de DocumentSpecialLines usa link.lines.length (lineas del documento tal como la
+      // integracion las conoce), no lineUpdates.length: buildQuotationLineUpdates solo emite una
+      // entrada por line item del EVENTO que hizo match, no por linea del documento en SAP. Con
+      // lineUpdates.length, editar una sola linea de una oferta de 5 reancla el texto detras de la
+      // linea 0 en vez de detras de la ultima, y SAP lo acepta sin error.
+      const documentLineCount = Array.isArray(link.lines) ? link.lines.length : 0;
+      const mappedHeaderFields = pickMappedHeaderFields(mappedDeal, { documentLineCount });
+      for (const field of IMMUTABLE_ON_PATCH_FIELDS) {
+        delete mappedHeaderFields[field];
+      }
+
       const patchPayload = {
+        ...mappedHeaderFields,
         DocumentLines: lineUpdates,
       };
-
-      // Only overwrite SAP's existing Comments when HubSpot actually sent one.
-      const comments = toNonEmptyString(deal?.comments);
-      if (comments) {
-        patchPayload.Comments = comments;
-      }
 
       // Re-map the deal owner to its SAP salesperson in case it changed in HubSpot.
       const slpCode = await resolveDocumentSlpCode({

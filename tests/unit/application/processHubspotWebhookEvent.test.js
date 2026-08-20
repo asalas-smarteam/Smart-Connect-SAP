@@ -325,3 +325,76 @@ describe('ProcessHubspotWebhookEvent — internalcode al contact del deal', () =
     );
   });
 });
+
+describe('ProcessHubspotWebhookEvent — la cabecera sale solo del FieldMapping', () => {
+  // El payload real de noelito, el tenant cuyas cinco propiedades estaban hardcodeadas.
+  const dealDeNoelito = {
+    hs_object_id: '59680314911',
+    comments: 'llevar el dia de maniana',
+    numero_de_contacto_primario: '+50583635946',
+    numero_de_contacto_secundario: 'null',
+    direccion_de_facturacion: 'null',
+    direccion_de_entrega: 'Jalapa contiguo al mercado',
+  };
+
+  const mapeosDeNoelito = [
+    { sourceField: 'Comments', targetField: 'comments' },
+    { sourceField: 'U_ACO_Telefono', targetField: 'numero_de_contacto_primario' },
+    { sourceField: 'U_ACO_Telefono2', targetField: 'numero_de_contacto_secundario' },
+    { sourceField: 'Address', targetField: 'direccion_de_facturacion' },
+    { sourceField: 'Address2', targetField: 'direccion_de_entrega' },
+  ];
+
+  // Este es el test que fija que el codigo ya no tiene la puerta trasera: las propiedades
+  // vienen en el payload, pero sin las filas de FieldMapping no viajan a SAP.
+  it('no lee ninguna propiedad de HubSpot por nombre cuando no hay mapeos', async () => {
+    const deps = buildDeps();
+    const useCase = new ProcessHubspotWebhookEvent(deps);
+
+    const event = buildEvent({ deal: dealDeNoelito });
+
+    await useCase.execute({ event, tenantModels, portalId: '50564010' });
+
+    const { orderPayload } = deps.sapOrderAdapter.createOrder.mock.calls[0][0];
+    for (const field of ['Comments', 'U_ACO_Telefono', 'U_ACO_Telefono2', 'Address', 'Address2']) {
+      expect(orderPayload).not.toHaveProperty(field);
+    }
+  });
+
+  it('toma los cinco campos del FieldMapping cuando estan mapeados', async () => {
+    const context = buildContext();
+    context.mappings.dealOrdersQuotationsMappings = mapeosDeNoelito;
+    const deps = buildDeps(context);
+    const useCase = new ProcessHubspotWebhookEvent(deps);
+
+    const event = buildEvent({ deal: dealDeNoelito });
+
+    await useCase.execute({ event, tenantModels, portalId: '50564010' });
+
+    const { orderPayload } = deps.sapOrderAdapter.createOrder.mock.calls[0][0];
+    expect(orderPayload.Comments).toBe('llevar el dia de maniana');
+    expect(orderPayload.U_ACO_Telefono).toBe('+50583635946');
+    expect(orderPayload.Address2).toBe('Jalapa contiguo al mercado');
+  });
+
+  // Las dos propiedades que noelito manda como el TEXTO "null" no deben llegar a SAP, ni
+  // siquiera estando mapeadas. Cubre la Task 1 desde el flujo completo.
+  it('descarta las propiedades que llegan como el texto "null" aunque esten mapeadas', async () => {
+    const context = buildContext();
+    context.mappings.dealOrdersQuotationsMappings = mapeosDeNoelito;
+    const deps = buildDeps(context);
+    const useCase = new ProcessHubspotWebhookEvent(deps);
+
+    const event = buildEvent({ deal: dealDeNoelito });
+
+    await useCase.execute({ event, tenantModels, portalId: '50564010' });
+
+    const { orderPayload } = deps.sapOrderAdapter.createOrder.mock.calls[0][0];
+    expect(orderPayload).not.toHaveProperty('U_ACO_Telefono2');
+    expect(orderPayload).not.toHaveProperty('Address');
+    expect(deps.logger.warn).toHaveBeenCalledWith(expect.objectContaining({
+      sapField: 'U_ACO_Telefono2',
+      hubspotProperty: 'numero_de_contacto_secundario',
+    }));
+  });
+});

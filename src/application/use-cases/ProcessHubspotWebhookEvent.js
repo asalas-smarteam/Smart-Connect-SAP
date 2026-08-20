@@ -299,7 +299,11 @@ export class ProcessHubspotWebhookEvent {
         hubspotCredentials,
       });
 
-      const mappedDeal = mapHubspotToSapFields(deal || {}, mappings.dealOrdersQuotationsMappings);
+      const mappedDeal = mapHubspotToSapFields(
+        deal || {},
+        mappings.dealOrdersQuotationsMappings,
+        { logger: this.logger }
+      );
       const groupCodeDefaults = await this.runtimeRepository.resolveGroupCodeDefaults(tenantModels);
       const paymentGroupCode = resolvePaymentGroupCode({ mappedDeal, groupCodeDefaults });
 
@@ -309,11 +313,6 @@ export class ProcessHubspotWebhookEvent {
         slpCode,
         paymentGroupCode,
         mappedDealFields: mappedDeal,
-        comments: deal?.comments,
-        U_ACO_Telefono: deal?.numero_de_contacto_primario,
-        U_ACO_Telefono2: deal?.numero_de_contacto_secundario,
-        Address: deal?.direccion_de_facturacion,
-        Address2: deal?.direccion_de_entrega,
       });
 
       auditTrail.payload_SAP.order = orderPayload;

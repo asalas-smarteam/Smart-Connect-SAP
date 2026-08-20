@@ -147,7 +147,9 @@ export class ProcessHubspotInventoryTransferRequest {
         dealContactIsContactEmployee,
       } = businessPartner;
 
-      const mappedDeal = mapHubspotToSapFields(deal || {}, mappings.dealInventoryTransferRequestMappings);
+      const mappedDeal = mapHubspotToSapFields(deal || {}, mappings.dealInventoryTransferRequestMappings, {
+        logger: this.logger,
+      });
       const stockTransferLines = mapStockTransferLines({
         lineItems,
         lineMappings: mappings.productInventoryTransferRequestMappings,

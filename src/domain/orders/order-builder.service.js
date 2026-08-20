@@ -3,7 +3,34 @@ import { PermanentWebhookError } from '#shared/errors/index.js';
 import { pickByPath } from '#shared/utils/object-path.utils.js';
 import { normalizeInteger, normalizeNumber, toNonEmptyString } from '#shared/utils/string.utils.js';
 
-export function mapHubspotToSapFields(source, mappings) {
+// Un workflow de HubSpot mal configurado serializa una propiedad vacia como el TEXTO 'null' o
+// 'undefined' en vez de omitirla. Verificado en produccion: el tenant noelito manda "null" en
+// numero_de_contacto_secundario y direccion_de_facturacion, y hoy eso se escribe literal en
+// U_ACO_Telefono2 y Address de sus ordenes de SAP.
+//
+// El descarte NO va en toNonEmptyString a proposito: esa funcion tiene 208 usos en 34 archivos,
+// la mayoria identificadores (hs_object_id, portalId, hs_sku, cardCode), asi que cambiarle la
+// semantica exige su propia rama para poder atribuir cualquier regresion.
+const EMPTY_TEXT_SENTINELS = new Set(['null', 'undefined']);
+
+function isEmptyTextSentinel(value) {
+  return typeof value === 'string' && EMPTY_TEXT_SENTINELS.has(value.trim().toLowerCase());
+}
+
+// Un valor de puros espacios (o tabs/saltos de linea) es la misma clase de basura que ''
+// o los textos "null"/"undefined": la propiedad de HubSpot esta vacia mas alla de como el
+// workflow la haya serializado. Se descarta en silencio igual que '', sin warn: no es un
+// texto reconocible como error de configuracion, es simplemente vacio.
+//
+// El valor que SI viaja no se recorta aca: esta funcion solo decide si la clave se agrega,
+// nunca transforma el valor guardado. Un 'texto ' con espacio final tiene que llegar a SAP
+// tal cual. Solo strings entran a este chequeo; numeros, booleanos (incluido 0 y false) y
+// arrays no son texto y siguen viajando sin tocar.
+function isBlankString(value) {
+  return typeof value === 'string' && value.trim() === '';
+}
+
+export function mapHubspotToSapFields(source, mappings, { logger = null } = {}) {
   const mapped = {};
 
   for (const mapping of Array.isArray(mappings) ? mappings : []) {
@@ -18,7 +45,21 @@ export function mapHubspotToSapFields(source, mappings) {
     }
 
     const value = pickByPath(source, targetField);
-    if (value !== null && typeof value !== 'undefined' && value !== '') {
+
+    // Se avisa en vez de descartar en silencio: el valor sucio viene de un workflow mal
+    // configurado, y este warn es lo que hace que alguien lo corrija en HubSpot, que es donde
+    // corresponde. Un null real no pasa por aca, asi que el log no se llena de ruido.
+    if (isEmptyTextSentinel(value)) {
+      logger?.warn?.({
+        msg: 'Propiedad de HubSpot descartada por llegar como el texto "null"/"undefined"',
+        sapField: sourceField,
+        hubspotProperty: targetField,
+        value,
+      });
+      continue;
+    }
+
+    if (value !== null && typeof value !== 'undefined' && !isBlankString(value)) {
       mapped[sourceField] = value;
     }
   }
@@ -66,7 +107,10 @@ export function normalizeDocumentSpecialLines(value, { afterLineNumber = 0 } = {
   ];
 }
 
-function pickMappedHeaderFields(mappedDealFields, { documentLineCount = 0 } = {}) {
+// Exportada porque el PATCH de ProcessHubspotUpdateQuotation la necesita: sin ella, un mapeo
+// podria pisar CardCode o DocumentLines en la actualizacion de una oferta, y DocumentSpecialLines
+// llegaria como texto plano en vez de como la coleccion que SAP espera.
+export function pickMappedHeaderFields(mappedDealFields, { documentLineCount = 0 } = {}) {
   const fields = {};
 
   for (const [field, value] of Object.entries(mappedDealFields || {})) {
@@ -90,6 +134,31 @@ function pickMappedHeaderFields(mappedDealFields, { documentLineCount = 0 } = {}
 
   return fields;
 }
+
+// This is a DIFFERENT criterion from RESERVED_HEADER_FIELDS above, hence its own Set: that one
+// is "the builder already owns this field" (CardCode, DocDueDate, DocumentLines, PaymentGroupCode
+// are computed elsewhere when a document is CREATED), while this one is "SAP will not let you
+// change this on a document that already exists". Series/DocNum/DocType/DocEntry identify the
+// document itself, and DocDate/TaxDate are posting dates fixed at creation. None of that applies
+// while creating: mixing the two lists would also strip these fields from buildOrderPayload and
+// buildQuotationPayload, where they DO need to travel.
+//
+// Verified against production data: tenant printer has Series, DocumentSpecialLines, TaxDate and
+// DocDate mapped in dealOrdersQuotationsMappings (a single list shared by order/quotation
+// creation, conversion, AND the quotation PATCH). It does not use updateQuotation today, but any
+// tenant that maps one of these and later edits quotation lines would send it in a PATCH; Service
+// Layer rejects the whole PATCH rather than the offending field, so line sync would silently stop
+// landing with a symptom that does not point back to the mapping.
+//
+// THIS LIST IS PARTIAL. The six names above are only the ones observed in printer's mappings;
+// they are not the full set of fields SAP refuses to change on an existing document. printer
+// alone has 81 rows in that context, and its payload also carries DocCurrency and DocRate
+// (currency / exchange rate), which SAP equally rejects on a PATCH and which are NOT covered
+// here. Before enabling updateQuotation for a tenant that does not use it today, audit that
+// tenant's deal/orders-quotations mappings against the fields Service Layer disallows on PATCH:
+// an uncovered field makes the WHOLE PATCH fail, and the symptom looks like broken line sync,
+// not a header mapping problem.
+export const IMMUTABLE_ON_PATCH_FIELDS = new Set(['Series', 'DocNum', 'DocDate', 'TaxDate', 'DocType', 'DocEntry']);
 
 // Line fields owned by mapDocumentLines (or resolved through dedicated coercion, like TaxCode
 // by rate or UnitPrice by misc calculation) are excluded from the generic line-mapping spread
@@ -302,7 +371,7 @@ export function mapDocumentLines({
   const lines = [];
 
   for (const lineItem of lineItems) {
-    const mapped = mapHubspotToSapFields(lineItem, productMappings);
+    const mapped = mapHubspotToSapFields(lineItem, productMappings, { logger });
     const itemCode = toNonEmptyString(mapped?.ItemCode || lineItem?.hs_sku || lineItem?.itemCode);
     const quantity = normalizeNumber(mapped?.Quantity ?? lineItem?.quantity, 1);
     const discount = resolveLineDiscount(lineItem, discountConfig, 0);
@@ -323,7 +392,7 @@ export function mapDocumentLines({
       });
     }
 
-    const mappedLine = pickMappedLineFields(mapHubspotToSapFields(lineItem, lineMappings));
+    const mappedLine = pickMappedLineFields(mapHubspotToSapFields(lineItem, lineMappings, { logger }));
     const line = {
       ...mappedLine,
       ItemCode: itemCode,
@@ -358,11 +427,6 @@ export function buildOrderPayload({
   slpCode = null,
   paymentGroupCode = null,
   mappedDealFields = {},
-  comments = null,
-  U_ACO_Telefono = null,
-  U_ACO_Telefono2 = null,
-  Address = null,
-  Address2 = null,
 }) {
   if (!documentLines.length) {
     throw new PermanentWebhookError('At least one line_item is required to create SAP Order');
@@ -383,19 +447,6 @@ export function buildOrderPayload({
     payload.PaymentGroupCode = paymentGroupCode;
   }
 
-  const resolvedComments = toNonEmptyString(comments);
-  if (resolvedComments) {
-    payload.Comments = resolvedComments;
-  }
-
-  const optionalFields = { U_ACO_Telefono, U_ACO_Telefono2, Address, Address2 };
-  for (const [field, value] of Object.entries(optionalFields)) {
-    const resolved = toNonEmptyString(value);
-    if (resolved) {
-      payload[field] = resolved;
-    }
-  }
-
   return payload;
 }
 
@@ -408,7 +459,6 @@ export function buildQuotationPayload({
   slpCode = null,
   paymentGroupCode = null,
   mappedDealFields = {},
-  comments = null,
 }) {
   if (!documentLines.length) {
     throw new PermanentWebhookError('At least one line_item is required to create SAP Quotation');
@@ -427,11 +477,6 @@ export function buildQuotationPayload({
 
   if (Number.isInteger(paymentGroupCode)) {
     payload.PaymentGroupCode = paymentGroupCode;
-  }
-
-  const resolvedComments = toNonEmptyString(comments);
-  if (resolvedComments) {
-    payload.Comments = resolvedComments;
   }
 
   return payload;
@@ -546,7 +591,7 @@ export function buildQuotationLineUpdates({ lineItems, productMappings, linkLine
 
     usedLineNums.add(matchedLink.sapLineNum);
 
-    const mapped = mapHubspotToSapFields(lineItem, productMappings);
+    const mapped = mapHubspotToSapFields(lineItem, productMappings, { logger });
     const quantity = normalizeNumber(mapped?.Quantity ?? lineItem?.quantity, null);
     const discount = resolveLineDiscount(lineItem, discountConfig, null);
     const { unitPrice, warning } = resolveUnitPrice({ mapped, lineItem, miscPriceCalculationConfig });

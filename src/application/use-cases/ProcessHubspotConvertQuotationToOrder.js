@@ -106,7 +106,9 @@ export class ProcessHubspotConvertQuotationToOrder {
         logger: this.logger,
       });
 
-      const mappedDeal = mapHubspotToSapFields(deal || {}, mappings.dealOrdersQuotationsMappings);
+      const mappedDeal = mapHubspotToSapFields(deal || {}, mappings.dealOrdersQuotationsMappings, {
+        logger: this.logger,
+      });
 
       const orderPayload = buildOrderFromQuotationPayload({
         cardCode,
