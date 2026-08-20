@@ -147,12 +147,26 @@ le gana al mapeo. Después del cambio recibirá el `<id>` crudo, que es lo que c
 este código lee ese campo de vuelta para Printer: no tienen config de `invoice` y su config de
 `deal` está inactiva. Decisión tomada el 2026-08-19: se despliega sin avisarles.
 
-**Cambio adicional, más allá del pedido original:** también se quita el parámetro `comments` de
-`buildQuotationPayload`. Hoy es una doble fuente que le gana al mapeo; ambas leen `deal.comments`,
-así que no produce un bug visible, pero un tenant que mapee `Comments` a otra propiedad se
-encontraría con que el parámetro se la pisa — la misma clase de falla que este trabajo elimina. Es
-seguro quitarlo: los dos únicos tenants que crean cotizaciones (`distelsa`, `printer`) tienen la
-fila `Comments <- comments` activa.
+**`buildQuotationPayload` conserva su parámetro `comments`.** Se consideró quitarlo por simetría
+—es una doble fuente que le gana al mapeo— y se descartó: `ProcessHubspotUpdateQuotation.js:106`
+lee `deal?.comments` directo para su PATCH, así que si crear cotización pasara a leer por mapeo y
+actualizar siguiera leyendo la propiedad literal, un tenant que mapee `Comments` a otra propiedad
+recibiría un valor al crear y otro al actualizar. Eso es peor que la doble fuente actual, donde
+ambas leen la misma propiedad. Unificarlo de verdad exige meter el camino de update en el mismo
+mecanismo, y eso es trabajo aparte de este spec.
+
+El parámetro que sí se quita de ese builder es `numAtCard`, que es el que produce el override
+observado en Printer. La diferencia es que ese parámetro traía un valor **fabricado por el
+integrador** (`HS-DEAL-<dealId>`), mientras que `comments` lee una propiedad de HubSpot: sólo el
+primero es el defecto que este trabajo elimina.
+
+**Asimetría aceptada, y su riesgo.** En el camino de conversión, `Comments` pasa a salir del mapeo,
+mientras que crear y actualizar cotización lo siguen leyendo de `deal.comments`. Para Distelsa da
+el mismo valor, porque su fila es `Comments <- comments`. El riesgo es que si esa fila se desactiva
+o se borra, los comentarios de sus órdenes desaparecen en silencio — y los comentarios son
+justamente lo que el cliente reclamó. Se asume porque es coherente con el principio acordado (una
+propiedad que no llega es un error de configuración que se corrige en HubSpot), pero queda escrito
+para que se sepa de dónde vendría esa falla.
 
 **Distelsa en concreto:** su workflow manda la propiedad de la OC recién en
 `convertQuotationToOrder`, así que sus cotizaciones quedarán con `NumAtCard` vacío y sus órdenes
@@ -230,6 +244,10 @@ Crear en el admin la fila `NumAtCard` → propiedad de HubSpot de la OC, en `obj
 tiene una sola fila (`Comments <- comments`). Sin esta fila el código queda correcto pero el
 `NumAtCard` de Distelsa viajará vacío.
 
+Y **las dos filas de ese contexto pasan a ser críticas para el camino de conversión**, porque es de
+ahí que salen `Comments` y `NumAtCard` de la orden. Desactivar o borrar `Comments <- comments`
+vacía los comentarios de las órdenes de Distelsa sin ningún error visible.
+
 ## Sin compatibilidad hacia atrás
 
 Decisión del cliente: las órdenes existentes con `NumAtCard: HS-DEAL-<id>` se van a borrar. No hay
@@ -296,9 +314,12 @@ Sobre el derrame de campos mapeados, que es el corazón del cambio:
   aparecen en el payload. Este es el test que fija la regla que pidió el cliente.
 - El mismo builder sigue respetando `DocDueDate` y las líneas `BaseType`/`BaseEntry`/`BaseLine`
   que ya construía: el derrame no debe pisar lo que el builder posee.
-- Ninguno de los tres builders acepta ya un parámetro que le gane al mapeo para `NumAtCard`
+- Ninguno de los tres builders acepta ya un parámetro `numAtCard` que le gane al mapeo
   (`buildQuotationPayload` y `buildOrderFromQuotationPayload` pierden la firma; `buildOrderPayload`
   nunca la tuvo).
+- `buildQuotationPayload` **conserva** su parámetro `comments`: con `mappedDealFields` vacío y
+  `comments: 'texto'`, el payload lleva `Comments`. Protege los dos tests vivos de
+  `processQuotationFlows.test.js` y la consistencia con el PATCH de update-quotation.
 - **Cotización de un tenant que sí manda `NumAtCard`** (el caso de Printer): con
   `mappedDealFields.NumAtCard` presente el payload de cotización lo lleva **tal cual**, sin prefijo
   `HS-DEAL-`. Es el test que fija el cambio de comportamiento de Printer como intencional.
