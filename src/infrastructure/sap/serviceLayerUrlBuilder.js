@@ -69,6 +69,20 @@ function getAdditionalFieldsByObjectType(objectType) {
     .filter((field) => field && SAP_FIELD_PATTERN.test(field));
 }
 
+// Campos que una tarea necesita por diseño, y que por eso NO viajan como FieldMapping: si
+// dependieran de una fila del admin, un tenant que la borre rompería la tarea en silencio.
+//
+// La reconciliación de facturas resuelve el negocio de HubSpot por el linaje de SAP
+// (DocumentLines[].BaseEntry con BaseType 17 apuntando al DocEntry de la orden), así que sin
+// DocumentLines no puede identificar ninguna orden y descartaría todas las facturas.
+const requiredFieldsByObjectType = {
+  invoice: ['DocumentLines'],
+};
+
+function getRequiredFieldsByObjectType(objectType) {
+  return requiredFieldsByObjectType[objectType] ?? [];
+}
+
 function sanitizeControlledFilter(filter) {
   const value = cleanValue(filter);
   if (!value) return '';
@@ -153,7 +167,12 @@ export function buildServiceLayerUrl(clientConfig, mappings, options = {}) {
 
   const selectFields = sanitizeSelectFields(mappings);
   const additionalFields = getAdditionalFieldsByObjectType(clientConfig?.objectType);
-  const mergedSelectFields = Array.from(new Set([...selectFields, ...additionalFields]));
+  const requiredFields = getRequiredFieldsByObjectType(clientConfig?.objectType);
+  const mergedSelectFields = Array.from(new Set([
+    ...selectFields,
+    ...additionalFields,
+    ...requiredFields,
+  ]));
   if (mergedSelectFields.length === 0) {
     throw new Error('At least one active mapping with a valid sourceField is required');
   }
