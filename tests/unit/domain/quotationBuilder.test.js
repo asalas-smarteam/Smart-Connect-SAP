@@ -8,23 +8,42 @@ import {
 } from '../../../src/domain/orders/order-builder.service.js';
 
 describe('order-builder.service buildQuotationPayload', () => {
-  it('builds a Quotation payload with NumAtCard, Comments and SalesPersonCode', () => {
+  it('builds a Quotation payload with Comments and SalesPersonCode', () => {
     const payload = buildQuotationPayload({
       cardCode: 'CL00129',
       documentLines: [{ ItemCode: 'A01', Quantity: 1, UnitPrice: 10 }],
       slpCode: 5,
-      numAtCard: 'HS-DEAL-123',
       comments: 'Oferta creada desde HubSpot',
     });
 
     expect(payload).toMatchObject({
       CardCode: 'CL00129',
-      NumAtCard: 'HS-DEAL-123',
       Comments: 'Oferta creada desde HubSpot',
       SalesPersonCode: 5,
       DocumentLines: [{ ItemCode: 'A01', Quantity: 1, UnitPrice: 10 }],
     });
     expect(payload.DocDueDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  // Printer mapea NumAtCard <- hs_object_id y hoy recibe HS-DEAL-<id> porque el parametro
+  // explicito le gana al mapeo. Este test fija que reciba el valor mapeado tal cual.
+  it('toma NumAtCard del mapeo, sin prefijo ni parametro que lo pise', () => {
+    const payload = buildQuotationPayload({
+      cardCode: 'CL00129',
+      documentLines: [{ ItemCode: 'A01', Quantity: 1, UnitPrice: 10 }],
+      mappedDealFields: { NumAtCard: '64175519381' },
+    });
+
+    expect(payload.NumAtCard).toBe('64175519381');
+  });
+
+  it('no agrega NumAtCard cuando el mapeo no produjo valor', () => {
+    const payload = buildQuotationPayload({
+      cardCode: 'CL00129',
+      documentLines: [{ ItemCode: 'A01', Quantity: 1, UnitPrice: 10 }],
+    });
+
+    expect(payload).not.toHaveProperty('NumAtCard');
   });
 
   it('uses the DocDueDate mapped from HubSpot instead of today', () => {
@@ -379,5 +398,29 @@ describe('order-builder.service buildQuotationLineUpdates', () => {
         lineItems: [{ hubspot_id: 'unknown', hs_sku: 'A99', price: '1' }],
       })
     ).toThrow(/No matching quotation lines/);
+  });
+});
+
+describe('order-builder.service buildOrderPayload conserva su parametro comments', () => {
+  // amc y noelito NO tienen mapeo de Comments en deal/orders-quotations: para ellos este
+  // parametro es la unica fuente del campo. No unificarlo con el derrame de los otros builders.
+  it('manda Comments desde el parametro aunque no haya ningun campo mapeado', () => {
+    const payload = buildOrderPayload({
+      cardCode: 'CL00129',
+      documentLines: [{ ItemCode: 'A01', Quantity: 1, UnitPrice: 10 }],
+      mappedDealFields: {},
+      comments: 'Comentario del negocio en HubSpot',
+    });
+
+    expect(payload.Comments).toBe('Comentario del negocio en HubSpot');
+  });
+
+  it('no manda Comments cuando el negocio no trae ninguno', () => {
+    const payload = buildOrderPayload({
+      cardCode: 'CL00129',
+      documentLines: [{ ItemCode: 'A01', Quantity: 1, UnitPrice: 10 }],
+    });
+
+    expect(payload).not.toHaveProperty('Comments');
   });
 });

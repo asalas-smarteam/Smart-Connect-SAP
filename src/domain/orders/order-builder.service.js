@@ -408,7 +408,6 @@ export function buildQuotationPayload({
   slpCode = null,
   paymentGroupCode = null,
   mappedDealFields = {},
-  numAtCard = null,
   comments = null,
 }) {
   if (!documentLines.length) {
@@ -428,11 +427,6 @@ export function buildQuotationPayload({
 
   if (Number.isInteger(paymentGroupCode)) {
     payload.PaymentGroupCode = paymentGroupCode;
-  }
-
-  const resolvedNumAtCard = toNonEmptyString(numAtCard);
-  if (resolvedNumAtCard) {
-    payload.NumAtCard = resolvedNumAtCard;
   }
 
   const resolvedComments = toNonEmptyString(comments);
