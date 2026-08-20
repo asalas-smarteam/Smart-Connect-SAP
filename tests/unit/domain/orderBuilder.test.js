@@ -203,6 +203,32 @@ describe('order-builder.service mapDocumentLines', () => {
     expect(lines[1]).not.toHaveProperty('U_MESES_GARANTIA');
   });
 
+  // mapDocumentLines calls mapHubspotToSapFields for lineMappings without passing a logger
+  // today, so a "null"/"undefined" text sentinel on a LINE field is discarded without any
+  // trace. This is the only path with zero coverage of that warn (buildOrderPayload/
+  // buildQuotationPayload cover the header path via mapHubspotToSapFields.test.js).
+  it('warns when a line field mapping is discarded for arriving as the text "null"', () => {
+    const logger = { warn: jest.fn() };
+
+    const lines = mapDocumentLines({
+      productMappings,
+      lineMappings: [{ sourceField: 'U_TEXTO_LIBRE', targetField: 'u_texto_libre' }],
+      taxCodes: [],
+      logger,
+      lineItems: [
+        { hs_sku: 'A56010004', quantity: '1', price: '19.21', u_texto_libre: 'null' },
+      ],
+    });
+
+    expect(lines[0]).not.toHaveProperty('U_TEXTO_LIBRE');
+    expect(logger.warn).toHaveBeenCalledWith({
+      msg: 'Propiedad de HubSpot descartada por llegar como el texto "null"/"undefined"',
+      sapField: 'U_TEXTO_LIBRE',
+      hubspotProperty: 'u_texto_libre',
+      value: 'null',
+    });
+  });
+
   it('does not let lineMappings clobber the line fields owned by the builder', () => {
     const lines = mapDocumentLines({
       productMappings,

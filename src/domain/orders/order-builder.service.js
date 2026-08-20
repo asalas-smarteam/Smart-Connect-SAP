@@ -149,6 +149,15 @@ export function pickMappedHeaderFields(mappedDealFields, { documentLineCount = 0
 // tenant that maps one of these and later edits quotation lines would send it in a PATCH; Service
 // Layer rejects the whole PATCH rather than the offending field, so line sync would silently stop
 // landing with a symptom that does not point back to the mapping.
+//
+// THIS LIST IS PARTIAL. The six names above are only the ones observed in printer's mappings;
+// they are not the full set of fields SAP refuses to change on an existing document. printer
+// alone has 81 rows in that context, and its payload also carries DocCurrency and DocRate
+// (currency / exchange rate), which SAP equally rejects on a PATCH and which are NOT covered
+// here. Before enabling updateQuotation for a tenant that does not use it today, audit that
+// tenant's deal/orders-quotations mappings against the fields Service Layer disallows on PATCH:
+// an uncovered field makes the WHOLE PATCH fail, and the symptom looks like broken line sync,
+// not a header mapping problem.
 export const IMMUTABLE_ON_PATCH_FIELDS = new Set(['Series', 'DocNum', 'DocDate', 'TaxDate', 'DocType', 'DocEntry']);
 
 // Line fields owned by mapDocumentLines (or resolved through dedicated coercion, like TaxCode
@@ -362,7 +371,7 @@ export function mapDocumentLines({
   const lines = [];
 
   for (const lineItem of lineItems) {
-    const mapped = mapHubspotToSapFields(lineItem, productMappings);
+    const mapped = mapHubspotToSapFields(lineItem, productMappings, { logger });
     const itemCode = toNonEmptyString(mapped?.ItemCode || lineItem?.hs_sku || lineItem?.itemCode);
     const quantity = normalizeNumber(mapped?.Quantity ?? lineItem?.quantity, 1);
     const discount = resolveLineDiscount(lineItem, discountConfig, 0);
@@ -383,7 +392,7 @@ export function mapDocumentLines({
       });
     }
 
-    const mappedLine = pickMappedLineFields(mapHubspotToSapFields(lineItem, lineMappings));
+    const mappedLine = pickMappedLineFields(mapHubspotToSapFields(lineItem, lineMappings, { logger }));
     const line = {
       ...mappedLine,
       ItemCode: itemCode,
@@ -582,7 +591,7 @@ export function buildQuotationLineUpdates({ lineItems, productMappings, linkLine
 
     usedLineNums.add(matchedLink.sapLineNum);
 
-    const mapped = mapHubspotToSapFields(lineItem, productMappings);
+    const mapped = mapHubspotToSapFields(lineItem, productMappings, { logger });
     const quantity = normalizeNumber(mapped?.Quantity ?? lineItem?.quantity, null);
     const discount = resolveLineDiscount(lineItem, discountConfig, null);
     const { unitPrice, warning } = resolveUnitPrice({ mapped, lineItem, miscPriceCalculationConfig });
