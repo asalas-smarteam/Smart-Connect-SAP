@@ -71,22 +71,50 @@ El mecanismo ya existe y funciona: el contexto `deal` / `orders-quotations`
 cabecera vía `pickMappedHeaderFields` (`order-builder.service.js:69`), que sólo excluye
 `CardCode`, `DocDueDate`, `DocumentLines` y `PaymentGroupCode`. `NumAtCard` no está reservado.
 
-Lo único que lo tapa es que el parámetro explícito se aplica **después** del spread. Entonces:
+Lo único que lo tapa es que el parámetro explícito se aplica **después** del spread, así que gana
+siempre contra el mapeo.
+
+**El objetivo no es dejar de mandar `NumAtCard` en cotización. Es que en cotización, en orden
+directa y en orden desde cotización el valor tenga una sola fuente: el mapeo.** Que viaje o no
+depende de la configuración del tenant, no del tipo de documento, y el código no debe distinguir
+entre esos tres escenarios.
+
+Ese valor viaja cuando se cumplen **las dos** condiciones, y las dos son configuración, no código:
+
+1. **Existe la fila en `FieldMapping`**: `sourceField: 'NumAtCard'`,
+   `targetField: '<propiedad de HubSpot>'`, `objectType: 'deal'`,
+   `sourceContext: 'orders-quotations'`.
+2. **El workflow de HubSpot manda esa propiedad dentro de `payload.deal`.**
+   `resolveEventPayload` devuelve `payload.deal` tal cual, sin lista blanca
+   (`webhook-payload.service.js:14`), así que cualquier propiedad que el workflow incluya llega al
+   mapeador. Si el workflow no la manda, no hay nada que mapear.
+
+Si falta cualquiera de las dos, `mapHubspotToSapFields` no produce la clave (descarta `null`,
+`undefined` y `''` en `order-builder.service.js:20`), el builder no agrega `NumAtCard` al payload
+y SAP deja el campo como esté. O sea: vacío en HubSpot ⇒ vacío en SAP, sin default y sin error.
+
+Los cambios:
 
 - **Cotización** (`ProcessHubspotCreateQuotation.js:171`): se quita
-  `numAtCard: buildDealNumAtCard(dealId)`. Se quita además el parámetro `numAtCard` de la firma de
-  `buildQuotationPayload`: el spread ya lo trae del mapeo, y dejar el parámetro es exactamente la
-  trampa que causó este bug — gana siempre contra el mapeo.
+  `numAtCard: buildDealNumAtCard(dealId)`, y se quita también el parámetro `numAtCard` de la firma
+  de `buildQuotationPayload`. No es para que la cotización deje de mandar el campo — el spread del
+  mapeo lo sigue trayendo, y un tenant que sí lo manda en cotización queda cubierto. Es para que
+  deje de haber dos fuentes para el mismo campo, donde la explícita pisa a la del mapeo en
+  silencio. Esa duplicación es la causa raíz del bug.
 - **Orden desde cotización** (`ProcessHubspotConvertQuotationToOrder.js:117`): pasa a
   `numAtCard: mappedDeal.NumAtCard`. Aquí el paso explícito **sí** hace falta, porque este builder
-  a propósito no derrama los campos mapeados (SAP copia la cabecera de la cotización base).
+  a propósito no derrama los campos mapeados (SAP copia la cabecera de la cotización base). Sigue
+  habiendo una sola fuente: `mappedDeal`.
 - Se borra `buildDealNumAtCard` de `webhookQuotationSupport.js:380`.
 
-`buildOrderPayload` (orden directa, sin cotización) ya funciona por mapeo hoy; no se toca.
+`buildOrderPayload` (orden directa, sin cotización) ya funciona así hoy: no tiene parámetro
+`numAtCard` y toma el valor del spread. No se toca. Después del cambio, los tres builders se
+comportan igual.
 
-Resultado: si el tenant tiene la fila `NumAtCard → <propiedad HS>` en contexto
-`deal`/`orders-quotations` y la propiedad viene con valor, viaja. Si no, no viaja. Sirve en
-cotización, en orden directa y en orden desde cotización sin distinguir el escenario.
+**Distelsa en concreto:** su workflow manda la propiedad recién en la conversión a orden de venta,
+así que sus cotizaciones van a quedar con `NumAtCard` vacío y sus órdenes con la OC del usuario.
+Eso es consecuencia de su configuración, no del código: el mismo código, con un workflow que mande
+la propiedad desde el inicio, la manda también en la cotización.
 
 **No se siembra un mapeo por defecto** en `defaultClientConfigMappings.service.js`: el nombre de
 la propiedad de HubSpot es específico del tenant y sembrarlo para todos crea mapeos muertos en el
@@ -212,6 +240,11 @@ Nuevas:
 - `buildServiceLayerUrl`: incluye `DocumentLines` para `objectType: 'invoice'` y **no** lo incluye
   para los demás.
 - `buildQuotationPayload` toma `NumAtCard` de los campos mapeados (y ya no acepta el parámetro).
+- **Cotización de un tenant que sí manda `NumAtCard`**: con `mappedDealFields.NumAtCard` presente,
+  el payload de cotización lo lleva. Este caso es el que garantiza que el cambio no deja fuera a
+  los tenants distintos de Distelsa, y hoy no existe en la suite.
+- **Cotización sin la propiedad**: sin `NumAtCard` en `mappedDealFields`, la clave no aparece en el
+  payload (no viaja como `null` ni como `''`).
 - `buildOrderFromQuotationPayload` recibe `numAtCard` y `comments` explícitos.
 - `ProcessHubspotConvertQuotationToOrder` pasa `deal.comments` y `mappedDeal.NumAtCard`.
 
