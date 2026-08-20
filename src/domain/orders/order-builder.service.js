@@ -3,7 +3,21 @@ import { PermanentWebhookError } from '#shared/errors/index.js';
 import { pickByPath } from '#shared/utils/object-path.utils.js';
 import { normalizeInteger, normalizeNumber, toNonEmptyString } from '#shared/utils/string.utils.js';
 
-export function mapHubspotToSapFields(source, mappings) {
+// Un workflow de HubSpot mal configurado serializa una propiedad vacia como el TEXTO 'null' o
+// 'undefined' en vez de omitirla. Verificado en produccion: el tenant noelito manda "null" en
+// numero_de_contacto_secundario y direccion_de_facturacion, y hoy eso se escribe literal en
+// U_ACO_Telefono2 y Address de sus ordenes de SAP.
+//
+// El descarte NO va en toNonEmptyString a proposito: esa funcion tiene 208 usos en 34 archivos,
+// la mayoria identificadores (hs_object_id, portalId, hs_sku, cardCode), asi que cambiarle la
+// semantica exige su propia rama para poder atribuir cualquier regresion.
+const EMPTY_TEXT_SENTINELS = new Set(['null', 'undefined']);
+
+function isEmptyTextSentinel(value) {
+  return typeof value === 'string' && EMPTY_TEXT_SENTINELS.has(value.trim().toLowerCase());
+}
+
+export function mapHubspotToSapFields(source, mappings, { logger = null } = {}) {
   const mapped = {};
 
   for (const mapping of Array.isArray(mappings) ? mappings : []) {
@@ -18,6 +32,20 @@ export function mapHubspotToSapFields(source, mappings) {
     }
 
     const value = pickByPath(source, targetField);
+
+    // Se avisa en vez de descartar en silencio: el valor sucio viene de un workflow mal
+    // configurado, y este warn es lo que hace que alguien lo corrija en HubSpot, que es donde
+    // corresponde. Un null real no pasa por aca, asi que el log no se llena de ruido.
+    if (isEmptyTextSentinel(value)) {
+      logger?.warn?.({
+        msg: 'Propiedad de HubSpot descartada por llegar como el texto "null"/"undefined"',
+        sapField: sourceField,
+        hubspotProperty: targetField,
+        value,
+      });
+      continue;
+    }
+
     if (value !== null && typeof value !== 'undefined' && value !== '') {
       mapped[sourceField] = value;
     }
