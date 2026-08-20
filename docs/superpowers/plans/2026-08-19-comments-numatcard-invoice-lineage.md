@@ -733,11 +733,17 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ---
 
-### Task 6: `extractOrderBaseEntries` y los códigos de descarte
+### Task 6: `extractOrderBaseEntries` y los códigos de descarte (aditiva)
+
+**Esta tarea es puramente aditiva. NO borres nada.** `extractDealId`, la constante `DEAL_PREFIX` y
+el cuerpo actual de `process` se quedan exactamente como están: el `process` viejo llama a
+`extractDealId`, así que borrarlo aquí dejaría el fuente roto y toda la suite del archivo en rojo
+hasta la Task 7. El borrado y la reescritura van juntos en la Task 7, para que cada commit quede
+verde. Si te encontrás borrando código en esta tarea, parate.
 
 **Files:**
-- Modify: `src/infrastructure/hubspot/handlers/invoice.handler.js:1-31` (constantes y función pura) y `:120-125` (export default)
-- Test: `tests/unit/infrastructure/invoiceHandler.test.js` (agregar un describe nuevo al final)
+- Modify: `src/infrastructure/hubspot/handlers/invoice.handler.js` — agregar `ORDER_BASE_TYPE` y `extractOrderBaseEntries`, agregar dos claves a `SKIP_REASONS`, agregar la función al `export default`
+- Test: `tests/unit/infrastructure/invoiceHandler.test.js` (agregar un describe nuevo al final; el `await import` de la cabecera suma la función nueva)
 
 **Interfaces:**
 - Produces: `extractOrderBaseEntries(documentLines)` → array de `DocEntry` de órdenes, enteros y sin repetir. `SKIP_REASONS.NO_ORDER_BASE_ENTRY`. Task 7 los consume.
@@ -803,13 +809,11 @@ NODE_OPTIONS=--experimental-vm-modules npx jest tests/unit/infrastructure/invoic
 
 Esperado: FAIL con `extractOrderBaseEntries is not a function`.
 
-- [ ] **Step 3: Implementar la función y los códigos**
+- [ ] **Step 3: Agregar la constante, la función y las dos claves nuevas**
 
-En `src/infrastructure/hubspot/handlers/invoice.handler.js`, reemplazar la constante `DEAL_PREFIX`, el bloque `SKIP_REASONS` y la función `extractDealId` por:
+En `src/infrastructure/hubspot/handlers/invoice.handler.js`:
 
-Ojo con el rango: la línea `const sapDocumentLinkRepository = new MongooseSapDocumentLinkRepository();`
-(línea 31) cae dentro de lo que se reemplaza. Está incluida abajo tal cual está hoy — no es una
-declaración nueva, no duplicarla.
+**3a.** Agregar la constante junto a `DEAL_PREFIX` (que se queda donde está):
 
 ```javascript
 // BoObjectTypes.oOrders. Una factura copiada de un pedido pone este BaseType en cada linea que
@@ -817,21 +821,23 @@ declaración nueva, no duplicarla.
 // que la cotizacion 500 y la orden 500 coexisten, y sin el filtro una factura copiada de una
 // cotizacion haria match con una orden ajena que tenga ese DocEntry.
 const ORDER_BASE_TYPE = 17;
+```
 
-// Códigos estables: viajan al SyncLog y quedan guardados en Mongo, así que
-// renombrarlos rompe la lectura de los logs históricos.
-export const SKIP_REASONS = {
+**3b.** Agregar **dos claves** al objeto `SKIP_REASONS` existente, sin tocar las tres que ya están
+(`NO_DEAL_IN_NUM_AT_CARD`, `ORDER_LINK_NOT_FOUND`, `UPDATE_DEAL_STAGE_DISABLED` siguen ahí; el
+`process` viejo y los tests viejos las usan todavía):
+
+```javascript
   NO_ORDER_BASE_ENTRY: 'no_order_base_entry',
-  ORDER_LINK_NOT_FOUND: 'order_link_not_found',
-  UPDATE_DEAL_STAGE_DISABLED: 'update_deal_stage_disabled',
-  // Histórico: lo emitía la reconciliación por prefijo HS-DEAL- en NumAtCard, retirada el
-  // 2026-08-19 en favor del linaje SAP. Ya no se emite, pero los SyncLog guardados en Mongo lo
-  // tienen en skippedReasons y borrarlo hace ilegibles esas corridas.
-  NO_DEAL_IN_NUM_AT_CARD: 'no_deal_in_num_at_card',
-};
+```
 
-const sapDocumentLinkRepository = new MongooseSapDocumentLinkRepository();
+`ORDER_LINK_NOT_FOUND` ya existe con el valor correcto, así que no hay que agregarla. El comentario
+de "histórico" sobre `NO_DEAL_IN_NUM_AT_CARD` lo pone la Task 7, cuando efectivamente deje de
+emitirse.
 
+**3c.** Agregar la función después de `extractDealId`, que **se queda**:
+
+```javascript
 /**
  * Devuelve los DocEntry de las órdenes que originaron esta factura, sin repetir. Una factura
  * real repite el mismo BaseEntry en cada una de sus líneas (verificado en SBO_DISTELSA_PROD:
@@ -863,23 +869,26 @@ export function extractOrderBaseEntries(documentLines) {
 }
 ```
 
-Y actualizar el `export default` al final del archivo:
+**3d.** Agregar la función al `export default` del final, **conservando `extractDealId`**:
 
 ```javascript
 export default {
   process,
+  extractDealId,
   extractOrderBaseEntries,
   SKIP_REASONS,
 };
 ```
 
-- [ ] **Step 4: Correr los tests y confirmar que pasan**
+- [ ] **Step 4: Correr el archivo completo y confirmar que TODO pasa**
 
 ```bash
-NODE_OPTIONS=--experimental-vm-modules npx jest tests/unit/infrastructure/invoiceHandler.test.js -t "extractOrderBaseEntries"
+NODE_OPTIONS=--experimental-vm-modules npx jest tests/unit/infrastructure/invoiceHandler.test.js
 ```
 
-Esperado: PASS los cuatro tests del describe nuevo. Los demás tests del archivo van a fallar en este punto porque `extractDealId` ya no existe y `process` todavía es el viejo — se arreglan en Task 7.
+Esperado: **PASS todo el archivo** — los cuatro tests nuevos de `extractOrderBaseEntries` y también
+los siete tests viejos que ejercitan el `process` por prefijo `HS-DEAL-`. Esta tarea es aditiva:
+si algún test viejo falla, se borró algo que no había que borrar. Parar y revisar.
 
 - [ ] **Step 5: Commit**
 
@@ -896,10 +905,14 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ---
 
-### Task 7: reescribir `process` para reconciliar por linaje
+### Task 7: reescribir `process` para reconciliar por linaje, y borrar el camino viejo
+
+**Esta es la tarea que borra.** Aquí desaparecen `DEAL_PREFIX`, `extractDealId` y su entrada en el
+`export default`, y `process` se reescribe completo. Va todo junto a propósito: `process` llama a
+`extractDealId`, así que separarlo dejaría el fuente roto en un commit intermedio.
 
 **Files:**
-- Modify: `src/infrastructure/hubspot/handlers/invoice.handler.js:33-118` (la función `process`)
+- Modify: `src/infrastructure/hubspot/handlers/invoice.handler.js` — borrar `DEAL_PREFIX`, `extractDealId` y su entrada del `export default`; reescribir `process`; agregar el comentario de histórico a `NO_DEAL_IN_NUM_AT_CARD`
 - Modify: `src/application/services/defaultClientConfigMappings.service.js:65-66` (comentario obsoleto)
 - Test: `tests/unit/infrastructure/invoiceHandler.test.js` (reescribir el describe `invoice.handler skip reasons`)
 
@@ -1084,9 +1097,24 @@ NODE_OPTIONS=--experimental-vm-modules npx jest tests/unit/infrastructure/invoic
 
 Esperado: FAIL — `process` todavía llama a `findByDeal` y parsea `NumAtCard`.
 
-- [ ] **Step 3: Reescribir `process`**
+- [ ] **Step 3: Borrar el camino viejo y reescribir `process`**
 
-En `src/infrastructure/hubspot/handlers/invoice.handler.js`, reemplazar la función `process` completa (desde el comentario JSDoc hasta el cierre) por:
+En `src/infrastructure/hubspot/handlers/invoice.handler.js`:
+
+**3a.** Borrar la constante `DEAL_PREFIX`, la función `extractDealId` completa con su JSDoc, y la
+línea `extractDealId,` del `export default`.
+
+**3b.** Agregar el comentario de histórico sobre la clave que deja de emitirse, dentro de
+`SKIP_REASONS`:
+
+```javascript
+  // Histórico: lo emitía la reconciliación por prefijo HS-DEAL- en NumAtCard, retirada el
+  // 2026-08-19 en favor del linaje SAP. Ya no se emite, pero los SyncLog guardados en Mongo lo
+  // tienen en skippedReasons y borrarlo hace ilegibles esas corridas.
+  NO_DEAL_IN_NUM_AT_CARD: 'no_deal_in_num_at_card',
+```
+
+**3c.** Reemplazar la función `process` completa (desde su comentario JSDoc hasta el cierre) por:
 
 ```javascript
 /**
