@@ -6,6 +6,7 @@ import {
   buildQuotationPayload,
   mapHubspotToSapFields,
   normalizeDocumentSpecialLines,
+  pickMappedHeaderFields,
 } from '../../../src/domain/orders/order-builder.service.js';
 
 describe('order-builder.service buildQuotationPayload', () => {
@@ -70,6 +71,21 @@ describe('order-builder.service buildQuotationPayload', () => {
     expect(() => buildQuotationPayload({ cardCode: 'CL1', documentLines: [] })).toThrow(
       /At least one line_item/
     );
+  });
+
+  // Series y DocDate son inmutables solo en el PATCH de updateQuotation (ver
+  // processQuotationFlows.test.js): ahi identifican o fechan un documento que ya existe en SAP.
+  // Al CREAR no aplica ese motivo, asi que tienen que seguir viajando igual que cualquier otro
+  // campo mapeado.
+  it('lleva Series y DocDate al crear, porque IMMUTABLE_ON_PATCH_FIELDS solo aplica al PATCH', () => {
+    const payload = buildQuotationPayload({
+      cardCode: 'CL00129',
+      documentLines: [{ ItemCode: 'A01', Quantity: 1, UnitPrice: 10 }],
+      mappedDealFields: { Series: '240', DocDate: '2026-08-01' },
+    });
+
+    expect(payload.Series).toBe('240');
+    expect(payload.DocDate).toBe('2026-08-01');
   });
 });
 
@@ -171,6 +187,27 @@ describe('order-builder.service DocumentSpecialLines in header payloads', () => 
     });
 
     expect(payload).toMatchObject({ U_BAJA_CUANTIA: 'N', Series: '240' });
+  });
+});
+
+// documentLineCount llega desde link.lines.length en ProcessHubspotUpdateQuotation (ver
+// processQuotationFlows.test.js). Ese call site nunca alcanza 0 en la practica porque
+// buildQuotationLineUpdates ya revienta antes si no hay ninguna linea que matchee, pero
+// pickMappedHeaderFields tiene que seguir siendo segura si algun otro caller le pasa 0 o nada.
+describe('order-builder.service pickMappedHeaderFields ancla DocumentSpecialLines sin explotar en el limite', () => {
+  it('no explota y ancla en 0 (no negativo) cuando documentLineCount es 0', () => {
+    const fields = pickMappedHeaderFields(
+      { DocumentSpecialLines: 'texto gobierno' },
+      { documentLineCount: 0 }
+    );
+
+    expect(fields.DocumentSpecialLines[0].AfterLineNumber).toBe(0);
+  });
+
+  it('no explota cuando se omite el segundo argumento por completo', () => {
+    const fields = pickMappedHeaderFields({ DocumentSpecialLines: 'texto gobierno' });
+
+    expect(fields.DocumentSpecialLines[0].AfterLineNumber).toBe(0);
   });
 });
 

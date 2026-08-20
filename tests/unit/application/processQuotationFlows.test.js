@@ -670,6 +670,80 @@ describe('ProcessHubspotUpdateQuotation', () => {
     expect(Array.isArray(patch.DocumentLines)).toBe(true);
   });
 
+  // dealOrdersQuotationsMappings es una sola lista compartida por creacion, conversion y este
+  // PATCH. Series/DocNum/DocDate/TaxDate/DocType/DocEntry identifican o fechan un documento que
+  // en este flujo YA existe en SAP: mandarlos arriesga que Service Layer rechace el PATCH
+  // completo, con lo que la sincronizacion de lineas tampoco aterriza. La creacion SI debe
+  // llevarlos (ver quotationBuilder.test.js), por eso la exclusion vive solo aca.
+  it('no manda Series ni DocDate en el PATCH aunque esten mapeados y presentes en el payload', async () => {
+    const context = buildContext();
+    context.mappings.dealOrdersQuotationsMappings = [
+      { sourceField: 'Series', targetField: 'serie' },
+      { sourceField: 'DocDate', targetField: 'fecha_documento' },
+    ];
+    const deps = buildDeps();
+    deps.runtimeRepository = buildRuntimeRepository(context);
+    const useCase = new ProcessHubspotUpdateQuotation(deps);
+
+    const event = {
+      ...updateEvent,
+      payload: {
+        ...updateEvent.payload,
+        deal: { ...updateEvent.payload.deal, serie: '240', fecha_documento: '2026-08-01' },
+      },
+    };
+
+    await useCase.execute({ event, tenantModels });
+
+    const patch = deps.sapQuotationAdapter.updateQuotation.mock.calls[0][0].patchPayload;
+    expect(patch).not.toHaveProperty('Series');
+    expect(patch).not.toHaveProperty('DocDate');
+    expect(patch).toHaveProperty('DocumentLines');
+  });
+
+  // buildQuotationLineUpdates emite una entrada por line item del EVENTO que hizo match, no por
+  // linea del documento en SAP. Con una oferta de 5 lineas donde el evento solo edita 1,
+  // lineUpdates.length es 1: si el ancla usara eso, el texto se reancla detras de la linea 0 en
+  // cada edicion en vez de quedarse detras de la ultima (linea 4), y SAP lo acepta sin error.
+  it('ancla DocumentSpecialLines segun las lineas del documento en SAP, no las editadas en el evento', async () => {
+    const context = buildContext();
+    context.mappings.dealOrdersQuotationsMappings = [
+      { sourceField: 'DocumentSpecialLines', targetField: 'texto_gobierno' },
+    ];
+    const deps = buildDeps();
+    deps.runtimeRepository = buildRuntimeRepository(context);
+    deps.sapDocumentLinkRepository.findByDeal.mockResolvedValue({
+      _id: 'link-1',
+      cardCode: 'CL00129',
+      sapDocEntry: 12345,
+      sapDocNum: 8001,
+      lines: [
+        { hubspotLineItemId: 'li-1', sapLineNum: 0, quantity: 1, unitPrice: 10 },
+        { hubspotLineItemId: 'li-2', sapLineNum: 1, quantity: 1, unitPrice: 10 },
+        { hubspotLineItemId: 'li-3', sapLineNum: 2, quantity: 1, unitPrice: 10 },
+        { hubspotLineItemId: 'li-4', sapLineNum: 3, quantity: 1, unitPrice: 10 },
+        { hubspotLineItemId: 'li-5', sapLineNum: 4, quantity: 1, unitPrice: 10 },
+      ],
+    });
+    const useCase = new ProcessHubspotUpdateQuotation(deps);
+
+    const event = {
+      ...updateEvent,
+      payload: {
+        ...updateEvent.payload,
+        deal: { ...updateEvent.payload.deal, texto_gobierno: 'O.C: 111931' },
+      },
+    };
+
+    await useCase.execute({ event, tenantModels });
+
+    const patch = deps.sapQuotationAdapter.updateQuotation.mock.calls[0][0].patchPayload;
+    expect(patch.DocumentLines).toHaveLength(1);
+    expect(patch.DocumentSpecialLines).toEqual([
+      { LineType: 'dslt_Text', AfterLineNumber: 4, LineText: 'O.C: 111931' },
+    ]);
+  });
+
   it('fails in a controlled way when there is no quotation link for the deal', async () => {
     const deps = buildDeps();
     deps.sapDocumentLinkRepository.findByDeal.mockResolvedValue(null);

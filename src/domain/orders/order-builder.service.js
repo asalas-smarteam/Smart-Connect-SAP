@@ -135,6 +135,22 @@ export function pickMappedHeaderFields(mappedDealFields, { documentLineCount = 0
   return fields;
 }
 
+// This is a DIFFERENT criterion from RESERVED_HEADER_FIELDS above, hence its own Set: that one
+// is "the builder already owns this field" (CardCode, DocDueDate, DocumentLines, PaymentGroupCode
+// are computed elsewhere when a document is CREATED), while this one is "SAP will not let you
+// change this on a document that already exists". Series/DocNum/DocType/DocEntry identify the
+// document itself, and DocDate/TaxDate are posting dates fixed at creation. None of that applies
+// while creating: mixing the two lists would also strip these fields from buildOrderPayload and
+// buildQuotationPayload, where they DO need to travel.
+//
+// Verified against production data: tenant printer has Series, DocumentSpecialLines, TaxDate and
+// DocDate mapped in dealOrdersQuotationsMappings (a single list shared by order/quotation
+// creation, conversion, AND the quotation PATCH). It does not use updateQuotation today, but any
+// tenant that maps one of these and later edits quotation lines would send it in a PATCH; Service
+// Layer rejects the whole PATCH rather than the offending field, so line sync would silently stop
+// landing with a symptom that does not point back to the mapping.
+export const IMMUTABLE_ON_PATCH_FIELDS = new Set(['Series', 'DocNum', 'DocDate', 'TaxDate', 'DocType', 'DocEntry']);
+
 // Line fields owned by mapDocumentLines (or resolved through dedicated coercion, like TaxCode
 // by rate or UnitPrice by misc calculation) are excluded from the generic line-mapping spread
 // so mapped raw values cannot clobber them.
