@@ -41,4 +41,14 @@ describe('buildServiceLayerUrl — DocumentLines obligatorio en facturas', () =>
 
     expect(url).not.toContain('DocumentLines');
   });
+
+  // requiredFields (DocumentLines) no puede tapar este guard: si un tenant sin ningún
+  // mapping activo de facturas igual arma una URL válida, SAP responde con datos y
+  // MappingSyncRepository.mapRecords devuelve [] por falta de mappings, así que el
+  // SyncLog queda "completado", con registros leídos y cero enviados, sin ningún motivo.
+  it('sigue lanzando cuando invoice no tiene ningun mapping activo', () => {
+    expect(() => buildServiceLayerUrl(invoiceConfig, [])).toThrow(
+      'At least one active mapping with a valid sourceField is required'
+    );
+  });
 });
