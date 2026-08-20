@@ -602,7 +602,7 @@ describe('ProcessHubspotUpdateQuotation', () => {
       { sourceField: 'NumAtCard', targetField: 'orden_de_compra' },
     ];
     const deps = buildDeps();
-    deps.runtimeRepository = buildRuntimeRepository(context);
+    deps.runtimeRepository.resolveRuntimeContext.mockResolvedValue(context);
     const useCase = new ProcessHubspotUpdateQuotation(deps);
 
     const result = await useCase.execute({ event: updateEvent, tenantModels });
@@ -621,7 +621,7 @@ describe('ProcessHubspotUpdateQuotation', () => {
       { sourceField: 'NumAtCard', targetField: 'orden_de_compra' },
     ];
     const deps = buildDeps();
-    deps.runtimeRepository = buildRuntimeRepository(context);
+    deps.runtimeRepository.resolveRuntimeContext.mockResolvedValue(context);
     const useCase = new ProcessHubspotUpdateQuotation(deps);
 
     const event = {
@@ -651,7 +651,7 @@ describe('ProcessHubspotUpdateQuotation', () => {
       { sourceField: 'DocumentLines', targetField: 'lineas' },
     ];
     const deps = buildDeps();
-    deps.runtimeRepository = buildRuntimeRepository(context);
+    deps.runtimeRepository.resolveRuntimeContext.mockResolvedValue(context);
     const useCase = new ProcessHubspotUpdateQuotation(deps);
 
     const event = {
@@ -682,7 +682,7 @@ describe('ProcessHubspotUpdateQuotation', () => {
       { sourceField: 'DocDate', targetField: 'fecha_documento' },
     ];
     const deps = buildDeps();
-    deps.runtimeRepository = buildRuntimeRepository(context);
+    deps.runtimeRepository.resolveRuntimeContext.mockResolvedValue(context);
     const useCase = new ProcessHubspotUpdateQuotation(deps);
 
     const event = {
@@ -711,7 +711,7 @@ describe('ProcessHubspotUpdateQuotation', () => {
       { sourceField: 'DocumentSpecialLines', targetField: 'texto_gobierno' },
     ];
     const deps = buildDeps();
-    deps.runtimeRepository = buildRuntimeRepository(context);
+    deps.runtimeRepository.resolveRuntimeContext.mockResolvedValue(context);
     deps.sapDocumentLinkRepository.findByDeal.mockResolvedValue({
       _id: 'link-1',
       cardCode: 'CL00129',
