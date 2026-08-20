@@ -53,6 +53,33 @@ export function extractOrderBaseEntries(documentLines) {
 }
 
 /**
+ * Devuelve los BaseType distintos de -1 vistos en las líneas de la factura (SAP usa -1 para
+ * "esta línea no viene de ningún documento base"). Sirve para distinguir, cuando
+ * extractOrderBaseEntries da vacío, "esta factura no nació de ningún documento" (lo esperado)
+ * de "esta factura nació de un documento base, pero no es una orden" (el linaje cambió de
+ * forma y la reconciliación quedó ciega: p.ej. el cliente empieza a facturar contra notas de
+ * entrega, BaseType 15).
+ */
+function extractSeenBaseTypes(documentLines) {
+  const lines = Array.isArray(documentLines) ? documentLines : [];
+  const seen = new Set();
+
+  for (const line of lines) {
+    const rawBaseType = line?.BaseType;
+    if (rawBaseType === null || typeof rawBaseType === 'undefined' || rawBaseType === '') {
+      continue;
+    }
+
+    const baseType = Number(rawBaseType);
+    if (Number.isInteger(baseType) && baseType !== -1) {
+      seen.add(baseType);
+    }
+  }
+
+  return Array.from(seen);
+}
+
+/**
  * Reconcilia una factura de SAP contra las órdenes sincronizadas. La factura trae el DocEntry de
  * su orden en DocumentLines[].BaseEntry (BaseType 17), y desde el SapDocumentLink de esa orden se
  * llega al negocio de HubSpot, que se mueve a la etapa configurada en `updateDealStage`. Las
@@ -77,13 +104,29 @@ export async function process({ token, item, clientConfig, tenantModels, logger 
     baseEntries = extractOrderBaseEntries(item?.rawSapData?.DocumentLines);
 
     if (!baseEntries.length) {
-      // Una factura que no nació de un pedido es lo esperado, no una anomalía.
-      logger?.debug?.({
-        msg: 'Factura descartada por el sync de facturas',
-        reason: SKIP_REASONS.NO_ORDER_BASE_ENTRY,
-        numAtCard,
-        sapDocNum,
-      });
+      const baseTypesSeen = extractSeenBaseTypes(item?.rawSapData?.DocumentLines);
+
+      if (baseTypesSeen.length > 0) {
+        // Hay líneas base, pero ninguna es una orden (BaseType 17): el linaje de la
+        // factura cambió de forma (p.ej. ahora sale de una nota de entrega) y la
+        // reconciliación quedó ciega para TODA factura, no solo esta. Es una anomalía.
+        logger?.warn?.({
+          msg: 'Factura descartada por el sync de facturas',
+          reason: SKIP_REASONS.NO_ORDER_BASE_ENTRY,
+          baseTypesSeen,
+          numAtCard,
+          sapDocNum,
+        });
+      } else {
+        // Una factura que no nació de ningún documento base es lo esperado, no una anomalía.
+        logger?.debug?.({
+          msg: 'Factura descartada por el sync de facturas',
+          reason: SKIP_REASONS.NO_ORDER_BASE_ENTRY,
+          numAtCard,
+          sapDocNum,
+        });
+      }
+
       return { status: 'skipped', reason: SKIP_REASONS.NO_ORDER_BASE_ENTRY };
     }
 
@@ -113,6 +156,20 @@ export async function process({ token, item, clientConfig, tenantModels, logger 
       return { status: 'skipped', reason: SKIP_REASONS.ORDER_LINK_NOT_FOUND };
     }
 
+    if (dealIds.length < baseEntries.length) {
+      // Factura consolidada resuelta a medias: alguna de sus órdenes base es de la
+      // integración (tiene link) y otra no (pedido propio del cliente, o aún sin
+      // link). Es el caso normal en un tenant que también factura sus propios
+      // pedidos, no un error — por eso debug, igual que ORDER_LINK_NOT_FOUND.
+      logger?.debug?.({
+        msg: 'Factura consolidada resuelta parcialmente por el sync de facturas',
+        dealIdsCount: dealIds.length,
+        baseEntriesCount: baseEntries.length,
+        baseEntries,
+        sapDocNum,
+      });
+    }
+
     const { isRequired, dealstage } = await getUpdateDealStageConfig({ tenantModels });
 
     if (!isRequired || !dealstage) {
@@ -140,6 +197,7 @@ export async function process({ token, item, clientConfig, tenantModels, logger 
       dealIds,
       dealstage,
       sapDocNum,
+      numAtCard,
     });
 
     return { status: 'updated', dealId: dealIds[0], dealIds };

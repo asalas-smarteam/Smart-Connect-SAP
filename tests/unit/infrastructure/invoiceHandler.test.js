@@ -70,6 +70,11 @@ describe('invoice.handler reconciliacion por linaje SAP', () => {
     expect(result).toEqual({
       status: 'updated', dealId: '64175519381', dealIds: ['64175519381'],
     });
+    // Las facturas no se crean como objeto de HubSpot: este log es la unica forma de
+    // saber la OC del cliente de una factura que si movio negocios.
+    expect(logger.info).toHaveBeenCalledWith(expect.objectContaining({
+      numAtCard: 'OC #P06485', dealIds: ['64175519381'],
+    }));
   });
 
   // El NumAtCard del cliente ya no decide nada: es su OC y solo viaja al log.
@@ -103,12 +108,13 @@ describe('invoice.handler reconciliacion por linaje SAP', () => {
   });
 
   // Debug y no warn: en un tenant que factura sus propios pedidos esto es el caso normal.
-  it('descarta en debug la factura que no viene de ninguna orden', async () => {
+  // BaseType -1 es la convencion SAP para "esta linea no viene de ningun documento base".
+  it('descarta en debug la factura que no viene de ningun documento base', async () => {
     const logger = buildLogger();
 
     const result = await processInvoice({
       token: 't',
-      item: { rawSapData: { DocNum: 900, NumAtCard: 'OC-1', DocumentLines: [{ BaseType: 23, BaseEntry: 5 }] } },
+      item: { rawSapData: { DocNum: 900, NumAtCard: 'OC-1', DocumentLines: [{ BaseType: -1, BaseEntry: -1 }] } },
       clientConfig, tenantModels, logger,
     });
 
@@ -117,6 +123,26 @@ describe('invoice.handler reconciliacion por linaje SAP', () => {
       reason: SKIP_REASONS.NO_ORDER_BASE_ENTRY, sapDocNum: 900,
     }));
     expect(logger.warn).not.toHaveBeenCalled();
+    expect(mockUpdateDeal).not.toHaveBeenCalled();
+  });
+
+  // El dia que el cliente empiece a facturar contra notas de entrega (BaseType 15) en vez de
+  // pedidos, toda factura tendria lineas base pero ninguna de tipo orden: el linaje cambio de
+  // forma y la reconciliacion quedo ciega para TODA factura, no solo esta. Va en warn.
+  it('avisa en warn cuando hay lineas base pero ninguna es de una orden', async () => {
+    const logger = buildLogger();
+
+    const result = await processInvoice({
+      token: 't',
+      item: { rawSapData: { DocNum: 901, NumAtCard: 'OC-2', DocumentLines: [{ BaseType: 15, BaseEntry: 40 }] } },
+      clientConfig, tenantModels, logger,
+    });
+
+    expect(result).toEqual({ status: 'skipped', reason: SKIP_REASONS.NO_ORDER_BASE_ENTRY });
+    expect(logger.warn).toHaveBeenCalledWith(expect.objectContaining({
+      reason: SKIP_REASONS.NO_ORDER_BASE_ENTRY, baseTypesSeen: [15], sapDocNum: 901,
+    }));
+    expect(logger.debug).not.toHaveBeenCalled();
     expect(mockUpdateDeal).not.toHaveBeenCalled();
   });
 
@@ -136,6 +162,25 @@ describe('invoice.handler reconciliacion por linaje SAP', () => {
     }));
     expect(logger.warn).not.toHaveBeenCalled();
     expect(mockUpdateDeal).not.toHaveBeenCalled();
+  });
+
+  // Con baseEntries: [A, B] y link solo para A, el resultado queda limpio ('updated') pero
+  // sin este debug no queda ningun rastro de que la orden B no tenia negocio.
+  it('deja rastro en debug cuando una factura consolidada resuelve solo parte de sus ordenes', async () => {
+    mockFindByOrderDocEntry
+      .mockResolvedValueOnce({ dealId: '111' })
+      .mockResolvedValueOnce(null);
+    const logger = buildLogger();
+
+    const result = await processInvoice({
+      token: 't', item: buildInvoice({ baseEntries: [28987, 28991] }),
+      clientConfig, tenantModels, logger,
+    });
+
+    expect(result).toEqual({ status: 'updated', dealId: '111', dealIds: ['111'] });
+    expect(logger.debug).toHaveBeenCalledWith(expect.objectContaining({
+      dealIdsCount: 1, baseEntriesCount: 2, baseEntries: [28987, 28991],
+    }));
   });
 
   it('avisa en warn cuando updateDealStage esta apagado o sin etapa destino', async () => {
