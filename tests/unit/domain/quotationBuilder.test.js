@@ -9,12 +9,12 @@ import {
 } from '../../../src/domain/orders/order-builder.service.js';
 
 describe('order-builder.service buildQuotationPayload', () => {
-  it('builds a Quotation payload with Comments and SalesPersonCode', () => {
+  it('builds a Quotation payload with Comments del mapeo y SalesPersonCode', () => {
     const payload = buildQuotationPayload({
       cardCode: 'CL00129',
       documentLines: [{ ItemCode: 'A01', Quantity: 1, UnitPrice: 10 }],
       slpCode: 5,
-      comments: 'Oferta creada desde HubSpot',
+      mappedDealFields: { Comments: 'Oferta creada desde HubSpot' },
     });
 
     expect(payload).toMatchObject({
@@ -24,6 +24,15 @@ describe('order-builder.service buildQuotationPayload', () => {
       DocumentLines: [{ ItemCode: 'A01', Quantity: 1, UnitPrice: 10 }],
     });
     expect(payload.DocDueDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('no agrega Comments cuando el mapeo no produjo valor', () => {
+    const payload = buildQuotationPayload({
+      cardCode: 'CL00129',
+      documentLines: [{ ItemCode: 'A01', Quantity: 1, UnitPrice: 10 }],
+    });
+
+    expect(payload).not.toHaveProperty('Comments');
   });
 
   // Printer mapea NumAtCard <- hs_object_id y hoy recibe HS-DEAL-<id> porque el parametro

@@ -245,8 +245,13 @@ describe('ProcessHubspotCreateQuotation', () => {
     expect(quotationPayload).not.toHaveProperty('PaymentGroupCode');
   });
 
-  it('forwards deal.comments as the quotation Comments when provided', async () => {
+  it('toma el Comments de la cotizacion del FieldMapping', async () => {
+    const context = buildContext();
+    context.mappings.dealOrdersQuotationsMappings = [
+      { sourceField: 'Comments', targetField: 'comments' },
+    ];
     const deps = buildDeps();
+    deps.runtimeRepository = buildRuntimeRepository(context);
     const useCase = new ProcessHubspotCreateQuotation(deps);
 
     const event = {
@@ -263,11 +268,21 @@ describe('ProcessHubspotCreateQuotation', () => {
     expect(quotationPayload.Comments).toBe('Comentario para el comprador y prueba');
   });
 
-  it('omits Comments on the quotation when the deal has no comments', async () => {
+  // Sin la fila de FieldMapping no viaja, aunque la propiedad venga en el payload: el codigo
+  // ya no tiene una puerta trasera que lea deal.comments por su nombre.
+  it('no manda Comments cuando no hay mapeo, aunque el payload lo traiga', async () => {
     const deps = buildDeps();
     const useCase = new ProcessHubspotCreateQuotation(deps);
 
-    await useCase.execute({ event: baseEvent, tenantModels });
+    const event = {
+      ...baseEvent,
+      payload: {
+        ...baseEvent.payload,
+        deal: { hs_object_id: '59680314911', comments: 'Este comentario no deberia viajar' },
+      },
+    };
+
+    await useCase.execute({ event, tenantModels });
 
     const { quotationPayload } = deps.sapQuotationAdapter.createQuotation.mock.calls[0][0];
     expect(quotationPayload).not.toHaveProperty('Comments');

@@ -431,7 +431,6 @@ export function buildQuotationPayload({
   slpCode = null,
   paymentGroupCode = null,
   mappedDealFields = {},
-  comments = null,
 }) {
   if (!documentLines.length) {
     throw new PermanentWebhookError('At least one line_item is required to create SAP Quotation');
@@ -450,11 +449,6 @@ export function buildQuotationPayload({
 
   if (Number.isInteger(paymentGroupCode)) {
     payload.PaymentGroupCode = paymentGroupCode;
-  }
-
-  const resolvedComments = toNonEmptyString(comments);
-  if (resolvedComments) {
-    payload.Comments = resolvedComments;
   }
 
   return payload;
