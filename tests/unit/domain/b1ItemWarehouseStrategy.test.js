@@ -128,7 +128,93 @@ describe('normalizeB1ExcludedWarehouses', () => {
   });
 });
 
+// ItemWarehouseInfoCollection real del producto P27020056 (18 bodegas),
+// reducido a los cuatro campos que la strategy lee. Los unicos valores no
+// nulos del payload real son A02.InStock=1, B09.InStock=66 y B12.Ordered=1400.
+const P27020056_STOCK = {
+  A02: { InStock: 1 },
+  B09: { InStock: 66 },
+  B12: { Ordered: 1400 },
+};
+
+const P27020056_WAREHOUSES = [
+  'A01', 'A02', 'B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08',
+  'B09', 'B10', 'B11', 'B12', 'B13', 'B14', 'B15', 'PA',
+].map((WarehouseCode) => ({
+  WarehouseCode,
+  ItemCode: 'P27020056',
+  InStock: 0,
+  Committed: 0,
+  Ordered: 0,
+  ...P27020056_STOCK[WarehouseCode],
+}));
+
 describe('buildB1WarehouseStockProperties', () => {
+  it('emits the three separate metrics for one warehouse (AMC profile)', () => {
+    const properties = buildB1WarehouseStockProperties(P27020056_WAREHOUSES, [
+      { warehouseCode: 'B09', propertyName: 'b09_instock', metric: 'inStock' },
+      { warehouseCode: 'B09', propertyName: 'b09_committed', metric: 'committed' },
+      { warehouseCode: 'B09', propertyName: 'b09_ordered', metric: 'ordered' },
+      { warehouseCode: 'B12', propertyName: 'b12_instock', metric: 'inStock' },
+      { warehouseCode: 'B12', propertyName: 'b12_ordered', metric: 'ordered' },
+      { warehouseCode: 'A02', propertyName: 'a02_instock', metric: 'inStock' },
+    ]);
+
+    expect(properties).toEqual({
+      b09_instock: 66,
+      b09_committed: 0,
+      b09_ordered: 0,
+      b12_instock: 0,
+      b12_ordered: 1400,
+      a02_instock: 1,
+    });
+  });
+
+  it('emits only InStock, leaving Ordered out (Printer profile)', () => {
+    const properties = buildB1WarehouseStockProperties(P27020056_WAREHOUSES, [
+      { warehouseCode: 'A01', propertyName: 'a01_stock', metric: 'inStock' },
+      { warehouseCode: 'B09', propertyName: 'b09_stock', metric: 'inStock' },
+      { warehouseCode: 'B12', propertyName: 'b12_stock', metric: 'inStock' },
+    ]);
+
+    // B12 tiene Ordered 1400 y NO entra: con metric inStock la propiedad es 0.
+    expect(properties).toEqual({ a01_stock: 0, b09_stock: 66, b12_stock: 0 });
+  });
+
+  it('keeps the historical formula for fields with no metric (Distelsa/Noelito profile)', () => {
+    const properties = buildB1WarehouseStockProperties(P27020056_WAREHOUSES, [
+      { warehouseCode: 'A02', propertyName: 'a02_stock' },
+      { warehouseCode: 'B09', propertyName: 'b09_stock' },
+      { warehouseCode: 'B12', propertyName: 'b12_stock' },
+    ]);
+
+    // b12 = 0 - 0 + 1400: la formula historica cuenta lo pedido como disponible.
+    expect(properties).toEqual({ a02_stock: 1, b09_stock: 66, b12_stock: 1400 });
+  });
+
+  it('resolves a configured warehouse missing from the payload to 0 for any metric', () => {
+    const properties = buildB1WarehouseStockProperties(P27020056_WAREHOUSES, [
+      { warehouseCode: 'C99', propertyName: 'c99_instock', metric: 'inStock' },
+      { warehouseCode: 'C99', propertyName: 'c99_committed', metric: 'committed' },
+    ]);
+
+    expect(properties).toEqual({ c99_instock: 0, c99_committed: 0 });
+  });
+
+  it('forces an excluded warehouse to 0 in all three metrics', () => {
+    const properties = buildB1WarehouseStockProperties(
+      P27020056_WAREHOUSES,
+      [
+        { warehouseCode: 'B09', propertyName: 'b09_instock', metric: 'inStock' },
+        { warehouseCode: 'B09', propertyName: 'b09_committed', metric: 'committed' },
+        { warehouseCode: 'B09', propertyName: 'b09_ordered', metric: 'ordered' },
+      ],
+      ['B09']
+    );
+
+    expect(properties).toEqual({ b09_instock: 0, b09_committed: 0, b09_ordered: 0 });
+  });
+
   it('builds a property per configured warehouse, matching case-insensitively', () => {
     const properties = buildB1WarehouseStockProperties(
       [{ WarehouseCode: 'a01', Ordered: 2, Committed: 1, InStock: 7 }],

@@ -170,7 +170,10 @@ export function buildB1WarehouseStockProperties(
       return acc;
     }
 
-    acc[propertyName] = getWarehouseAvailableStock(warehousesByCode.get(warehouseCode));
+    acc[propertyName] = getWarehouseMetricValue(
+      warehousesByCode.get(warehouseCode),
+      field.metric
+    );
     return acc;
   }, {});
 }
