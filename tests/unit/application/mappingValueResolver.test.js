@@ -1,6 +1,7 @@
 import {
   buildMappedProperties,
   hasMappedValue,
+  normalizeSapBoolean,
   resolveValueByPath,
 } from '../../../src/application/services/mappingValueResolver.service.js';
 
@@ -195,5 +196,81 @@ describe('buildMappedProperties', () => {
 
     expect(buildMappedProperties({ input: record, mappings }).name).toBe('ACME');
     expect(buildMappedProperties({ input: record, mappings, fallbackConfig: { enabled: true } }).name).toBe('ACME');
+  });
+});
+
+describe('normalizeSapBoolean', () => {
+  it('converts the BoYesNoEnum values to real booleans', () => {
+    expect(normalizeSapBoolean('tYES')).toBe(true);
+    expect(normalizeSapBoolean('tNO')).toBe(false);
+  });
+
+  it('ignores case and surrounding blanks', () => {
+    // El payload real manda 'tYES'; una config a mano puede traer 'tYes'.
+    expect(normalizeSapBoolean('tYes')).toBe(true);
+    expect(normalizeSapBoolean(' tno ')).toBe(false);
+    expect(normalizeSapBoolean('TYES')).toBe(true);
+  });
+
+  it('leaves anything that is not the enum untouched', () => {
+    // Nada de adivinar: un valor inesperado viaja tal cual y se ve en HubSpot,
+    // en vez de convertirse en un false plausible pero inventado.
+    expect(normalizeSapBoolean('tal vez')).toBe('tal vez');
+    expect(normalizeSapBoolean('')).toBe('');
+    expect(normalizeSapBoolean(null)).toBeNull();
+    expect(normalizeSapBoolean(undefined)).toBeUndefined();
+    expect(normalizeSapBoolean(0)).toBe(0);
+    expect(normalizeSapBoolean(true)).toBe(true);
+  });
+});
+
+describe('buildMappedProperties — campos booleanos de SAP', () => {
+  const item = { ItemCode: '0010-0361', InventoryItem: 'tYES', SalesItem: 'tNO', Valid: 'tYES' };
+
+  it('normalizes InventoryItem and SalesItem', () => {
+    const properties = buildMappedProperties({
+      input: item,
+      mappings: [
+        { sourceField: 'InventoryItem', targetField: 'es_inventariable', isActive: true },
+        { sourceField: 'SalesItem', targetField: 'es_vendible', isActive: true },
+      ],
+    });
+
+    expect(properties).toEqual({ es_inventariable: true, es_vendible: false });
+  });
+
+  it('leaves every other tYES/tNO field alone', () => {
+    // Alcance deliberado: `Valid` tambien es un BoYesNoEnum, pero convertirlo
+    // cambiaria lo que envia un mapeo que ningun cliente pidio tocar.
+    const properties = buildMappedProperties({
+      input: item,
+      mappings: [{ sourceField: 'Valid', targetField: 'vigente', isActive: true }],
+    });
+
+    expect(properties).toEqual({ vigente: 'tYES' });
+  });
+
+  it('normalizes by SAP source field, whatever the HubSpot property is called', () => {
+    const properties = buildMappedProperties({
+      input: item,
+      mappings: [{ sourceField: 'InventoryItem', targetField: 'cualquier_nombre', isActive: true }],
+    });
+
+    expect(properties).toEqual({ cualquier_nombre: true });
+  });
+
+  it('keeps a normalized false as a real value in a fallback chain', () => {
+    // hasMappedValue(false) es true, asi que el primer mapeo gana y el segundo
+    // no puede sobreescribirlo. Sin esto, un tNO se trataria como hueco.
+    const properties = buildMappedProperties({
+      input: item,
+      mappings: [
+        { _id: 1, sourceField: 'SalesItem', targetField: 'es_vendible', isActive: true },
+        { _id: 2, sourceField: 'ItemCode', targetField: 'es_vendible', isActive: true },
+      ],
+      fallbackConfig: { enabled: true },
+    });
+
+    expect(properties).toEqual({ es_vendible: false });
   });
 });

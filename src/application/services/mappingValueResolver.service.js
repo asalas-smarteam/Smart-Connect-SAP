@@ -2,6 +2,49 @@
 // This logic used to be duplicated verbatim in field-mapping.service.js (which
 // maps contacts) and MappingSyncRepository.js (which maps companies), so a fix
 // applied to one silently missed the other.
+import {
+  SAP_BOOLEAN_FALSE,
+  SAP_BOOLEAN_SOURCE_FIELDS,
+  SAP_BOOLEAN_TRUE,
+} from '#domain/sap/sap-boolean-fields.constants.js';
+
+const SAP_BOOLEAN_FIELD_SET = new Set(
+  SAP_BOOLEAN_SOURCE_FIELDS.map((field) => field.toLowerCase())
+);
+
+// 'tYES'/'tNO' -> true/false. Cualquier otra cosa vuelve intacta: un valor
+// inesperado tiene que llegar visible a HubSpot en vez de convertirse en un
+// false plausible pero inventado, que nadie detecta mirando una casilla.
+export function normalizeSapBoolean(value) {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  const normalized = value.trim().toLowerCase();
+
+  if (normalized === SAP_BOOLEAN_TRUE.toLowerCase()) {
+    return true;
+  }
+
+  if (normalized === SAP_BOOLEAN_FALSE.toLowerCase()) {
+    return false;
+  }
+
+  return value;
+}
+
+// Se compara el ULTIMO segmento del path: la lista nombra el campo de SAP, así
+// que un mapeo anidado ('to_Customer.InventoryItem') cuenta igual que el plano.
+function isSapBooleanField(sourceField) {
+  if (!sourceField) {
+    return false;
+  }
+
+  const segments = String(sourceField).split('.');
+  const lastSegment = segments[segments.length - 1].trim().toLowerCase();
+
+  return SAP_BOOLEAN_FIELD_SET.has(lastSegment);
+}
 
 // A blank string is a GAP, not a value: SAP fills either BPTaxNumber or
 // BPTaxLongNumber per tax type and leaves the other as "". Treating "" as
@@ -113,10 +156,19 @@ export function buildMappedProperties({ input, mappings, fallbackConfig = null }
       continue;
     }
 
-    properties[targetField] = resolveValueByPath(input, mapping.sourceField, options);
+    const value = resolveValueByPath(input, mapping.sourceField, options);
+
+    properties[targetField] = isSapBooleanField(mapping.sourceField)
+      ? normalizeSapBoolean(value)
+      : value;
   }
 
   return properties;
 }
 
-export default { buildMappedProperties, hasMappedValue, resolveValueByPath };
+export default {
+  buildMappedProperties,
+  hasMappedValue,
+  normalizeSapBoolean,
+  resolveValueByPath,
+};
