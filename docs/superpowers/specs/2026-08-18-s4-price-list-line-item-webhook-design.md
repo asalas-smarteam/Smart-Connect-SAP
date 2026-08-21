@@ -262,11 +262,19 @@ strategy `s4_PlantStorageLocation`. El precio del producto en HubSpot no se toca
 carga es el de la línea, que es lo que valoriza el negocio.
 
 El audit se construye con `buildLineItemPriceAudit`
-([syncLog.service.js:289](../../../src/infrastructure/sync/syncLog.service.js)) y no a mano:
-las entradas de tráfico OData llevan claves `$filter`/`$select`, y ese builder es el que las
-pasa por `sanitizeAuditKeys`, que las renombra a `_$filter`/`_$select`. Sin eso el `$set` del
-`WebhookEvent` se cae completo contra el Mongo de producción (< 5.0), arrastrando también el
-`errorMessage` que viaja en la misma escritura.
+([syncLog.service.js:289](../../../src/infrastructure/sync/syncLog.service.js)) y no a mano. El
+motivo es el `$set` sobre el `WebhookEvent`: el Mongo de producción es anterior a la 5.0 y una
+sola clave con `$` al inicio tira la escritura **completa**, arrastrando el `errorMessage` que
+viaja en la misma operación. Las entradas de tráfico OData llevan `$filter` y `$select`, y ese
+builder las neutraliza por dos caminos distintos, verificados en el código:
+
+- **`params` se aplana a un string** `clave=valor&clave=valor` en `serializeAuditParams`
+  ([syncLog.service.js:159](../../../src/infrastructure/sync/syncLog.service.js)), así que el
+  `$filter` termina dentro de un valor y nunca es una clave.
+- **`request` y `response` sí pasan por `sanitizeAuditKeys`**, que renombra las claves con `$`
+  al inicio agregándoles un guion bajo adelante y descarta las `@odata.*`.
+
+Construir el audit a mano se saltea las dos protecciones.
 
 ### 5. Config del tenant
 
@@ -281,11 +289,21 @@ al lado de `resolveTenantPriceList`. Documento nuevo en `Configurations` — hoy
     "defaultPriceListType": "ZC",
     "salesArea": { "salesOrganization": "FQCR", "distributionChannel": "01", "division": "SC" },
     "priceListProperty": "lista_de_precios_sap",
-    "currencyProperty": "moneda_precio_sap"
+    "currencyProperty": "moneda_precio_sap",
+    "priceSourceProperty": "origen_precio_sap"
 }}
 ```
 
 `conditionType` es configurable a propósito: ZPR0 es de Multiquímica, no del estándar.
+
+Ajustes de la revisión final (2026-08-20), detallados en
+`.superpowers/sdd/2026-08-18-s4-price-list-line-item-webhook/final-fix-report.md`:
+`salesArea.division` pasó a ser OPCIONAL (nunca entra al `$filter`; hay clientes con `Division`
+vacía en S/4 que si no quedaban sin configuración posible), `priceListProperty` se escribe
+siempre — con el literal `PRODUCT_DEFAULT` cuando el precio sale de las tablas 501/504 — y se
+agregó `priceSourceProperty` para distinguir los tres orígenes. La config se lee con
+`Configuration.findOne` directo y no con `tenantConfigurationService.getValue`, que upsertaba la
+clave con `value: null` al faltar.
 
 ### 6. Wiring
 
@@ -333,6 +351,37 @@ llamada.
 
 Test de composición que verifique el wiring real de la ruta nueva — no `expect.any(Object)`,
 sino que la dependencia esperada esté efectivamente pasada.
+
+## Medido después de implementar (2026-08-21): el área de ventas necesita otra vuelta
+
+La decisión de área de ventas —derivar del cliente, y si tiene varias usar la configurada— se
+tomó suponiendo que tener varias era la excepción. Medido contra el S/4 real: **1835 de 6031
+clientes (30%) tienen más de un área de ventas**, sobre 8974 áreas en total. Ninguna `Division`
+viene vacía (todas son `SC`), y hay tres canales de distribución (`01`, `02`, `03`).
+
+Cobertura de una sola área configurada, contando los clientes que resuelven sin fallar:
+
+| Área configurada | Cobertura | Clientes que fallan |
+|---|---|---|
+| `FQCR/01` | 69,9 % | 1814 |
+| `DPDO/01` | 95,3 % | ~283 |
+| lista de prioridad de 5 áreas | 98,6 % | ~85 |
+| lista de prioridad de 8 áreas | 99,4 % | ~36 |
+
+Dos consecuencias, y la segunda es la que importa:
+
+1. **Fallo ruidoso:** un cliente multi-área que no tiene la área configurada hace fallar el
+   webhook completo. Es visible y diagnosticable, pero con `FQCR/01` afecta a casi un tercio de
+   la cartera.
+2. **Riesgo silencioso:** un cliente multi-área que **sí** tiene la área configurada resuelve con
+   la lista de precios de esa área. Si el negocio en HubSpot pertenece en realidad a otra
+   organización de ventas, se escribe el precio de la lista equivocada y nada falla. El código no
+   tiene forma de saber a qué organización pertenece el negocio, porque HubSpot no lleva ese dato.
+
+La alternativa descartada en el diseño —sincronizar organización de ventas y canal a una propiedad
+de HubSpot y leerla desde el webhook— es la única que cierra el punto 2. Con estos números
+conviene reconsiderarla; mientras no exista, la mitigación barata es configurar `DPDO/01` en vez
+de una área de cobertura baja, y aceptar el punto 2 de forma explícita.
 
 ## Fuera de alcance
 

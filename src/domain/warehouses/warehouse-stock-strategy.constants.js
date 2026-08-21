@@ -25,6 +25,26 @@ export const WAREHOUSE_STOCK_KEY = '_warehouseStock';
 // meaning "sum every stock type present for this warehouse".
 export const STOCK_TYPE_ALL = '*';
 
+// Que numero de una bodega de B1 va a la propiedad de HubSpot. Es el eje
+// equivalente a stockType del lado S/4: uno por field, no por tenant, para que
+// un tenant pueda pedir tres columnas de una bodega y una sola de otra.
+export const B1_STOCK_METRICS = Object.freeze({
+  // InStock - Committed + Ordered. El comportamiento historico y el default:
+  // ninguna config existente declara metric, y ninguna debe cambiar.
+  AVAILABLE: 'available',
+  IN_STOCK: 'inStock',
+  COMMITTED: 'committed',
+  ORDERED: 'ordered',
+});
+
+export const DEFAULT_B1_STOCK_METRIC = B1_STOCK_METRICS.AVAILABLE;
+
+// code del documento de SyncWarnings que se escribe cuando una entrada de
+// fieldsWareHouseHS declara una metric que no existe. La entrada se descarta:
+// caer de vuelta a available escribiria un numero plausible pero equivocado en
+// una columna de inventario, y eso nadie lo detecta mirando.
+export const WAREHOUSE_METRIC_INVALID_WARNING = 'warehouse_metric_invalid';
+
 // Quantities are summed from string values coming off SAP; rounding avoids
 // floating-point noise (12.000000000000002) that would make every product
 // look "changed" on every sync even when nothing moved.
@@ -36,5 +56,8 @@ export default {
   DEFAULT_WAREHOUSE_STOCK_STRATEGY,
   WAREHOUSE_STOCK_KEY,
   STOCK_TYPE_ALL,
+  B1_STOCK_METRICS,
+  DEFAULT_B1_STOCK_METRIC,
+  WAREHOUSE_METRIC_INVALID_WARNING,
   QUANTITY_DECIMALS,
 };

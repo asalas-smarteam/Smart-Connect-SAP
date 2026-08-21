@@ -28,6 +28,7 @@ import MongooseClientConfigRepository from '#infrastructure/database/repositorie
 import MongooseHubspotCredentialRepository from '#infrastructure/database/repositories/MongooseHubspotCredentialRepository.js';
 import MongooseSapSyncTenantRepository from '#infrastructure/database/repositories/MongooseSapSyncTenantRepository.js';
 import MongooseSyncLogRepository from '#infrastructure/database/repositories/MongooseSyncLogRepository.js';
+import MongooseSyncWarningRepository from '#infrastructure/database/repositories/MongooseSyncWarningRepository.js';
 import HubspotSyncAdapter from '#infrastructure/hubspot/HubspotSyncAdapter.js';
 import logger from '#infrastructure/logger/logger.adapter.js';
 import TenantSapSyncLockAdapter from '#infrastructure/locks/TenantSapSyncLockAdapter.js';
@@ -120,6 +121,7 @@ export function buildSyncSapConfigToHubspot() {
       new WarehouseStockEnrichmentAdapter({
         strategyFactory: warehouseStockStrategyFactory,
         configRepository: new WarehouseStockConfigRepository(),
+        syncWarningRepository: new MongooseSyncWarningRepository(),
         logger,
       }),
       SapRecordEnricherPort

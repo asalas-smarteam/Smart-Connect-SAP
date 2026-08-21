@@ -27,8 +27,8 @@ describe('warehouseStock utils', () => {
     const fields = await resolveHubspotWarehouseFields(tenantModels);
 
     expect(fields).toEqual([
-      { warehouseCode: 'A01', propertyName: 'A01_stock' },
-      { warehouseCode: 'B10', propertyName: 'B10_stock' },
+      { warehouseCode: 'A01', propertyName: 'A01_stock', metric: 'available' },
+      { warehouseCode: 'B10', propertyName: 'B10_stock', metric: 'available' },
     ]);
   });
 
@@ -49,8 +49,8 @@ describe('warehouseStock utils', () => {
     const fields = await resolveHubspotWarehouseFields(tenantModels);
 
     expect(fields).toEqual([
-      { warehouseCode: '01', propertyName: 'distelsa_stock' },
-      { warehouseCode: '05', propertyName: 'exhibicion_stock' },
+      { warehouseCode: '01', propertyName: 'distelsa_stock', metric: 'available' },
+      { warehouseCode: '05', propertyName: 'exhibicion_stock', metric: 'available' },
     ]);
   });
 

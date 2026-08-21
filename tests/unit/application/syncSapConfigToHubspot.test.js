@@ -251,6 +251,49 @@ describe('SyncSapConfigToHubspot', () => {
     }));
   });
 
+  it('passes clientConfigId and syncLogId to the warehouse stock enricher', async () => {
+    const config = createConfig({ objectType: 'product' });
+    const tenantContext = { tenantKey: 'tenant-a', tenantModels: {} };
+    const warehouseStockEnricher = { enrich: jest.fn().mockResolvedValue(undefined) };
+
+    const useCase = new SyncSapConfigToHubspot({
+      sapDataSource: { fetchData: jest.fn().mockResolvedValue([{ ItemCode: 'P1' }]) },
+      mappingRepository: {
+        ensureDefaultMappings: jest.fn().mockResolvedValue([]),
+        findMappings: jest.fn().mockResolvedValue([{ sourceField: 'ItemCode', targetField: 'idsap' }]),
+        mapRecords: jest.fn().mockResolvedValue([{ properties: { idsap: 'P1' } }]),
+      },
+      hubspotSyncTarget: {
+        send: jest.fn().mockResolvedValue({ sent: 1, failed: 0, created: 1, updated: 0 }),
+      },
+      syncLogRepository: {
+        start: jest.fn().mockResolvedValue({ _id: 'log-1' }),
+        finish: jest.fn().mockResolvedValue(null),
+      },
+      clientConfigRepository: {
+        findById: jest.fn(),
+        markSyncSucceeded: jest.fn().mockResolvedValue(null),
+        markSyncFailed: jest.fn(),
+      },
+      hubspotCredentialRepository: {
+        findByClientConfig: jest.fn().mockResolvedValue({ _id: 'cred-1' }),
+        findById: jest.fn(),
+      },
+      warehouseStockEnricher,
+      dateProvider: () => new Date('2026-05-05T00:00:00.000Z'),
+    });
+
+    await useCase.execute({ config, tenantContext });
+
+    // Sin estos dos, el SyncWarning se escribe huerfano: sin corrida y sin
+    // tenant al que atribuirlo.
+    expect(warehouseStockEnricher.enrich).toHaveBeenCalledWith(expect.objectContaining({
+      objectType: 'product',
+      clientConfigId: 'cfg-1',
+      syncLogId: 'log-1',
+    }));
+  });
+
   describe('enrichRecordsWithDiscounts', () => {
     // El grupo real del tenant noelito: vigente, para todos los socios, y con
     // línea sólo para OTRO artículo.

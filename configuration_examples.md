@@ -78,3 +78,38 @@ Compuerta de la sincronización de direcciones de SAP hacia HubSpot. Hoy siempre
 Detalle: batchExpiryStrategy
 Lleva los lotes y sus fechas de caducidad de SAP a propiedades del producto en HubSpot. `source` decide de dónde salen los lotes: `'none'` (el default, y lo que aplica a todos los tenants B1 actuales) apaga el feature sin hacer ni una llamada a SAP; `'s4_BatchMaster'` lee el maestro `API_BATCH_SRV/Batch` y lo une con el stock por `Material + Batch`. `projection` decide cómo se representan: hoy solo existe `'hs_ProductProperties'`, que escribe las siete propiedades sobre el propio producto (`lotes_detalle`, `lote_proximo_vencer`, `fecha_vencimiento_proxima`, `dias_para_vencer`, `cantidad_por_vencer`, `cantidad_vencida`, `lotes_vigentes`) — hay que crearlas en el portal antes del primer run o `batchCreateProducts` falla el lote de 100 entero. `warehouses` acota el alcance con la misma sintaxis de `valueSAP` que `fieldsWareHouseHS` (`'DPDO/*'` centro completo, `'MQGT/0008'` bodega puntual) y **vacío o ausente significa TODAS las bodegas**, no ninguna; es independiente de `fieldsWareHouseHS` a propósito, para poder tener fechas de vencimiento sin propiedades de stock por bodega. `stockTypes` (default `['01']`, libre utilización) son los tipos de stock que cuentan; el stock especial —consignación, subcontratación, stock de cliente— se descarta siempre sin config. `includeExpired` (default `false`) solo controla si los vencidos salen en `lotes_detalle`: `cantidad_vencida` los cuenta igual, y `lote_proximo_vencer`/`fecha_vencimiento_proxima` nunca apuntan a un lote vencido aunque esté en `true`. `horizonDays` (default 90) es la ventana de "por vencer", con borde inclusivo. Un producto sin gestión de lotes queda con las siete propiedades vacías, no en cero. Solo aplica a SAP S/4HANA.
 { key: 'batchExpiryStrategy', value: { source: 's4_BatchMaster', projection: 'hs_ProductProperties', warehouses: [], stockTypes: ['01'], includeExpired: false, horizonDays: 90 } }
+
+Detalle: fieldsWareHouseHS
+Qué bodegas de SAP se llevan a propiedades numéricas del producto en HubSpot, y qué número va en cada una. **Cada entrada de la lista es UNA propiedad**: `value` es el nombre interno de la propiedad en HubSpot y `valueSAP` es el código de bodega en SAP (si falta `valueSAP`, se deduce del nombre de la propiedad, pero sólo si termina en `_stock`: `a01_stock` → `A01`; cualquier otro nombre se descarta). `metric` decide el número, y **sólo aplica a SAP Business One**: `'available'` (el default, y lo que aplica a toda config que no declare `metric`) es `InStock - Committed + Ordered`, o sea que cuenta lo pedido a proveedor como disponible; `'inStock'`, `'committed'` y `'ordered'` son el campo crudo de `ItemWarehouseInfoCollection` sin aritmética. Se compara sin distinguir mayúsculas, así que `'InStock'` e `'instock'` son lo mismo. Para tener tres columnas de la misma bodega se ponen tres entradas con el mismo `valueSAP` y `value` distintos. Una `metric` que no existe (un typo como `'inStok'`) **descarta esa entrada y escribe un documento en la colección `SyncWarnings`** con `code: 'warehouse_metric_invalid'`, atado al `syncLogId` de la corrida: la propiedad queda sin escribir en vez de recibir un número equivocado, que en una columna de inventario nadie detecta mirando. Una bodega listada en `excludedWarehouses` sale en `0` en cualquier métrica, aunque SAP reporte existencias. Una bodega configurada que no aparece en el producto también sale en `0`. Las propiedades tienen que existir en el portal **antes** del primer sync, y tienen que crearse en **producto y en line item**: la misma config alimenta también el sync de precios de line items (`SyncLineItemPrices.js` → `TenantLineItemPriceConfigRepository.getHubspotWarehouseStockPropertiesForTenant` → `HubspotLineItemPriceClient`, que derrama el resultado dentro de `properties` de cada line item y también del producto). Si falta en producto, una propiedad inexistente hace fallar el lote de 100 completo en `batchCreateProducts`; si falta en line item, el siguiente webhook de precios manda esas propiedades dentro de cada line item y HubSpot responde 400, con lo que el lote entero de actualización de precios falla y el negocio queda con el precio viejo. En SAP S/4HANA `metric` no se lee; el eje equivalente es `stockType`.
+{
+  "key": "fieldsWareHouseHS",
+  "value": [
+    { "label": "A01 En stock",     "value": "a01_instock",   "valueSAP": "A01", "metric": "inStock" },
+    { "label": "A01 Comprometido", "value": "a01_committed", "valueSAP": "A01", "metric": "committed" },
+    { "label": "A01 Solicitado",   "value": "a01_ordered",   "valueSAP": "A01", "metric": "ordered" },
+    { "label": "Bodega B09",       "value": "b09_stock",     "valueSAP": "B09" }
+  ]
+}
+
+Detalle: s4PriceList
+Precios de line items para tenants S/4 (`sapFlavor: "S4"`). Solo la usa el webhook `POST /webhooks/hubspot/line-items/prices/s4`; el flujo de B1 no la lee.
+
+- `conditionType`: condición de precio de venta en SAP. En Multiquímica es `ZPR0`. Default `ZPR0`.
+- `defaultPriceListType`: lista de precios a usar cuando el cliente no tiene una asignada en su área de ventas, o cuando la suya no tiene tarifa vigente para ese material. Obligatoria.
+- `salesArea`: área de ventas a usar cuando el cliente tiene varias (un mismo cliente puede tener una lista distinta por organización de ventas). Si el cliente tiene una sola, se usa la suya y esta config se ignora. `salesOrganization` y `distributionChannel` son obligatorias juntas (son las dos que entran al filtro de condiciones en SAP); `division` es opcional y sólo desempata cuando el cliente tiene dos áreas que difieren únicamente en ella — si las filas de S/4 del cliente traen `Division` vacía, la comparación la ignora. Si el área configurada queda empatada con más de una del cliente, el flujo falla pidiendo la división en vez de elegir una.
+- `priceListProperty`: propiedad del line item donde se escribe la lista efectivamente usada. Opcional. Se escribe SIEMPRE que esté configurada: cuando el precio salió del default del producto (tablas 501/504, sin lista) se escribe el literal `PRODUCT_DEFAULT`, para no dejar la etiqueta de la corrida anterior al lado de un precio de otra procedencia. Si la propiedad del portal es un desplegable, hay que agregarle la opción `PRODUCT_DEFAULT` además de las listas.
+- `currencyProperty`: propiedad del line item donde se escribe la moneda de la tarifa de SAP. Opcional pero muy recomendada: la tarifa no se convierte, viene en la moneda de la condición. Si falta, cada corrida deja un warning en el log, porque sin ella la moneda no queda registrada en ninguna parte del CRM.
+- `priceSourceProperty`: propiedad del line item donde se escribe el ORIGEN del precio: `customerPriceList` (la lista del área de ventas del cliente), `defaultPriceList` (`defaultPriceListType`) o `productDefault` (tablas 501/504). Opcional. Distingue los tres casos que la etiqueta de lista sola no separa, porque la lista del cliente y la de config pueden ser la misma.
+
+Nota sobre el `amount` del negocio: si las líneas valorizadas quedan con tarifas en más de una moneda, el `amount` del deal NO se escribe (sumar USD con DOP no da un número correcto en ninguna de las dos). Las líneas sí se actualizan, queda un warning con el detalle y la respuesta trae `meta.dealUpdated: false` con el motivo.
+
+```json
+{ "key": "s4PriceList", "value": {
+    "conditionType": "ZPR0",
+    "defaultPriceListType": "ZC",
+    "salesArea": { "salesOrganization": "FQCR", "distributionChannel": "01", "division": "SC" },
+    "priceListProperty": "lista_de_precios_sap",
+    "currencyProperty": "moneda_precio_sap",
+    "priceSourceProperty": "origen_precio_sap"
+}}
+```
