@@ -94,6 +94,60 @@ export class TenantLineItemPriceConfigRepository {
     return priceList;
   }
 
+  // La lista efectiva del cliente sale de S/4 (PriceListType de su área de ventas); acá solo
+  // vive lo que el tenant decide: el default cuando el cliente no tiene lista, el área de
+  // ventas a usar si el cliente tiene varias, y las propiedades de HubSpot donde dejar rastro.
+  async resolveS4PriceListConfig({ tenantModels }) {
+    // Lectura directa y NO tenantConfigurationService.getValue: ese helper UPSERTA la clave con
+    // el fallback cuando falta, así que el primer webhook de un tenant sin configurar dejaba
+    // `{ key: 's4PriceList', value: null }` en la base del cliente antes de tirar el error.
+    // Mismo patrón que resolveTenantTaxSettings / resolveMiscPriceCalculationConfig.
+    const Configuration = tenantModels?.Configuration;
+    const query = typeof Configuration?.findOne === 'function'
+      ? Configuration.findOne({ key: 's4PriceList' })
+      : null;
+    const configuration = typeof query?.lean === 'function' ? await query.lean() : await query;
+    const rawConfiguration = typeof configuration?.toObject === 'function'
+      ? configuration.toObject()
+      : configuration;
+    const value = rawConfiguration?.value ?? null;
+
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error(
+        'Configuration s4PriceList is required for the S4 line item price webhook,'
+        + ' e.g. { "conditionType": "ZPR0", "defaultPriceListType": "ZC",'
+        + ' "salesArea": { "salesOrganization": "FQCR", "distributionChannel": "01", "division": "SC" } }'
+      );
+    }
+
+    const defaultPriceListType = toNonEmptyString(value.defaultPriceListType)?.toUpperCase() ?? null;
+
+    if (!defaultPriceListType) {
+      throw new Error('s4PriceList.defaultPriceListType is required');
+    }
+
+    const salesOrganization = toNonEmptyString(value.salesArea?.salesOrganization)?.toUpperCase() ?? null;
+    const distributionChannel = toNonEmptyString(value.salesArea?.distributionChannel) ?? null;
+    const division = toNonEmptyString(value.salesArea?.division)?.toUpperCase() ?? null;
+    // `salesOrganization` y `distributionChannel` son obligatorios juntos: son los dos que
+    // entran al $filter de las condiciones, y un área a medias devolvería precios de otro canal.
+    // `division` es OPCIONAL: nunca entra al filtro, sólo desempata entre áreas del mismo
+    // cliente, y hay clientes cuyas filas de S/4 la traen vacía — exigirla los dejaba sin
+    // ninguna configuración posible (ver matchesSalesArea en SyncS4LineItemPricesByPriceList).
+    const salesArea = salesOrganization && distributionChannel
+      ? { salesOrganization, distributionChannel, division }
+      : null;
+
+    return {
+      conditionType: toNonEmptyString(value.conditionType)?.toUpperCase() ?? 'ZPR0',
+      defaultPriceListType,
+      salesArea,
+      priceListProperty: toNonEmptyString(value.priceListProperty),
+      currencyProperty: toNonEmptyString(value.currencyProperty),
+      priceSourceProperty: toNonEmptyString(value.priceSourceProperty),
+    };
+  }
+
   async resolveTenantTaxSettings({ tenantModels }) {
     const Configuration = tenantModels?.Configuration;
 

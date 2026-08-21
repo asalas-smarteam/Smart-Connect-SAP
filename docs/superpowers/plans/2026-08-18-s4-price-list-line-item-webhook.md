@@ -17,7 +17,7 @@
 - **Correr jest con path explícito**, nunca la suite completa desde la raíz. Bash: `NODE_OPTIONS=--experimental-vm-modules npx jest <path>`. PowerShell: `$env:NODE_OPTIONS='--experimental-vm-modules'; npx jest <path>`.
 - **Fechas en las fixtures: ISO, no `/Date(ms)/`.** El `S4GatewayTransport` normaliza `/Date(1769126400000)/` a `2026-01-23T00:00:00.000Z` antes de devolver los datos ([odataV2Normalizer.js:18](../../../src/infrastructure/sap/transport/odataV2Normalizer.js)). Las fixtures imitan la salida del transporte, no la del sistema remoto.
 - **Filtros OData: `$filter` va pre-encodeado, `$select` va crudo.** El transporte pasa los valores del query tal cual ([S4GatewayTransport.js:19](../../../src/infrastructure/sap/transport/S4GatewayTransport.js)). El patrón del repo es `$filter: encodeURIComponent(filtro)` — ver [S4StockResolver.js:80](../../../src/infrastructure/sap/products/S4StockResolver.js).
-- **El audit se construye con `buildLineItemPriceAudit`**, nunca a mano: las entradas de tráfico OData llevan claves `$filter`/`$select` y ese builder las pasa por `sanitizeAuditKeys`, que las renombra a `_$filter`/`_$select`. Sin eso el `$set` del `WebhookEvent` se cae completo contra el Mongo de producción (< 5.0) y arrastra el `errorMessage` que viaja en la misma escritura.
+- **El audit se construye con `buildLineItemPriceAudit`**, nunca a mano. El `$set` sobre el `WebhookEvent` va contra un Mongo anterior a la 5.0: una sola clave con `$` al inicio tira la escritura completa y arrastra el `errorMessage` que viaja en la misma operación. Ese builder neutraliza las claves `$filter`/`$select` del tráfico OData por dos caminos distintos, verificados en el código: `params` se **aplana a un string** `clave=valor&clave=valor` en `serializeAuditParams` ([syncLog.service.js:159](../../../src/infrastructure/sync/syncLog.service.js)), así que el `$filter` queda dentro de un valor y nunca es una clave; y `request`/`response` sí pasan por `sanitizeAuditKeys`, que renombra las claves con `$` inicial agregándoles un guion bajo adelante. Armar el audit a mano se saltea las dos protecciones.
 - **Valores verificados en vivo el 2026-08-18** contra el S/4 de dev/QA de Multiquímica: condición `ZPR0`; tabla `502` = OrgVentas+Canal+PriceListType+Material; tablas `501` y `504` = OrgVentas+Canal+Material sin lista; listas `ZA`/`ZB`/`ZC`/`ZD`. Usar estos valores en las fixtures.
 
 ## Estructura de archivos
@@ -1430,9 +1430,9 @@ export class SyncS4LineItemPricesByPriceList {
           skippedCount: skippedLineItems.length,
           dealUpdated: true,
         },
-        // buildLineItemPriceAudit es obligatorio: pasa el árbol por sanitizeAuditKeys, que
-        // renombra las claves `$filter`/`$select` del tráfico OData. Sin eso el $set del
-        // WebhookEvent se cae completo contra el Mongo de producción (< 5.0).
+        // buildLineItemPriceAudit es obligatorio: neutraliza las claves `$` del tráfico OData
+        // (aplana `params` a string y sanea los cuerpos). Sin eso el $set del WebhookEvent se
+        // cae completo contra el Mongo de producción (< 5.0), y se lleva el errorMessage.
         audit: this.buildLineItemPriceAudit({ ...auditTrail, droppedCalls: callRecorder.droppedCalls }),
       };
     } catch (error) {
@@ -2062,16 +2062,54 @@ describe('s4-line-item-prices.composition', () => {
     expect(typeof client.transport.fetchAll).toBe('function');
   });
 
-  it('el audit cableado sanea las claves $ del query OData', () => {
+  // Dos aserciones y no una, porque el audit neutraliza las claves `$` por dos caminos
+  // distintos y cada uno protege algo diferente: `params` se APLANA a un string
+  // (serializeAuditParams), así que el `$filter` termina dentro de un valor; y `request`
+  // /`response` sí pasan por sanitizeAuditKeys, que RENOMBRA la clave. No las unifiques.
+  it('ninguna clave del audit cableado empieza con $', () => {
     const useCase = buildSyncS4LineItemPrices();
 
     const audit = useCase.buildLineItemPriceAudit({
       dealId: '77',
-      calls: [{ target: 'sap', method: 'GET', path: '/x', params: { $filter: "Material eq '1'" } }],
+      calls: [{
+        target: 'sap',
+        method: 'GET',
+        path: '/x',
+        params: { $filter: "Material eq '1'", $select: 'ConditionRecord' },
+      }],
     });
 
-    expect(JSON.stringify(audit)).not.toContain('"$filter"');
-    expect(JSON.stringify(audit)).toContain('_$filter');
+    const dollarKeys = [];
+    const walk = (value) => {
+      if (Array.isArray(value)) {
+        value.forEach(walk);
+        return;
+      }
+      if (value && typeof value === 'object') {
+        for (const [key, nested] of Object.entries(value)) {
+          if (key.startsWith('$')) {
+            dollarKeys.push(key);
+          }
+          walk(nested);
+        }
+      }
+    };
+
+    walk(audit);
+    expect(dollarKeys).toEqual([]);
+  });
+
+  it('renombra las claves $ que vienen en el cuerpo de la llamada', () => {
+    const useCase = buildSyncS4LineItemPrices();
+
+    const audit = useCase.buildLineItemPriceAudit({
+      dealId: '77',
+      calls: [{ target: 'sap', method: 'GET', path: '/x', data: { $inner: { $deep: 1 } } }],
+    });
+
+    const serialized = JSON.stringify(audit);
+    expect(serialized).not.toContain('"$inner"');
+    expect(serialized).toContain('_$inner');
   });
 });
 ```
@@ -2236,12 +2274,20 @@ Con un deal real del portal que tenga una company con `idsap` y al menos una lí
 ```bash
 curl -X POST http://localhost:3000/webhooks/hubspot/line-items/prices/s4 \
   -H 'Content-Type: application/json' \
-  -H 'x-tenant-key: multiquimica' \
   -d '[{"eventId":1,"subscriptionId":2,"portalId":<PORTAL_ID>,"appId":4,"occurredAt":1755500000000,"fromObjectId":"<DEAL_ID>","associationType":"DEAL_TO_LINE_ITEM","changeSource":"USER"}]'
 ```
 
-El header de tenant es el que use `tenantResolver` en este entorno — confirmarlo en
-[tenantResolver.js](../../../src/interfaces/http/middlewares/tenantResolver.js) antes de correr el curl.
+**No hace falta header de tenant, y `x-tenant-key` no existe.** `tenantResolver` resuelve el
+tenant, en este orden: el `portalId` que viene en el **cuerpo** del evento
+(`req.body[0].portalId`), un header `x-tenant-id`, `tenantId` por query o body, o un JWT en
+`Authorization: Bearer`. Ver
+[tenantResolver.js:57](../../../src/interfaces/http/middlewares/tenantResolver.js). Con el
+`portalId` real de Multiquímica dentro del array del evento alcanza; si el `SaaSClient` de ese
+portal no está en el Mongo local, agregá `-H 'x-tenant-id: <id>'`.
+
+> **Esta llamada escribe en el portal real de HubSpot del cliente**: cambia el `price` de los
+> line items del deal y el `amount` del negocio. No es una prueba en seco. Elegí un deal de
+> prueba, o asumí el cambio a conciencia.
 
 Expected: `200` con `ok: true`, `data.priceListType` con la lista aplicada, `data.lineItems[].Price` distinto de cero y `data.lineItems[].Currency` con la moneda de la condición.
 
