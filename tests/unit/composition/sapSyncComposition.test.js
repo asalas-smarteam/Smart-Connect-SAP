@@ -170,8 +170,13 @@ describe('sap-sync composition (verificacion textual del cableado)', () => {
 
   it('inyecta syncWarningRepository en WarehouseStockEnrichmentAdapter', () => {
     expect(source).toMatch(/import MongooseSyncWarningRepository from/);
+    // Ventana sin tope de caracteres pero con un limite estructural: no puede
+    // atravesar la apertura de OTRO *EnrichmentAdapter (p.ej.
+    // BatchExpiryEnrichmentAdapter). Asi, mover la clave al bloque de al lado
+    // hace fallar el test en vez de dar un falso verde por cercania incidental
+    // de caracteres.
     expect(source).toMatch(
-      /new WarehouseStockEnrichmentAdapter\(\{[\s\S]{0,400}?syncWarningRepository:\s*new MongooseSyncWarningRepository\(\)/
+      /new WarehouseStockEnrichmentAdapter\(\{(?:(?!EnrichmentAdapter)[\s\S])*?syncWarningRepository:\s*new MongooseSyncWarningRepository\(\)/
     );
   });
 });
