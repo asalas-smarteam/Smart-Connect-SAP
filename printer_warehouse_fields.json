@@ -1,0 +1,426 @@
+{
+  "key": "fieldsWareHouseHS",
+  "userUpdated": "admin",
+  "value": [
+    {
+      "label": "Principal Antigua Guatemala",
+      "value": "at00_onhand",
+      "valueSAP": "AT00",
+      "metric": "inStock"
+    },
+    {
+      "label": "Auxiliar Antigua Guatemala",
+      "value": "at01_onhand",
+      "valueSAP": "AT01",
+      "metric": "inStock"
+    },
+    {
+      "label": "Principal Barberena",
+      "value": "br00_onhand",
+      "valueSAP": "BR00",
+      "metric": "inStock"
+    },
+    {
+      "label": "Auxiliar Barberena",
+      "value": "br01_onhand",
+      "valueSAP": "BR01",
+      "metric": "inStock"
+    },
+    {
+      "label": "Principal Coban",
+      "value": "cb00_onhand",
+      "valueSAP": "CB00",
+      "metric": "inStock"
+    },
+    {
+      "label": "Auxiliar Coban",
+      "value": "cb01_onhand",
+      "valueSAP": "CB01",
+      "metric": "inStock"
+    },
+    {
+      "label": "Show Room Coban",
+      "value": "cb02_onhand",
+      "valueSAP": "CB02",
+      "metric": "inStock"
+    },
+    {
+      "label": "Demostración Clientes Coban",
+      "value": "cb08_onhand",
+      "valueSAP": "CB08",
+      "metric": "inStock"
+    },
+    {
+      "label": "Principal Coatepeque",
+      "value": "cp00_onhand",
+      "valueSAP": "CP00",
+      "metric": "inStock"
+    },
+    {
+      "label": "Auxiliar Coatepeque",
+      "value": "cp01_onhand",
+      "valueSAP": "CP01",
+      "metric": "inStock"
+    },
+    {
+      "label": "Principal Chiquimula",
+      "value": "cq00_onhand",
+      "valueSAP": "CQ00",
+      "metric": "inStock"
+    },
+    {
+      "label": "Auxiliar Chiquimula",
+      "value": "cq01_onhand",
+      "valueSAP": "CQ01",
+      "metric": "inStock"
+    },
+    {
+      "label": "Show Room Chiquimula",
+      "value": "cq02_onhand",
+      "valueSAP": "CQ02",
+      "metric": "inStock"
+    },
+    {
+      "label": "Demostración Clientes Chiquimula",
+      "value": "cq08_onhand",
+      "valueSAP": "CQ08",
+      "metric": "inStock"
+    },
+    {
+      "label": "Principal Chimaltenango",
+      "value": "ct00_onhand",
+      "valueSAP": "CT00",
+      "metric": "inStock"
+    },
+    {
+      "label": "Auxiliar Chimaltenango",
+      "value": "ct01_onhand",
+      "valueSAP": "CT01",
+      "metric": "inStock"
+    },
+    {
+      "label": "Show Room Chimaltenango",
+      "value": "ct02_onhand",
+      "valueSAP": "CT02",
+      "metric": "inStock"
+    },
+    {
+      "label": "Principal Escuintla",
+      "value": "ec00_onhand",
+      "valueSAP": "EC00",
+      "metric": "inStock"
+    },
+    {
+      "label": "Auxiliar Escuintla",
+      "value": "ec01_onhand",
+      "valueSAP": "EC01",
+      "metric": "inStock"
+    },
+    {
+      "label": "Show Room Escuintla",
+      "value": "ec02_onhand",
+      "valueSAP": "EC02",
+      "metric": "inStock"
+    },
+    {
+      "label": "Demostración Clientes Escuintla",
+      "value": "ec08_onhand",
+      "valueSAP": "EC08",
+      "metric": "inStock"
+    },
+    {
+      "label": "Principal Central",
+      "value": "gt00_onhand",
+      "valueSAP": "GT00",
+      "metric": "inStock"
+    },
+    {
+      "label": "Auxiliar Central",
+      "value": "gt01_onhand",
+      "valueSAP": "GT01",
+      "metric": "inStock"
+    },
+    {
+      "label": "Show Room Central",
+      "value": "gt02_onhand",
+      "valueSAP": "GT02",
+      "metric": "inStock"
+    },
+    {
+      "label": "Prestamos Tecnicos",
+      "value": "gt06_onhand",
+      "valueSAP": "GT06",
+      "metric": "inStock"
+    },
+    {
+      "label": "Demostración Clientes Central",
+      "value": "gt08_onhand",
+      "valueSAP": "GT08",
+      "metric": "inStock"
+    },
+    {
+      "label": "Tránsitos Central",
+      "value": "gt10_onhand",
+      "valueSAP": "GT10",
+      "metric": "inStock"
+    },
+    {
+      "label": "Showroom Cortijo",
+      "value": "gt11_onhand",
+      "valueSAP": "GT11",
+      "metric": "inStock"
+    },
+    {
+      "label": "Principal Huehuetenango",
+      "value": "hh00_onhand",
+      "valueSAP": "HH00",
+      "metric": "inStock"
+    },
+    {
+      "label": "Auxiliar Huehuetenango",
+      "value": "hh01_onhand",
+      "valueSAP": "HH01",
+      "metric": "inStock"
+    },
+    {
+      "label": "Show Room Huehuetenango",
+      "value": "hh02_onhand",
+      "valueSAP": "HH02",
+      "metric": "inStock"
+    },
+    {
+      "label": "Principal Jalapa",
+      "value": "jl00_onhand",
+      "valueSAP": "JL00",
+      "metric": "inStock"
+    },
+    {
+      "label": "Auxiliar Jalapa",
+      "value": "jl01_onhand",
+      "valueSAP": "JL01",
+      "metric": "inStock"
+    },
+    {
+      "label": "Principal Jutiapa",
+      "value": "jt00_onhand",
+      "valueSAP": "JT00",
+      "metric": "inStock"
+    },
+    {
+      "label": "Auxiliar Jutiapa",
+      "value": "jt01_onhand",
+      "valueSAP": "JT01",
+      "metric": "inStock"
+    },
+    {
+      "label": "Show Room Jutiapa",
+      "value": "jt02_onhand",
+      "valueSAP": "JT02",
+      "metric": "inStock"
+    },
+    {
+      "label": "Demostración Clientes Jutiapa",
+      "value": "jt08_onhand",
+      "valueSAP": "JT08",
+      "metric": "inStock"
+    },
+    {
+      "label": "Principal Mazatenango",
+      "value": "mz00_onhand",
+      "valueSAP": "MZ00",
+      "metric": "inStock"
+    },
+    {
+      "label": "Auxiliar Mazatenango",
+      "value": "mz01_onhand",
+      "valueSAP": "MZ01",
+      "metric": "inStock"
+    },
+    {
+      "label": "Show Room Mazatenango",
+      "value": "mz02_onhand",
+      "valueSAP": "MZ02",
+      "metric": "inStock"
+    },
+    {
+      "label": "Demostración Clientes Mazatenango",
+      "value": "mz08_onhand",
+      "valueSAP": "MZ08",
+      "metric": "inStock"
+    },
+    {
+      "label": "Principal Puerto Barrios",
+      "value": "pb00_onhand",
+      "valueSAP": "PB00",
+      "metric": "inStock"
+    },
+    {
+      "label": "Auxiliar Puerto Barrios",
+      "value": "pb01_onhand",
+      "valueSAP": "PB01",
+      "metric": "inStock"
+    },
+    {
+      "label": "Show Room Puerto Barrios",
+      "value": "pb02_onhand",
+      "valueSAP": "PB02",
+      "metric": "inStock"
+    },
+    {
+      "label": "Principal El Progreso",
+      "value": "pg00_onhand",
+      "valueSAP": "PG00",
+      "metric": "inStock"
+    },
+    {
+      "label": "Auxiliar El Progreso",
+      "value": "pg01_onhand",
+      "valueSAP": "PG01",
+      "metric": "inStock"
+    },
+    {
+      "label": "Principal Peten",
+      "value": "pt00_onhand",
+      "valueSAP": "PT00",
+      "metric": "inStock"
+    },
+    {
+      "label": "Auxiliar Peten",
+      "value": "pt01_onhand",
+      "valueSAP": "PT01",
+      "metric": "inStock"
+    },
+    {
+      "label": "Show Room Peten",
+      "value": "pt02_onhand",
+      "valueSAP": "PT02",
+      "metric": "inStock"
+    },
+    {
+      "label": "Principal Quiche",
+      "value": "qc00_onhand",
+      "valueSAP": "QC00",
+      "metric": "inStock"
+    },
+    {
+      "label": "Auxiliar Quiche",
+      "value": "qc01_onhand",
+      "valueSAP": "QC01",
+      "metric": "inStock"
+    },
+    {
+      "label": "Show Room Quiche",
+      "value": "qc02_onhand",
+      "valueSAP": "QC02",
+      "metric": "inStock"
+    },
+    {
+      "label": "Principal Quetzaltenango",
+      "value": "qz00_onhand",
+      "valueSAP": "QZ00",
+      "metric": "inStock"
+    },
+    {
+      "label": "Auxiliar Quetzaltenango",
+      "value": "qz01_onhand",
+      "valueSAP": "QZ01",
+      "metric": "inStock"
+    },
+    {
+      "label": "Show Room Quetzaltenango",
+      "value": "qz02_onhand",
+      "valueSAP": "QZ02",
+      "metric": "inStock"
+    },
+    {
+      "label": "Demostración Clientes Quetzaltenango",
+      "value": "qz08_onhand",
+      "valueSAP": "QZ08",
+      "metric": "inStock"
+    },
+    {
+      "label": "Principal Retalhuleu",
+      "value": "rh00_onhand",
+      "valueSAP": "RH00",
+      "metric": "inStock"
+    },
+    {
+      "label": "Auxiliar Retalhuleu",
+      "value": "rh01_onhand",
+      "valueSAP": "RH01",
+      "metric": "inStock"
+    },
+    {
+      "label": "Principal Salama",
+      "value": "sa00_onhand",
+      "valueSAP": "SA00",
+      "metric": "inStock"
+    },
+    {
+      "label": "Auxiliar Salama",
+      "value": "sa01_onhand",
+      "valueSAP": "SA01",
+      "metric": "inStock"
+    },
+    {
+      "label": "Principal San Marcos",
+      "value": "sm00_onhand",
+      "valueSAP": "SM00",
+      "metric": "inStock"
+    },
+    {
+      "label": "Auxiliar San Marcos",
+      "value": "sm01_onhand",
+      "valueSAP": "SM01",
+      "metric": "inStock"
+    },
+    {
+      "label": "Principal Solola",
+      "value": "so00_onhand",
+      "valueSAP": "SO00",
+      "metric": "inStock"
+    },
+    {
+      "label": "Auxiliar Solola",
+      "value": "so01_onhand",
+      "valueSAP": "SO01",
+      "metric": "inStock"
+    },
+    {
+      "label": "Principal Totonicapan",
+      "value": "tt00_onhand",
+      "valueSAP": "TT00",
+      "metric": "inStock"
+    },
+    {
+      "label": "Auxiliar Totonicapan",
+      "value": "tt01_onhand",
+      "valueSAP": "TT01",
+      "metric": "inStock"
+    },
+    {
+      "label": "Principal Zacapa",
+      "value": "zc00_onhand",
+      "valueSAP": "ZC00",
+      "metric": "inStock"
+    },
+    {
+      "label": "Auxiliar Zacapa",
+      "value": "zc01_onhand",
+      "valueSAP": "ZC01",
+      "metric": "inStock"
+    },
+    {
+      "label": "Refacturacion",
+      "value": "ep07_onhand",
+      "valueSAP": "EP07",
+      "metric": "inStock"
+    },
+    {
+      "label": "Resma",
+      "value": "ep09_onhand",
+      "valueSAP": "EP09",
+      "metric": "inStock"
+    }
+  ]
+}

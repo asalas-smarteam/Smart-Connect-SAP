@@ -84,7 +84,7 @@ El documento que se escribe:
 
 Es **una vez por corrida y por entrada mal configurada**, no una por producto: la normalización de
 `fieldsWareHouseHS` ocurre una sola vez en `WarehouseStockEnrichmentAdapter.enrich`, antes del bucle
-de registros. Con 54 entradas y 3 mal escritas, son 3 documentos por corrida.
+de registros. Con 60 entradas y 3 mal escritas, son 3 documentos por corrida.
 
 `MongooseSyncWarningRepository.record` ya está escrito para no tirar nunca (`try/catch` que resuelve
 `null`), así que un fallo al escribir el aviso no puede abortar el sync.
@@ -114,7 +114,7 @@ sin que el port cambie.
 
 | Alternativa | Por qué no |
 |---|---|
-| **Una entrada por bodega con un mapa `metrics: { inStock: 'a01_instock', committed: 'a01_committed' }`** | Reduce la config de AMC de 54 filas a 18, pero obliga al normalizador a aceptar dos formas de entrada (`value` plano y mapa) y a la UI admin a tener un control compuesto nuevo. El ahorro es de filas de config, que se escriben una vez; el costo es permanente y está en el código |
+| **Una entrada por bodega con un mapa `metrics: { inStock: 'a01_instock', committed: 'a01_committed' }`** | Reduce la config de AMC de 60 filas a 20, pero obliga al normalizador a aceptar dos formas de entrada (`value` plano y mapa) y a la UI admin a tener un control compuesto nuevo. El ahorro es de filas de config, que se escriben una vez; el costo es permanente y está en el código |
 | **`metrics: ['inStock','committed','ordered']` a nivel de tenant, con nombres de propiedad derivados por sufijo** | Es la config más corta, pero obliga a que las propiedades del portal se llamen exactamente según la convención, y no deja que una bodega lleve tres métricas y otra sólo una. Printer y AMC no podrían convivir con reglas distintas por bodega |
 | **Una strategy nueva, `b1_ItemWarehouseColumns`** | Duplicaría normalización de fields, exclusiones y construcción de propiedades para cambiar una sola línea: qué número sale de cada bodega. Y no cubre a Printer, que quiere columnas separadas pero sólo una de las tres |
 | **`metric` como lista sumable (`['inStock','ordered']`)** | Nadie lo pidió. Si algún día hace falta, `available` ya cubre el único combinado que existe hoy |
@@ -256,46 +256,50 @@ Nada. Su `fieldsWareHouseHS` actual sigue significando lo mismo.
 
 ### `sap_integration_amc` — `amc_warehouse_fields.json` en la raíz del repo
 
-Documento `Configuration` completo, listo para insertar, con 54 entradas: las 18 bodegas por las 3
+Documento `Configuration` completo, listo para insertar, con 60 entradas: las 20 bodegas reales de AMC por las 3
 métricas. Convención de nombres `<codigo en minusculas>_<metrica>`:
 
 ```json
 {
   "key": "fieldsWareHouseHS",
   "value": [
-    { "label": "A01 En stock",     "value": "a01_instock",   "valueSAP": "A01", "metric": "inStock" },
-    { "label": "A01 Comprometido", "value": "a01_committed", "valueSAP": "A01", "metric": "committed" },
-    { "label": "A01 Solicitado",   "value": "a01_ordered",   "valueSAP": "A01", "metric": "ordered" }
+    { "label": "CENTRAL En stock",     "value": "a0002_instock",   "valueSAP": "ALM-0002", "metric": "inStock" },
+    { "label": "CENTRAL Comprometido", "value": "a0002_committed", "valueSAP": "ALM-0002", "metric": "committed" },
+    { "label": "CENTRAL Solicitado",   "value": "a0002_ordered",   "valueSAP": "ALM-0002", "metric": "ordered" }
   ]
 }
 ```
 
-Las 18 bodegas son `A01`, `A02`, `B01`–`B15` y `PA`. **Vienen del payload del producto
-`P27020056`, no del catálogo de bodegas de AMC**: si AMC tiene bodegas que no aparecen en ese
-producto, faltan en el archivo y hay que agregarlas a mano con el mismo patrón de tres filas.
+Las 20 bodegas son `ALM-0001`–`ALM-0018` más `ALM-9998` (INSUMOS) y `ALM-9999` (PROVEEDURIA),
+tomadas del `fieldsWareHouseHS` real de AMC, entregado por el dueño del proyecto el 2026-08-21.
 
-Las 54 propiedades numéricas tienen que existir en el portal **antes** del primer sync, y tienen que
+**Corrección de una versión anterior de este spec:** el archivo se generó primero con 18
+bodegas `A01`/`A02`/`B01`–`B15`/`PA`, sacadas del payload del producto `P27020056`. Esas **no**
+eran las bodegas de AMC. El riesgo estaba marcado acá mismo y se confirmó; el archivo actual
+sale del catálogo real.
+
+Las 60 propiedades numéricas tienen que existir en el portal **antes** del primer sync, y tienen que
 existir **en dos tipos de objeto, no uno**: la misma config alimenta tanto el sync de productos como
 el de precios de line items (`SyncLineItemPrices.js:274` →
 `TenantLineItemPriceConfigRepository.js:186` (`getHubspotWarehouseStockPropertiesForTenant`) →
 `HubspotLineItemPriceClient.js:69`, donde el resultado se derrama con spread dentro de `properties`
 de **cada line item**, y también en `:90` dentro del payload de productos). El modo de fallo es
 distinto en cada camino: en productos, una propiedad inexistente hace fallar el lote de 100 completo
-en `batchCreateProducts`; en precios, el siguiente webhook de line items manda las 54 propiedades
+en `batchCreateProducts`; en precios, el siguiente webhook de line items manda las 60 propiedades
 nuevas dentro de cada line item y, si no existen **como propiedades de line item** en el portal,
 HubSpot responde 400 y el lote entero de actualización de precios falla — no queda una columna
 vacía, queda el precio del negocio sin actualizar. Las propiedades actuales de AMC (`*_stock`) ya
-existen como line item porque ese camino ya venía corriendo; los nombres nuevos (`a01_instock`,
-`a01_committed`, `a01_ordered`, etc.) no, y hay que crearlos ahí también antes de aplicar esta config.
+existen como line item porque ese camino ya venía corriendo; los nombres nuevos (`a0002_instock`,
+`a0002_committed`, `a0002_ordered`, etc.) no, y hay que crearlos ahí también antes de aplicar esta config.
 
-La cuarta columna acumulativa de AMC es una propiedad calculada del portal que suma las 18
+La cuarta columna acumulativa de AMC es una propiedad calculada del portal que suma las 20
 `*_instock`. No sale de este código.
 
 ### Rollout: renombrar deja las columnas viejas congeladas
 
-AMC hoy tiene columnas tipo `a01_stock`. Al reemplazar su `fieldsWareHouseHS` por
-`amc_warehouse_fields.json`, que usa `a01_instock`/`a01_committed`/`a01_ordered`, la propiedad
-`a01_stock` deja de aparecer en el payload. HubSpot no vacía una propiedad que dejó de recibir:
+AMC hoy tiene 20 columnas tipo `a0002_stock`. Al reemplazar su `fieldsWareHouseHS` por
+`amc_warehouse_fields.json`, que usa `a0002_instock`/`a0002_committed`/`a0002_ordered`, la
+propiedad `a0002_stock` deja de aparecer en el payload. HubSpot no vacía una propiedad que dejó de recibir:
 conserva el último valor sincronizado. Un vendedor que filtre o reportee por la columna vieja ve el
 inventario del día del cambio, para siempre, sin ninguna señal de que está muerta — el mismo tipo de
 daño que ya se rechazó arriba para una `metric` inválida (un número plausible pero equivocado que
