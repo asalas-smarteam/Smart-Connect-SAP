@@ -167,4 +167,11 @@ describe('sap-sync composition (verificacion textual del cableado)', () => {
   it('valida el adaptador contra SapRecordEnricherPort', () => {
     expect(source).toMatch(/BatchExpiryEnrichmentAdapter[\s\S]{0,400}?SapRecordEnricherPort/);
   });
+
+  it('inyecta syncWarningRepository en WarehouseStockEnrichmentAdapter', () => {
+    expect(source).toMatch(/import MongooseSyncWarningRepository from/);
+    expect(source).toMatch(
+      /new WarehouseStockEnrichmentAdapter\(\{[\s\S]{0,400}?syncWarningRepository:\s*new MongooseSyncWarningRepository\(\)/
+    );
+  });
 });
