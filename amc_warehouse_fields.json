@@ -1,0 +1,329 @@
+{
+  "key": "fieldsWareHouseHS",
+  "value": [
+    {
+      "label": "A01 En stock",
+      "value": "a01_instock",
+      "valueSAP": "A01",
+      "metric": "inStock"
+    },
+    {
+      "label": "A01 Comprometido",
+      "value": "a01_committed",
+      "valueSAP": "A01",
+      "metric": "committed"
+    },
+    {
+      "label": "A01 Solicitado",
+      "value": "a01_ordered",
+      "valueSAP": "A01",
+      "metric": "ordered"
+    },
+    {
+      "label": "A02 En stock",
+      "value": "a02_instock",
+      "valueSAP": "A02",
+      "metric": "inStock"
+    },
+    {
+      "label": "A02 Comprometido",
+      "value": "a02_committed",
+      "valueSAP": "A02",
+      "metric": "committed"
+    },
+    {
+      "label": "A02 Solicitado",
+      "value": "a02_ordered",
+      "valueSAP": "A02",
+      "metric": "ordered"
+    },
+    {
+      "label": "B01 En stock",
+      "value": "b01_instock",
+      "valueSAP": "B01",
+      "metric": "inStock"
+    },
+    {
+      "label": "B01 Comprometido",
+      "value": "b01_committed",
+      "valueSAP": "B01",
+      "metric": "committed"
+    },
+    {
+      "label": "B01 Solicitado",
+      "value": "b01_ordered",
+      "valueSAP": "B01",
+      "metric": "ordered"
+    },
+    {
+      "label": "B02 En stock",
+      "value": "b02_instock",
+      "valueSAP": "B02",
+      "metric": "inStock"
+    },
+    {
+      "label": "B02 Comprometido",
+      "value": "b02_committed",
+      "valueSAP": "B02",
+      "metric": "committed"
+    },
+    {
+      "label": "B02 Solicitado",
+      "value": "b02_ordered",
+      "valueSAP": "B02",
+      "metric": "ordered"
+    },
+    {
+      "label": "B03 En stock",
+      "value": "b03_instock",
+      "valueSAP": "B03",
+      "metric": "inStock"
+    },
+    {
+      "label": "B03 Comprometido",
+      "value": "b03_committed",
+      "valueSAP": "B03",
+      "metric": "committed"
+    },
+    {
+      "label": "B03 Solicitado",
+      "value": "b03_ordered",
+      "valueSAP": "B03",
+      "metric": "ordered"
+    },
+    {
+      "label": "B04 En stock",
+      "value": "b04_instock",
+      "valueSAP": "B04",
+      "metric": "inStock"
+    },
+    {
+      "label": "B04 Comprometido",
+      "value": "b04_committed",
+      "valueSAP": "B04",
+      "metric": "committed"
+    },
+    {
+      "label": "B04 Solicitado",
+      "value": "b04_ordered",
+      "valueSAP": "B04",
+      "metric": "ordered"
+    },
+    {
+      "label": "B05 En stock",
+      "value": "b05_instock",
+      "valueSAP": "B05",
+      "metric": "inStock"
+    },
+    {
+      "label": "B05 Comprometido",
+      "value": "b05_committed",
+      "valueSAP": "B05",
+      "metric": "committed"
+    },
+    {
+      "label": "B05 Solicitado",
+      "value": "b05_ordered",
+      "valueSAP": "B05",
+      "metric": "ordered"
+    },
+    {
+      "label": "B06 En stock",
+      "value": "b06_instock",
+      "valueSAP": "B06",
+      "metric": "inStock"
+    },
+    {
+      "label": "B06 Comprometido",
+      "value": "b06_committed",
+      "valueSAP": "B06",
+      "metric": "committed"
+    },
+    {
+      "label": "B06 Solicitado",
+      "value": "b06_ordered",
+      "valueSAP": "B06",
+      "metric": "ordered"
+    },
+    {
+      "label": "B07 En stock",
+      "value": "b07_instock",
+      "valueSAP": "B07",
+      "metric": "inStock"
+    },
+    {
+      "label": "B07 Comprometido",
+      "value": "b07_committed",
+      "valueSAP": "B07",
+      "metric": "committed"
+    },
+    {
+      "label": "B07 Solicitado",
+      "value": "b07_ordered",
+      "valueSAP": "B07",
+      "metric": "ordered"
+    },
+    {
+      "label": "B08 En stock",
+      "value": "b08_instock",
+      "valueSAP": "B08",
+      "metric": "inStock"
+    },
+    {
+      "label": "B08 Comprometido",
+      "value": "b08_committed",
+      "valueSAP": "B08",
+      "metric": "committed"
+    },
+    {
+      "label": "B08 Solicitado",
+      "value": "b08_ordered",
+      "valueSAP": "B08",
+      "metric": "ordered"
+    },
+    {
+      "label": "B09 En stock",
+      "value": "b09_instock",
+      "valueSAP": "B09",
+      "metric": "inStock"
+    },
+    {
+      "label": "B09 Comprometido",
+      "value": "b09_committed",
+      "valueSAP": "B09",
+      "metric": "committed"
+    },
+    {
+      "label": "B09 Solicitado",
+      "value": "b09_ordered",
+      "valueSAP": "B09",
+      "metric": "ordered"
+    },
+    {
+      "label": "B10 En stock",
+      "value": "b10_instock",
+      "valueSAP": "B10",
+      "metric": "inStock"
+    },
+    {
+      "label": "B10 Comprometido",
+      "value": "b10_committed",
+      "valueSAP": "B10",
+      "metric": "committed"
+    },
+    {
+      "label": "B10 Solicitado",
+      "value": "b10_ordered",
+      "valueSAP": "B10",
+      "metric": "ordered"
+    },
+    {
+      "label": "B11 En stock",
+      "value": "b11_instock",
+      "valueSAP": "B11",
+      "metric": "inStock"
+    },
+    {
+      "label": "B11 Comprometido",
+      "value": "b11_committed",
+      "valueSAP": "B11",
+      "metric": "committed"
+    },
+    {
+      "label": "B11 Solicitado",
+      "value": "b11_ordered",
+      "valueSAP": "B11",
+      "metric": "ordered"
+    },
+    {
+      "label": "B12 En stock",
+      "value": "b12_instock",
+      "valueSAP": "B12",
+      "metric": "inStock"
+    },
+    {
+      "label": "B12 Comprometido",
+      "value": "b12_committed",
+      "valueSAP": "B12",
+      "metric": "committed"
+    },
+    {
+      "label": "B12 Solicitado",
+      "value": "b12_ordered",
+      "valueSAP": "B12",
+      "metric": "ordered"
+    },
+    {
+      "label": "B13 En stock",
+      "value": "b13_instock",
+      "valueSAP": "B13",
+      "metric": "inStock"
+    },
+    {
+      "label": "B13 Comprometido",
+      "value": "b13_committed",
+      "valueSAP": "B13",
+      "metric": "committed"
+    },
+    {
+      "label": "B13 Solicitado",
+      "value": "b13_ordered",
+      "valueSAP": "B13",
+      "metric": "ordered"
+    },
+    {
+      "label": "B14 En stock",
+      "value": "b14_instock",
+      "valueSAP": "B14",
+      "metric": "inStock"
+    },
+    {
+      "label": "B14 Comprometido",
+      "value": "b14_committed",
+      "valueSAP": "B14",
+      "metric": "committed"
+    },
+    {
+      "label": "B14 Solicitado",
+      "value": "b14_ordered",
+      "valueSAP": "B14",
+      "metric": "ordered"
+    },
+    {
+      "label": "B15 En stock",
+      "value": "b15_instock",
+      "valueSAP": "B15",
+      "metric": "inStock"
+    },
+    {
+      "label": "B15 Comprometido",
+      "value": "b15_committed",
+      "valueSAP": "B15",
+      "metric": "committed"
+    },
+    {
+      "label": "B15 Solicitado",
+      "value": "b15_ordered",
+      "valueSAP": "B15",
+      "metric": "ordered"
+    },
+    {
+      "label": "PA En stock",
+      "value": "pa_instock",
+      "valueSAP": "PA",
+      "metric": "inStock"
+    },
+    {
+      "label": "PA Comprometido",
+      "value": "pa_committed",
+      "valueSAP": "PA",
+      "metric": "committed"
+    },
+    {
+      "label": "PA Solicitado",
+      "value": "pa_ordered",
+      "valueSAP": "PA",
+      "metric": "ordered"
+    }
+  ]
+}
