@@ -214,6 +214,10 @@ export class SyncSapConfigToHubspot {
           mappedRecords: mappedRecordsWithRawSap,
           objectType,
           tenantModels: tenantContext?.tenantModels,
+          // Para que el SyncWarning de una metric mal configurada quede atado a
+          // esta corrida y a este tenant.
+          clientConfigId,
+          syncLogId: syncLog?.id ?? syncLog?._id ?? null,
         });
       }
 
