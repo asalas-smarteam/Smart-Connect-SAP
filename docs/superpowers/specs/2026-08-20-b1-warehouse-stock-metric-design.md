@@ -120,7 +120,7 @@ sin que el port cambie.
 | **`metric` como lista sumable (`['inStock','ordered']`)** | Nadie lo pidió. Si algún día hace falta, `available` ya cubre el único combinado que existe hoy |
 | **Métrica inválida → `console.error` y nada más** | Fue el diseño inicial y el dueño del proyecto lo rechazó: un log se pierde. El aviso tiene que quedar en una colección consultable |
 | **Métrica inválida → cae a `available`** | Escribe un número plausible pero equivocado en una columna de inventario. Peor que no escribir nada, porque nadie lo detecta |
-| **Métrica inválida → aborta la corrida** | Una config mal escrita en una bodega de 54 dejaría al tenant sin sincronizar nombre y precio de ningún producto. El resto de los enrichers ya está escrito para degradar, no para abortar |
+| **Métrica inválida → aborta la corrida** | Una config mal escrita en una bodega de 60 dejaría al tenant sin sincronizar nombre y precio de ningún producto. El resto de los enrichers ya está escrito para degradar, no para abortar |
 
 El campo `metric` por entrada gana porque es el calco del eje que la strategy hermana de S/4 ya
 tiene (`stockType` por field): el mismo lugar en la config, la misma granularidad, ninguna strategy
