@@ -13,7 +13,8 @@
 ## Global Constraints
 
 - **Sólo SAP Business One.** `S4PlantStorageLocationStrategy` no se toca. Su eje equivalente es `stockType` por field.
-- **`tests/unit/domain/b1ItemWarehouseStrategy.test.js` y `tests/unit/warehouseStock.test.js` tienen que pasar sin editar ni una línea.** Es la prueba de regresión de que Distelsa y Noelito no se mueven. Si una tarea obliga a tocarlos, la tarea está mal implementada.
+- **`tests/unit/warehouseStock.test.js` tiene que pasar sin editar ni una línea.** Es la prueba de regresión de que Distelsa y Noelito no se mueven, y ninguna tarea de este plan lo toca. Si una tarea obliga a editarlo, la tarea está mal implementada.
+- **`tests/unit/domain/b1ItemWarehouseStrategy.test.js` sí se edita**, pero sólo para (a) agregar casos nuevos y (b) el cambio puntual que la Task 2 detalla: sumar `metric: 'available'` a cuatro `toEqual` preexistentes, porque el retorno de `normalizeB1WarehouseFields` gana esa clave. Ninguna otra edición a los tests que ya estaban es aceptable — cambiar un valor esperado o borrar un caso es señal de que la implementación cambió comportamiento existente.
 - **Nunca correr `npm test` pelado.** `jest.config.js` no tiene `testPathIgnorePatterns`, así que un run sin ruta levanta también los tests de `.claude/worktrees/**` e infla la suite de ~160 a ~620 archivos, con fallos que no son de esta rama. Usar siempre una ruta: `npm test -- tests/unit/...`.
 - **Trabajar en el checkout principal** `C:\Users\ale_1\OneDrive\Escritorio\Proyectos\SAP`, rama `feat/b1-warehouse-stock-metric`, que ya existe con el spec commiteado. Hay trabajo sin commitear de otra feature (listas de precios S/4) en el working tree: **nunca hacer `git add -A` ni `git add .`**, siempre los archivos por nombre.
 - **`available` no cambia de fórmula:** sigue siendo `InStock - Committed + Ordered`. No se agrega redondeo a ninguna métrica.
