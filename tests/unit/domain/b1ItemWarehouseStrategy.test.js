@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import {
   B1ItemWarehouseStrategy,
   buildB1WarehouseStockProperties,
@@ -23,13 +24,13 @@ describe('normalizeB1WarehouseFields', () => {
   it('uses valueSAP as the warehouse code when present', () => {
     expect(normalizeB1WarehouseFields([
       { label: 'DISTELSA', value: 'distelsa_stock', valueSAP: '01' },
-    ])).toEqual([{ warehouseCode: '01', propertyName: 'distelsa_stock' }]);
+    ])).toEqual([{ warehouseCode: '01', propertyName: 'distelsa_stock', metric: 'available' }]);
   });
 
   it('falls back to deriving the code from a *_stock property name', () => {
     expect(normalizeB1WarehouseFields([
       { label: 'Entrepiso-T1', value: 'A01_stock' },
-    ])).toEqual([{ warehouseCode: 'A01', propertyName: 'A01_stock' }]);
+    ])).toEqual([{ warehouseCode: 'A01', propertyName: 'A01_stock', metric: 'available' }]);
   });
 
   it('drops a padded property name (the *_stock fallback regex is anchored) and an empty one', () => {
@@ -39,18 +40,81 @@ describe('normalizeB1WarehouseFields', () => {
       { label: 'PVC', value: ' B10_stock ' },
       { label: 'Duplicado', value: 'B10_stock' },
       { label: 'Inválido', value: '' },
-    ])).toEqual([{ warehouseCode: 'B10', propertyName: 'B10_stock' }]);
+    ])).toEqual([{ warehouseCode: 'B10', propertyName: 'B10_stock', metric: 'available' }]);
   });
 
   it('dedupes two entries resolving to the same warehouseCode + propertyName, keeping the first', () => {
     expect(normalizeB1WarehouseFields([
       { label: 'A', value: 'b10_stock', valueSAP: 'B10' },
       { label: 'B (duplicate, different case)', value: 'B10_stock', valueSAP: 'B10' },
-    ])).toEqual([{ warehouseCode: 'B10', propertyName: 'b10_stock' }]);
+    ])).toEqual([{ warehouseCode: 'B10', propertyName: 'b10_stock', metric: 'available' }]);
   });
 
   it('returns [] for non-array input', () => {
     expect(normalizeB1WarehouseFields('B10_stock')).toEqual([]);
+  });
+
+  it('defaults a field with no metric to available', () => {
+    expect(normalizeB1WarehouseFields([
+      { label: 'A01', value: 'a01_stock', valueSAP: 'A01' },
+    ])).toEqual([{ warehouseCode: 'A01', propertyName: 'a01_stock', metric: 'available' }]);
+  });
+
+  it('resolves the metric to its canonical name', () => {
+    expect(normalizeB1WarehouseFields([
+      { label: 'A01 en stock', value: 'a01_instock', valueSAP: 'A01', metric: 'InStock' },
+    ])).toEqual([{ warehouseCode: 'A01', propertyName: 'a01_instock', metric: 'inStock' }]);
+  });
+
+  it('keeps three entries for the same warehouse with different metrics', () => {
+    expect(normalizeB1WarehouseFields([
+      { value: 'a01_instock', valueSAP: 'A01', metric: 'inStock' },
+      { value: 'a01_committed', valueSAP: 'A01', metric: 'committed' },
+      { value: 'a01_ordered', valueSAP: 'A01', metric: 'ordered' },
+    ])).toEqual([
+      { warehouseCode: 'A01', propertyName: 'a01_instock', metric: 'inStock' },
+      { warehouseCode: 'A01', propertyName: 'a01_committed', metric: 'committed' },
+      { warehouseCode: 'A01', propertyName: 'a01_ordered', metric: 'ordered' },
+    ]);
+  });
+
+  it('drops an entry with an unsupported metric and reports the raw value', () => {
+    const onInvalidMetric = jest.fn();
+
+    const fields = normalizeB1WarehouseFields([
+      { value: 'a01_instock', valueSAP: 'A01', metric: 'inStok' },
+      { value: 'a02_instock', valueSAP: 'A02', metric: 'inStock' },
+    ], { onInvalidMetric });
+
+    expect(fields).toEqual([
+      { warehouseCode: 'A02', propertyName: 'a02_instock', metric: 'inStock' },
+    ]);
+    expect(onInvalidMetric).toHaveBeenCalledTimes(1);
+    expect(onInvalidMetric).toHaveBeenCalledWith({
+      propertyName: 'a01_instock',
+      warehouseCode: 'A01',
+      metric: 'inStok',
+    });
+  });
+
+  it('drops an unsupported metric without throwing when no reporter is passed', () => {
+    expect(() => normalizeB1WarehouseFields([
+      { value: 'a01_instock', valueSAP: 'A01', metric: 'inStok' },
+    ])).not.toThrow();
+    expect(normalizeB1WarehouseFields([
+      { value: 'a01_instock', valueSAP: 'A01', metric: 'inStok' },
+    ])).toEqual([]);
+  });
+
+  it('does not dedupe two entries that differ only by metric', () => {
+    // Config erronea del cliente (dos metricas a la MISMA propiedad). Sobreviven
+    // las dos a la normalizacion y el reduce de buildB1WarehouseStockProperties
+    // deja ganar a la ultima, igual que hoy con dos bodegas apuntando a una
+    // sola propiedad.
+    expect(normalizeB1WarehouseFields([
+      { value: 'a01_x', valueSAP: 'A01', metric: 'inStock' },
+      { value: 'a01_x', valueSAP: 'A01', metric: 'ordered' },
+    ])).toHaveLength(2);
   });
 });
 

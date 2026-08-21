@@ -21,6 +21,9 @@ function resolveWarehouseCodeFromPropertyName(propertyName) {
   return match?.[1] ?? '';
 }
 
+// Devuelve `metric: null` en vez de descartar la entrada acá, para que el
+// llamador pueda reportar el propertyName y la bodega en el aviso antes de
+// tirarla.
 function resolveWarehouseField(field) {
   const propertyName = field?.value;
 
@@ -34,7 +37,11 @@ function resolveWarehouseField(field) {
     return null;
   }
 
-  return { warehouseCode: String(rawWarehouseCode).toUpperCase(), propertyName };
+  return {
+    warehouseCode: String(rawWarehouseCode).toUpperCase(),
+    propertyName,
+    metric: normalizeB1StockMetric(field?.metric),
+  };
 }
 
 export function getWarehouseAvailableStock(warehouse) {
@@ -79,7 +86,7 @@ export function getWarehouseMetricValue(warehouse, metric = DEFAULT_B1_STOCK_MET
   }
 }
 
-export function normalizeB1WarehouseFields(value) {
+export function normalizeB1WarehouseFields(value, { onInvalidMetric } = {}) {
   if (!Array.isArray(value)) {
     return DEFAULT_WAREHOUSE_FIELDS;
   }
@@ -94,15 +101,25 @@ export function normalizeB1WarehouseFields(value) {
       return;
     }
 
-    const { warehouseCode, propertyName } = warehouseField;
-    const dedupeKey = `${warehouseCode}:${propertyName.toLowerCase()}`;
+    const { warehouseCode, propertyName, metric } = warehouseField;
+
+    if (!metric) {
+      onInvalidMetric?.({ propertyName, warehouseCode, metric: field?.metric });
+      return;
+    }
+
+    // La metrica entra en la clave: la misma bodega puede aportar tres
+    // propiedades distintas. Para una config sin metric el valor es siempre la
+    // constante 'available', asi que la clave es equivalente a la de antes y el
+    // comportamiento no se mueve.
+    const dedupeKey = `${warehouseCode}:${metric}:${propertyName.toLowerCase()}`;
 
     if (seen.has(dedupeKey)) {
       return;
     }
 
     seen.add(dedupeKey);
-    normalizedFields.push({ warehouseCode, propertyName });
+    normalizedFields.push({ warehouseCode, propertyName, metric });
   });
 
   return normalizedFields;
@@ -172,8 +189,8 @@ export function getAvailableStockForB1Warehouse(warehouseItems, warehouseCode) {
 }
 
 export class B1ItemWarehouseStrategy {
-  normalizeFields(rawValue) {
-    return normalizeB1WarehouseFields(rawValue);
+  normalizeFields(rawValue, options) {
+    return normalizeB1WarehouseFields(rawValue, options);
   }
 
   normalizeExclusions(rawValue) {
