@@ -5,6 +5,11 @@
 // src/infrastructure/hubspot/warehouseStock.js; that module is now a thin
 // wrapper re-exporting these functions so no existing import breaks.
 
+import {
+  B1_STOCK_METRICS,
+  DEFAULT_B1_STOCK_METRIC,
+} from '../warehouse-stock-strategy.constants.js';
+
 const DEFAULT_WAREHOUSE_FIELDS = [];
 
 function resolveWarehouseCodeFromPropertyName(propertyName) {
@@ -38,6 +43,40 @@ export function getWarehouseAvailableStock(warehouse) {
   const ordered = Number(warehouse?.Ordered ?? 0);
 
   return inStock - committed + ordered;
+}
+
+// La comparacion es en minusculas para que el cliente pueda escribir la metrica
+// tal como la ve en el JSON de SAP ("InStock") o en minusculas, sin que una u
+// otra forma se descarte.
+const METRIC_BY_LOWERCASE = new Map(
+  Object.values(B1_STOCK_METRICS).map((metric) => [metric.toLowerCase(), metric])
+);
+
+export function normalizeB1StockMetric(raw) {
+  const value = String(raw ?? '').trim();
+
+  if (!value) {
+    return DEFAULT_B1_STOCK_METRIC;
+  }
+
+  return METRIC_BY_LOWERCASE.get(value.toLowerCase()) ?? null;
+}
+
+// El default del switch es `available` a proposito: un field armado a mano sin
+// metric (la forma historica, { warehouseCode, propertyName }) tiene que seguir
+// dando el mismo numero que antes. Una metric invalida nunca llega hasta aca --
+// normalizeB1WarehouseFields ya descarto esa entrada.
+export function getWarehouseMetricValue(warehouse, metric = DEFAULT_B1_STOCK_METRIC) {
+  switch (metric) {
+    case B1_STOCK_METRICS.IN_STOCK:
+      return Number(warehouse?.InStock ?? 0);
+    case B1_STOCK_METRICS.COMMITTED:
+      return Number(warehouse?.Committed ?? 0);
+    case B1_STOCK_METRICS.ORDERED:
+      return Number(warehouse?.Ordered ?? 0);
+    default:
+      return getWarehouseAvailableStock(warehouse);
+  }
 }
 
 export function normalizeB1WarehouseFields(value) {

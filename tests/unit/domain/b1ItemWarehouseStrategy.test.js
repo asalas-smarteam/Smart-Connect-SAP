@@ -3,7 +3,9 @@ import {
   buildB1WarehouseStockProperties,
   getAvailableStockForB1Warehouse,
   getWarehouseAvailableStock,
+  getWarehouseMetricValue,
   normalizeB1ExcludedWarehouses,
+  normalizeB1StockMetric,
   normalizeB1WarehouseFields,
 } from '../../../src/domain/warehouses/strategies/b1-item-warehouse.strategy.js';
 
@@ -137,5 +139,59 @@ describe('B1ItemWarehouseStrategy', () => {
 
     ['normalizeFields', 'normalizeExclusions', 'requiresRemoteFetch', 'buildQueryTargets', 'buildIndex', 'buildProperties']
       .forEach((method) => expect(typeof strategy[method]).toBe('function'));
+  });
+});
+
+describe('normalizeB1StockMetric', () => {
+  it('defaults to available when the metric is absent or blank', () => {
+    expect(normalizeB1StockMetric(undefined)).toBe('available');
+    expect(normalizeB1StockMetric(null)).toBe('available');
+    expect(normalizeB1StockMetric('')).toBe('available');
+    expect(normalizeB1StockMetric('   ')).toBe('available');
+  });
+
+  it('matches case-insensitively and trims, returning the canonical name', () => {
+    expect(normalizeB1StockMetric('InStock')).toBe('inStock');
+    expect(normalizeB1StockMetric('instock')).toBe('inStock');
+    expect(normalizeB1StockMetric(' inStock ')).toBe('inStock');
+    expect(normalizeB1StockMetric('COMMITTED')).toBe('committed');
+    expect(normalizeB1StockMetric('Ordered')).toBe('ordered');
+    expect(normalizeB1StockMetric('available')).toBe('available');
+  });
+
+  it('returns null for a metric that does not exist', () => {
+    expect(normalizeB1StockMetric('inStok')).toBeNull();
+    expect(normalizeB1StockMetric('total')).toBeNull();
+    expect(normalizeB1StockMetric('in stock')).toBeNull();
+  });
+});
+
+describe('getWarehouseMetricValue', () => {
+  const warehouse = { InStock: 7, Committed: 1, Ordered: 2 };
+
+  it('returns the raw SAP field for each separate metric', () => {
+    expect(getWarehouseMetricValue(warehouse, 'inStock')).toBe(7);
+    expect(getWarehouseMetricValue(warehouse, 'committed')).toBe(1);
+    expect(getWarehouseMetricValue(warehouse, 'ordered')).toBe(2);
+  });
+
+  it('returns InStock - Committed + Ordered for available', () => {
+    expect(getWarehouseMetricValue(warehouse, 'available')).toBe(8);
+  });
+
+  it('treats a legacy field with no metric as available', () => {
+    expect(getWarehouseMetricValue(warehouse, undefined)).toBe(8);
+  });
+
+  it('treats a missing warehouse as zero for every metric', () => {
+    ['available', 'inStock', 'committed', 'ordered'].forEach((metric) => {
+      expect(getWarehouseMetricValue(undefined, metric)).toBe(0);
+    });
+  });
+
+  it('treats a missing SAP field as zero', () => {
+    expect(getWarehouseMetricValue({ InStock: 5 }, 'committed')).toBe(0);
+    expect(getWarehouseMetricValue({ InStock: 5 }, 'ordered')).toBe(0);
+    expect(getWarehouseMetricValue({ InStock: 5 }, 'available')).toBe(5);
   });
 });
