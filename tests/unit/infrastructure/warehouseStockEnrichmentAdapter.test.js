@@ -193,3 +193,162 @@ describe('WarehouseStockEnrichmentAdapter', () => {
     expect(silentLogger.error).toHaveBeenCalled();
   });
 });
+
+function buildB1Strategy({ invalidEntries = [], fields = [{ warehouseCode: 'A01', propertyName: 'a01_stock', metric: 'available' }] } = {}) {
+  return {
+    normalizeFields: jest.fn((rawValue, { onInvalidMetric } = {}) => {
+      invalidEntries.forEach((entry) => onInvalidMetric?.(entry));
+      return fields;
+    }),
+    normalizeExclusions: jest.fn().mockReturnValue([]),
+    requiresRemoteFetch: jest.fn().mockReturnValue(false),
+    buildProperties: jest.fn().mockReturnValue({ a01_stock: 5 }),
+  };
+}
+
+function buildSyncWarningRepository() {
+  return { record: jest.fn().mockResolvedValue({ _id: 'warn-1' }) };
+}
+
+describe('WarehouseStockEnrichmentAdapter — avisos de metric invalida', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  const invalid = [
+    { propertyName: 'a01_instock', warehouseCode: 'A01', metric: 'inStok' },
+    { propertyName: 'a02_instock', warehouseCode: 'A02', metric: 'total' },
+  ];
+
+  it('records one SyncWarning per misconfigured entry', async () => {
+    const syncWarningRepository = buildSyncWarningRepository();
+    const strategy = buildB1Strategy({ invalidEntries: invalid });
+    const adapter = new WarehouseStockEnrichmentAdapter({
+      strategyFactory: { getStrategy: jest.fn().mockReturnValue(strategy) },
+      configRepository: buildConfigRepository({ strategyName: 'b1_ItemWarehouse', rawFields: [], rawExclusions: [] }),
+      syncWarningRepository,
+      logger: silentLogger,
+    });
+
+    await adapter.enrich({
+      mappedRecords: buildRecords(1),
+      objectType: 'product',
+      tenantModels: buildTenantModels(),
+      clientConfigId: 'cfg-1',
+      syncLogId: 'log-1',
+    });
+
+    expect(syncWarningRepository.record).toHaveBeenCalledTimes(2);
+    expect(syncWarningRepository.record).toHaveBeenCalledWith(expect.objectContaining({
+      clientConfigId: 'cfg-1',
+      syncLogId: 'log-1',
+      objectType: 'product',
+      code: 'warehouse_metric_invalid',
+      message: 'Warehouse stock metric not supported: "inStok"',
+      details: {
+        propertyName: 'a01_instock',
+        warehouseCode: 'A01',
+        metric: 'inStok',
+        validMetrics: ['available', 'inStock', 'committed', 'ordered'],
+      },
+    }));
+  });
+
+  it('records once per entry, not once per product', async () => {
+    const syncWarningRepository = buildSyncWarningRepository();
+    const adapter = new WarehouseStockEnrichmentAdapter({
+      strategyFactory: { getStrategy: jest.fn().mockReturnValue(buildB1Strategy({ invalidEntries: [invalid[0]] })) },
+      configRepository: buildConfigRepository({ strategyName: 'b1_ItemWarehouse', rawFields: [], rawExclusions: [] }),
+      syncWarningRepository,
+      logger: silentLogger,
+    });
+
+    await adapter.enrich({
+      mappedRecords: buildRecords(3),
+      objectType: 'product',
+      tenantModels: buildTenantModels(),
+      clientConfigId: 'cfg-1',
+      syncLogId: 'log-1',
+    });
+
+    expect(syncWarningRepository.record).toHaveBeenCalledTimes(1);
+  });
+
+  it('records the warning even when every entry is invalid and no field survives', async () => {
+    const syncWarningRepository = buildSyncWarningRepository();
+    const adapter = new WarehouseStockEnrichmentAdapter({
+      strategyFactory: { getStrategy: jest.fn().mockReturnValue(buildB1Strategy({ invalidEntries: invalid, fields: [] })) },
+      configRepository: buildConfigRepository({ strategyName: 'b1_ItemWarehouse', rawFields: [], rawExclusions: [] }),
+      syncWarningRepository,
+      logger: silentLogger,
+    });
+    const records = buildRecords(1);
+
+    await adapter.enrich({
+      mappedRecords: records,
+      objectType: 'product',
+      tenantModels: buildTenantModels(),
+      clientConfigId: 'cfg-1',
+      syncLogId: 'log-1',
+    });
+
+    expect(syncWarningRepository.record).toHaveBeenCalledTimes(2);
+    expect(records[0].rawSapData[WAREHOUSE_STOCK_KEY]).toEqual({});
+  });
+
+  it('does not record anything when the config is fully valid', async () => {
+    const syncWarningRepository = buildSyncWarningRepository();
+    const adapter = new WarehouseStockEnrichmentAdapter({
+      strategyFactory: { getStrategy: jest.fn().mockReturnValue(buildB1Strategy()) },
+      configRepository: buildConfigRepository({ strategyName: 'b1_ItemWarehouse', rawFields: [], rawExclusions: [] }),
+      syncWarningRepository,
+      logger: silentLogger,
+    });
+
+    await adapter.enrich({
+      mappedRecords: buildRecords(1),
+      objectType: 'product',
+      tenantModels: buildTenantModels(),
+      clientConfigId: 'cfg-1',
+      syncLogId: 'log-1',
+    });
+
+    expect(syncWarningRepository.record).not.toHaveBeenCalled();
+  });
+
+  it('enriches normally when no syncWarningRepository is injected', async () => {
+    const adapter = new WarehouseStockEnrichmentAdapter({
+      strategyFactory: { getStrategy: jest.fn().mockReturnValue(buildB1Strategy({ invalidEntries: invalid })) },
+      configRepository: buildConfigRepository({ strategyName: 'b1_ItemWarehouse', rawFields: [], rawExclusions: [] }),
+      logger: silentLogger,
+    });
+    const records = buildRecords(1);
+
+    await adapter.enrich({
+      mappedRecords: records,
+      objectType: 'product',
+      tenantModels: buildTenantModels(),
+    });
+
+    expect(records[0].rawSapData[WAREHOUSE_STOCK_KEY]).toEqual({ a01_stock: 5 });
+  });
+
+  it('still writes the valid properties when recording a warning fails', async () => {
+    const syncWarningRepository = { record: jest.fn().mockRejectedValue(new Error('mongo down')) };
+    const adapter = new WarehouseStockEnrichmentAdapter({
+      strategyFactory: { getStrategy: jest.fn().mockReturnValue(buildB1Strategy({ invalidEntries: [invalid[0]] })) },
+      configRepository: buildConfigRepository({ strategyName: 'b1_ItemWarehouse', rawFields: [], rawExclusions: [] }),
+      syncWarningRepository,
+      logger: silentLogger,
+    });
+    const records = buildRecords(1);
+
+    await adapter.enrich({
+      mappedRecords: records,
+      objectType: 'product',
+      tenantModels: buildTenantModels(),
+      clientConfigId: 'cfg-1',
+      syncLogId: 'log-1',
+    });
+
+    expect(records[0].rawSapData[WAREHOUSE_STOCK_KEY]).toEqual({ a01_stock: 5 });
+  });
+});

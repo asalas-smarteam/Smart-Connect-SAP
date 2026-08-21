@@ -1,5 +1,9 @@
 import { SAP_FLAVORS } from '#domain/sap/sap-flavor.constants.js';
-import { WAREHOUSE_STOCK_KEY } from '#domain/warehouses/warehouse-stock-strategy.constants.js';
+import {
+  B1_STOCK_METRICS,
+  WAREHOUSE_METRIC_INVALID_WARNING,
+  WAREHOUSE_STOCK_KEY,
+} from '#domain/warehouses/warehouse-stock-strategy.constants.js';
 import { createSapTransport } from '../transport/sapTransportFactory.js';
 import S4StockResolver from './S4StockResolver.js';
 
@@ -17,6 +21,9 @@ export class WarehouseStockEnrichmentAdapter {
     strategyFactory,
     configRepository,
     resolverFactory = null,
+    // Opcional a proposito: sin el, el enrich sigue funcionando y el aviso solo
+    // queda en el log. Se cablea en sap-sync.composition.js.
+    syncWarningRepository = null,
     logger = console,
   }) {
     this.strategyFactory = strategyFactory;
@@ -27,10 +34,17 @@ export class WarehouseStockEnrichmentAdapter {
       || ((config) => new S4StockResolver({
         transport: createSapTransport({ sapFlavor: SAP_FLAVORS.S4, config }),
       }));
+    this.syncWarningRepository = syncWarningRepository;
     this.logger = logger;
   }
 
-  async enrich({ mappedRecords, objectType, tenantModels }) {
+  async enrich({
+    mappedRecords,
+    objectType,
+    tenantModels,
+    clientConfigId = null,
+    syncLogId = null,
+  }) {
     if (objectType !== 'product' || !tenantModels) {
       return;
     }
@@ -42,8 +56,22 @@ export class WarehouseStockEnrichmentAdapter {
         .getWarehouseStockConfig({ tenantModels });
       const strategy = this.strategyFactory.getStrategy(strategyName);
 
-      const fields = strategy.normalizeFields(rawFields);
+      // Se juntan acá y se reportan ANTES del return temprano de
+      // fields.length === 0: si todas las entradas del tenant estan mal
+      // escritas, fields queda vacio y ese return se llevaria puesto el aviso,
+      // que es justo el caso donde mas se necesita.
+      const invalidMetricFields = [];
+      const fields = strategy.normalizeFields(rawFields, {
+        onInvalidMetric: (entry) => invalidMetricFields.push(entry),
+      });
       const exclusions = strategy.normalizeExclusions(rawExclusions);
+
+      await this.recordInvalidMetricWarnings({
+        invalidMetricFields,
+        tenantModels,
+        clientConfigId,
+        syncLogId,
+      });
 
       if (fields.length === 0) {
         // No warehouses configured: every record still gets the key, as {} --
@@ -91,6 +119,60 @@ export class WarehouseStockEnrichmentAdapter {
       // must not abort the product sync -- name and price still reach
       // HubSpot, just without warehouse stock for this run.
       this.logger.error?.('Warehouse stock enrichment failed', { error: error?.message });
+    }
+  }
+
+  // Un documento de SyncWarnings por entrada mal configurada, una vez por
+  // corrida y no una por producto.
+  //
+  // El try/catch por iteracion no es redundante con el que envuelve a enrich:
+  // este metodo corre ANTES del bucle que escribe las propiedades, asi que un
+  // fallo al registrar el aviso que subiera hasta el catch de enrich se
+  // llevaria puesto el enriquecimiento de las entradas que SI estan bien.
+  // MongooseSyncWarningRepository.record ya resuelve null ante cualquier fallo;
+  // esto cubre un repositorio inyectado que no lo haga.
+  async recordInvalidMetricWarnings({
+    invalidMetricFields,
+    tenantModels,
+    clientConfigId,
+    syncLogId,
+  }) {
+    if (invalidMetricFields.length === 0) {
+      return;
+    }
+
+    this.logger.error?.('Warehouse stock metric not supported', {
+      invalidMetricFields,
+    });
+
+    if (typeof this.syncWarningRepository?.record !== 'function') {
+      return;
+    }
+
+    for (const { propertyName, warehouseCode, metric } of invalidMetricFields) {
+      try {
+        await this.syncWarningRepository.record({
+          tenantModels,
+          clientConfigId,
+          syncLogId,
+          objectType: 'product',
+          // La config es del tenant, no de un producto puntual.
+          sapId: null,
+          code: WAREHOUSE_METRIC_INVALID_WARNING,
+          message: `Warehouse stock metric not supported: "${metric}"`,
+          details: {
+            propertyName,
+            warehouseCode,
+            metric,
+            validMetrics: Object.values(B1_STOCK_METRICS),
+          },
+        });
+      } catch (error) {
+        this.logger.error?.('Warehouse stock metric warning not recorded', {
+          propertyName,
+          error: error?.message,
+        });
+      }
     }
   }
 
