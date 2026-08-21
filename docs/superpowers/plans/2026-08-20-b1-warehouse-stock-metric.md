@@ -1101,9 +1101,11 @@ Expected: PASS. Comparar el número de suites con el de `main` antes de empezar:
 
 - [ ] **Step 3: Verificar que la prueba de regresión sigue intacta**
 
-Run: `git diff main --stat -- tests/unit/warehouseStock.test.js`
+Run: `git diff main -- tests/unit/warehouseStock.test.js | grep -E "^[-+]" | grep -E ":\s*[0-9]+,?\s*$|toBe\([0-9]"`
 
-Expected: sin salida. Si aparece algo, alguna tarea cambió el comportamiento de una config existente y hay que volver atrás a averiguar cuál.
+Expected: **sin salida**. El archivo SÍ tiene un diff — las cuatro líneas de las dos aserciones de forma, autorizadas — pero ninguna línea con un valor numérico esperado puede cambiar. Si este grep devuelve algo, alguna tarea cambió el comportamiento de una config existente y hay que volver atrás a averiguar cuál.
+
+Y como control del tamaño del cambio: `git diff main --stat -- tests/unit/warehouseStock.test.js` tiene que decir exactamente `4 insertions(+), 4 deletions(-)`. Más que eso significa que se editó algo no autorizado.
 
 - [ ] **Step 4: Verificar que S/4 no se tocó**
 
