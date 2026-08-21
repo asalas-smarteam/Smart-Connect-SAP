@@ -274,11 +274,37 @@ Las 18 bodegas son `A01`, `A02`, `B01`–`B15` y `PA`. **Vienen del payload del 
 `P27020056`, no del catálogo de bodegas de AMC**: si AMC tiene bodegas que no aparecen en ese
 producto, faltan en el archivo y hay que agregarlas a mano con el mismo patrón de tres filas.
 
-Las 54 propiedades numéricas tienen que existir en el portal **antes** del primer sync: una
-propiedad inexistente hace fallar el lote de 100 completo en `batchCreateProducts`.
+Las 54 propiedades numéricas tienen que existir en el portal **antes** del primer sync, y tienen que
+existir **en dos tipos de objeto, no uno**: la misma config alimenta tanto el sync de productos como
+el de precios de line items (`SyncLineItemPrices.js:274` →
+`TenantLineItemPriceConfigRepository.js:186` (`getHubspotWarehouseStockPropertiesForTenant`) →
+`HubspotLineItemPriceClient.js:69`, donde el resultado se derrama con spread dentro de `properties`
+de **cada line item**, y también en `:90` dentro del payload de productos). El modo de fallo es
+distinto en cada camino: en productos, una propiedad inexistente hace fallar el lote de 100 completo
+en `batchCreateProducts`; en precios, el siguiente webhook de line items manda las 54 propiedades
+nuevas dentro de cada line item y, si no existen **como propiedades de line item** en el portal,
+HubSpot responde 400 y el lote entero de actualización de precios falla — no queda una columna
+vacía, queda el precio del negocio sin actualizar. Las propiedades actuales de AMC (`*_stock`) ya
+existen como line item porque ese camino ya venía corriendo; los nombres nuevos (`a01_instock`,
+`a01_committed`, `a01_ordered`, etc.) no, y hay que crearlos ahí también antes de aplicar esta config.
 
 La cuarta columna acumulativa de AMC es una propiedad calculada del portal que suma las 18
 `*_instock`. No sale de este código.
+
+### Rollout: renombrar deja las columnas viejas congeladas
+
+AMC hoy tiene columnas tipo `a01_stock`. Al reemplazar su `fieldsWareHouseHS` por
+`amc_warehouse_fields.json`, que usa `a01_instock`/`a01_committed`/`a01_ordered`, la propiedad
+`a01_stock` deja de aparecer en el payload. HubSpot no vacía una propiedad que dejó de recibir:
+conserva el último valor sincronizado. Un vendedor que filtre o reportee por la columna vieja ve el
+inventario del día del cambio, para siempre, sin ninguna señal de que está muerta — el mismo tipo de
+daño que ya se rechazó arriba para una `metric` inválida (un número plausible pero equivocado que
+nadie detecta mirando), sólo que aquí es por el lado de los nombres, no del valor.
+
+Dos salidas al aplicar la config nueva, a decidir con el dueño del proyecto antes del rollout:
+archivar o borrar `a01_stock` y las demás columnas viejas en el portal, o dejarlas vivas agregando
+una entrada más por bodega con `metric: "available"` (mismo `value` que hoy, mismo `valueSAP`) para
+que sigan recibiendo el número histórico en paralelo a las tres columnas nuevas.
 
 ### `sap_integration_printer` — sólo `InStock`
 
@@ -362,11 +388,24 @@ este cambio que no rompe ningún otro test es que esa clave no se cablee.
 `tests/unit/composition/propertiesFlagsEnricherWiring.test.js` es el precedente de cómo se afirma
 el cableado de un enricher en este repo.
 
-### Regresión: los tests actuales pasan sin modificarse
+### Regresión: lo que de verdad pasó con los tests existentes
 
-`tests/unit/domain/b1ItemWarehouseStrategy.test.js` (141 líneas) y `tests/unit/warehouseStock.test.js`
-tienen que pasar **sin editar una sola línea**. Es la prueba de que ninguna config existente cambia
-de significado.
+Los dos archivos **se editaron**, con autorización explícita del dueño del proyecto: el retorno de
+`normalizeB1WarehouseFields` ganó la clave `metric` en cada field, y `toEqual` compara objetos por
+sus claves exactas, así que cualquier assertion preexistente sobre esa forma dejó de matchear en
+cuanto la clave nueva apareció.
+
+- `tests/unit/domain/b1ItemWarehouseStrategy.test.js` creció de 141 a 347 líneas: cuatro `toEqual`
+  preexistentes recibieron `metric: 'available'`, y el resto de las líneas nuevas son los tests que
+  cubren el comportamiento agregado (`normalizeB1StockMetric`, `getWarehouseMetricValue`, los tres
+  perfiles de `buildB1WarehouseStockProperties`, etc.), no ediciones sobre assertions viejas.
+- `tests/unit/warehouseStock.test.js` cambió **exactamente 4 líneas**: las de las dos assertions que
+  afirmaban la forma del field intermedio (`{ warehouseCode, propertyName }` →
+  `{ warehouseCode, propertyName, metric: 'available' }`). Los cuatro tests de ese archivo que
+  afirman **números** están intactos: `distelsa_stock: 8` + `exhibicion_stock: 2`; `A01_stock: 8` +
+  `B10_stock: 2` + `C99_stock: 0`; los `toEqual([])` / `toEqual({})` de la entrada inválida; y
+  `getAvailableStockForWarehouse` → `7`. Esa es la prueba de regresión real: ningún número que
+  Distelsa o Noelito ya reciben en producción cambió.
 
 Correr jest **desde el checkout principal**, no desde la raíz del proyecto con los worktrees
 incluidos, o la suite se infla de ~160 a ~620 suites y aparecen fallos que no son de esta rama.
