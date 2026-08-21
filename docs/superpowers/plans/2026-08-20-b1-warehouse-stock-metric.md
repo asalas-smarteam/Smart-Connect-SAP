@@ -15,7 +15,17 @@
 - **Sólo SAP Business One.** `S4PlantStorageLocationStrategy` no se toca. Su eje equivalente es `stockType` por field.
 - **`tests/unit/warehouseStock.test.js` tiene que pasar sin editar ni una línea.** Es la prueba de regresión de que Distelsa y Noelito no se mueven, y ninguna tarea de este plan lo toca. Si una tarea obliga a editarlo, la tarea está mal implementada.
 - **`tests/unit/domain/b1ItemWarehouseStrategy.test.js` sí se edita**, pero sólo para (a) agregar casos nuevos y (b) el cambio puntual que la Task 2 detalla: sumar `metric: 'available'` a cuatro `toEqual` preexistentes, porque el retorno de `normalizeB1WarehouseFields` gana esa clave. Ninguna otra edición a los tests que ya estaban es aceptable — cambiar un valor esperado o borrar un caso es señal de que la implementación cambió comportamiento existente.
-- **Nunca correr `npm test` pelado.** `jest.config.js` no tiene `testPathIgnorePatterns`, así que un run sin ruta levanta también los tests de `.claude/worktrees/**` e infla la suite de ~160 a ~620 archivos, con fallos que no son de esta rama. Usar siempre una ruta: `npm test -- tests/unit/...`.
+- **Comando de test canónico** (medido en este entorno, Windows + Git Bash + jest 30.1.3). `npm test` **no sirve**: npm en Windows lanza `cmd.exe`, que no entiende el prefijo `NODE_OPTIONS=... jest` del script. Y `jest.config.js` no tiene `testPathIgnorePatterns`, así que sin filtro se levantan también las 6 copias del repo que viven en `.claude/worktrees/**` (977 suites en vez de 178). El filtro tiene que usar clase de caracteres para el separador, porque en Windows las rutas van con `\` y un patrón con `/` no matchea nunca:
+
+  ```bash
+  NODE_OPTIONS=--experimental-vm-modules npx jest \
+    --testPathIgnorePatterns='[\\/]node_modules[\\/]|[\\/]\.claude[\\/]' \
+    --testPathPatterns='tests[\\/]unit[\\/]domain[\\/]b1ItemWarehouseStrategy'
+  ```
+
+  Las dos opciones van con `=`: `--testPathIgnorePatterns` es una opción de array y sin `=` se traga los argumentos posicionales, corriendo la suite entera en silencio. Omitir `--testPathPatterns` corre toda la suite propia del repo.
+
+- **Baseline de fallos preexistentes, medida en `8c55830` antes de empezar: 178 suites, 5 fallando (10 tests).** Son `tests/integration/internalTenant.test.js`, `tests/unit/application/sendMappedItemsToHubspot.test.js`, `tests/unit/lineItemPriceWebhook.service.test.js`, `tests/unit/serviceLayerFlow.test.js` y `tests/unit/serviceLayerService.test.js`. Ninguna toca bodegas. "La suite en verde" en este plan significa **esas cinco y sólo esas cinco**; una sexta suite roja sí es de esta rama.
 - **Trabajar en el checkout principal** `C:\Users\ale_1\OneDrive\Escritorio\Proyectos\SAP`, rama `feat/b1-warehouse-stock-metric`, que ya existe con el spec commiteado. Hay trabajo sin commitear de otra feature (listas de precios S/4) en el working tree: **nunca hacer `git add -A` ni `git add .`**, siempre los archivos por nombre.
 - **`available` no cambia de fórmula:** sigue siendo `InStock - Committed + Ordered`. No se agrega redondeo a ninguna métrica.
 - **Nombres canónicos de las métricas, exactos:** `'available'`, `'inStock'`, `'committed'`, `'ordered'`. El `code` del warning es exactamente `'warehouse_metric_invalid'`.
@@ -104,7 +114,7 @@ describe('getWarehouseMetricValue', () => {
 
 - [ ] **Step 2: Correr los tests y verificar que fallan**
 
-Run: `npm test -- tests/unit/domain/b1ItemWarehouseStrategy.test.js`
+Run (ver el comando canónico en Global Constraints; `npm test` no funciona en este entorno): jest acotado a `tests/unit/domain/b1ItemWarehouseStrategy.test.js`
 
 Expected: FAIL. `normalizeB1StockMetric is not a function` y `getWarehouseMetricValue is not a function`.
 
@@ -201,7 +211,7 @@ export function getWarehouseMetricValue(warehouse, metric = DEFAULT_B1_STOCK_MET
 
 - [ ] **Step 5: Correr los tests y verificar que pasan**
 
-Run: `npm test -- tests/unit/domain/b1ItemWarehouseStrategy.test.js`
+Run (ver el comando canónico en Global Constraints; `npm test` no funciona en este entorno): jest acotado a `tests/unit/domain/b1ItemWarehouseStrategy.test.js`
 
 Expected: PASS, todos los tests del archivo — los nuevos y los 16 que ya estaban.
 
@@ -306,7 +316,7 @@ import { jest } from '@jest/globals';
 
 - [ ] **Step 2: Correr los tests y verificar que fallan**
 
-Run: `npm test -- tests/unit/domain/b1ItemWarehouseStrategy.test.js`
+Run (ver el comando canónico en Global Constraints; `npm test` no funciona en este entorno): jest acotado a `tests/unit/domain/b1ItemWarehouseStrategy.test.js`
 
 Expected: FAIL. Los nuevos fallan porque el retorno no trae `metric`; y los 4 tests preexistentes de `normalizeB1WarehouseFields` (líneas 21-48) **todavía pasan** porque el retorno aún no cambió.
 
@@ -403,7 +413,7 @@ El test de `B1ItemWarehouseStrategy` de la línea 127 no se toca: afirma sobre `
 
 - [ ] **Step 5: Correr los tests y verificar que pasan**
 
-Run: `npm test -- tests/unit/domain/b1ItemWarehouseStrategy.test.js tests/unit/warehouseStock.test.js`
+Run (ver el comando canónico en Global Constraints; `npm test` no funciona en este entorno): jest acotado a `tests/unit/domain/b1ItemWarehouseStrategy.test.js tests/unit/warehouseStock.test.js`
 
 Expected: PASS los dos archivos. `warehouseStock.test.js` tiene que pasar **sin haber sido editado** — es la prueba de que la firma de un argumento sigue intacta.
 
@@ -524,7 +534,7 @@ Y los casos:
 
 - [ ] **Step 2: Correr los tests y verificar que fallan**
 
-Run: `npm test -- tests/unit/domain/b1ItemWarehouseStrategy.test.js`
+Run (ver el comando canónico en Global Constraints; `npm test` no funciona en este entorno): jest acotado a `tests/unit/domain/b1ItemWarehouseStrategy.test.js`
 
 Expected: FAIL. Los perfiles AMC y Printer dan los números de la fórmula vieja: `b09_committed` sale `66` en vez de `0` y `b12_stock` sale `1400` en vez de `0`.
 
@@ -543,7 +553,7 @@ La rama de exclusión de la línea 112 no se toca: sigue escribiendo `0` antes d
 
 - [ ] **Step 4: Correr los tests y verificar que pasan**
 
-Run: `npm test -- tests/unit/domain/b1ItemWarehouseStrategy.test.js tests/unit/warehouseStock.test.js`
+Run (ver el comando canónico en Global Constraints; `npm test` no funciona en este entorno): jest acotado a `tests/unit/domain/b1ItemWarehouseStrategy.test.js tests/unit/warehouseStock.test.js`
 
 Expected: PASS los dos archivos, `warehouseStock.test.js` de nuevo sin editar.
 
@@ -739,7 +749,7 @@ describe('WarehouseStockEnrichmentAdapter — avisos de metric invalida', () => 
 
 - [ ] **Step 2: Correr los tests y verificar que fallan**
 
-Run: `npm test -- tests/unit/infrastructure/warehouseStockEnrichmentAdapter.test.js`
+Run (ver el comando canónico en Global Constraints; `npm test` no funciona en este entorno): jest acotado a `tests/unit/infrastructure/warehouseStockEnrichmentAdapter.test.js`
 
 Expected: FAIL. `record` no se llama nunca porque el adapter todavía no conoce `syncWarningRepository`.
 
@@ -866,7 +876,7 @@ Y agregar el método, después de `enrich` y antes de `applyToAllRecords`:
 
 - [ ] **Step 4: Correr los tests y verificar que pasan**
 
-Run: `npm test -- tests/unit/infrastructure/warehouseStockEnrichmentAdapter.test.js`
+Run (ver el comando canónico en Global Constraints; `npm test` no funciona en este entorno): jest acotado a `tests/unit/infrastructure/warehouseStockEnrichmentAdapter.test.js`
 
 Expected: PASS, los 6 nuevos y los 8 que ya estaban en el archivo.
 
@@ -940,7 +950,7 @@ Agregar a `tests/unit/application/syncSapConfigToHubspot.test.js`, dentro del `d
 
 - [ ] **Step 2: Correr el test y verificar que falla**
 
-Run: `npm test -- tests/unit/application/syncSapConfigToHubspot.test.js`
+Run (ver el comando canónico en Global Constraints; `npm test` no funciona en este entorno): jest acotado a `tests/unit/application/syncSapConfigToHubspot.test.js`
 
 Expected: FAIL. El objeto recibido no tiene `clientConfigId` ni `syncLogId`.
 
@@ -966,7 +976,7 @@ En `src/application/use-cases/SyncSapConfigToHubspot.js`, la llamada de la líne
 
 - [ ] **Step 4: Correr el test y verificar que pasa**
 
-Run: `npm test -- tests/unit/application/syncSapConfigToHubspot.test.js`
+Run (ver el comando canónico en Global Constraints; `npm test` no funciona en este entorno): jest acotado a `tests/unit/application/syncSapConfigToHubspot.test.js`
 
 Expected: PASS, el nuevo y los que ya estaban.
 
@@ -1006,7 +1016,7 @@ Esta es la tarea que evita el único modo de fallo silencioso del cambio: sin la
 
 - [ ] **Step 2: Correr el test y verificar que falla**
 
-Run: `npm test -- tests/unit/composition/sapSyncComposition.test.js`
+Run (ver el comando canónico en Global Constraints; `npm test` no funciona en este entorno): jest acotado a `tests/unit/composition/sapSyncComposition.test.js`
 
 Expected: FAIL en las dos aserciones: no hay import y no hay clave.
 
@@ -1034,7 +1044,7 @@ Y la clave al constructor del adapter (líneas 119-124):
 
 - [ ] **Step 4: Correr el test y verificar que pasa**
 
-Run: `npm test -- tests/unit/composition/sapSyncComposition.test.js`
+Run (ver el comando canónico en Global Constraints; `npm test` no funciona en este entorno): jest acotado a `tests/unit/composition/sapSyncComposition.test.js`
 
 Expected: PASS.
 
@@ -1081,7 +1091,7 @@ Qué bodegas de SAP se llevan a propiedades numéricas del producto en HubSpot, 
 
 - [ ] **Step 2: Correr la suite completa acotada al repo**
 
-Run: `npm test -- tests/`
+Run (ver el comando canónico en Global Constraints; `npm test` no funciona en este entorno): jest acotado a `tests/`
 
 Expected: PASS. Comparar el número de suites con el de `main` antes de empezar: tiene que ser el mismo, y `tests/unit/warehouseStock.test.js` tiene que aparecer en verde **sin haber sido modificado nunca**.
 
@@ -1108,7 +1118,7 @@ git commit -m "docs: catalogo de fieldsWareHouseHS con las cuatro metricas de B1
 
 ## Verificación final
 
-- [ ] `npm test -- tests/` en verde, con el mismo número de suites que `main`
+- [ ] jest sobre toda la suite propia del repo (sin `--testPathPatterns`) en verde contra la baseline: 5 suites rojas, las mismas cinco de Global Constraints, ninguna de bodegas
 - [ ] `git diff main --stat -- tests/unit/warehouseStock.test.js` vacío
 - [ ] `git diff main --stat -- src/domain/warehouses/strategies/s4-plant-storage-location.strategy.js` vacío
 - [ ] `grep -n "syncWarningRepository" src/composition/sap-sync.composition.js` muestra la clave dentro del bloque de `WarehouseStockEnrichmentAdapter`
