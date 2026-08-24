@@ -72,7 +72,7 @@ const start = async () => {
     const masterConnection = await connect();
     await seedDefaultSapFilters(masterConnection);
     await seedMasterClientConfigs(masterConnection);
-    await app.listen({ port: appConfig.port, host: '0.0.0.0' });
+    await app.listen({ port: appConfig.port, host: '::' });
     logger.info(`🚀 Server running on http://localhost:${appConfig.port}`);
 
   } catch (err) {

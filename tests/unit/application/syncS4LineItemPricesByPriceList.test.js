@@ -33,6 +33,7 @@ function buildDeps({
   updateLineItems = jest.fn(async () => ({ payload: { inputs: [{ id: '1' }] }, response: { results: [{ id: '1' }] } })),
   updateDealAmount = jest.fn(async () => ({ payload: {}, response: {} })),
   createSapCallRecorder,
+  notifyLineItemPriceOutcome = jest.fn(async () => {}),
 } = {}) {
   const priceListClient = {
     fetchCustomerSalesAreas: jest.fn(async () => salesAreas),
@@ -48,6 +49,7 @@ function buildDeps({
   return {
     priceListClient,
     hubspotPriceClient,
+    notifyLineItemPriceOutcome,
     useCase: new SyncS4LineItemPricesByPriceList({
       credentialRepository: {
         resolveS4PriceListConfig: jest.fn(async () => config),
@@ -59,6 +61,7 @@ function buildDeps({
       buildErrorResponseSnapshot: (error) => ({ message: error.message }),
       buildWebhookSyncErrorEntry: (entry) => entry,
       buildLineItemPriceAudit: (auditTrail) => auditTrail,
+      notifyLineItemPriceOutcome,
       dateProvider: () => new Date('2026-08-18T00:00:00.000Z'),
       logger: { warn: jest.fn(), info: jest.fn() },
       ...(createSapCallRecorder ? { createSapCallRecorder } : {}),
@@ -419,13 +422,111 @@ describe('SyncS4LineItemPricesByPriceList', () => {
     )).rejects.toThrow('does not belong to customer');
   });
 
-  it('falla cuando el cliente no tiene áreas de venta en SAP', async () => {
-    const { useCase } = buildDeps({ salesAreas: [] });
+  it('cae al área configurada y la lista default cuando el cliente no tiene áreas en SAP', async () => {
+    const { useCase, priceListClient, hubspotPriceClient } = buildDeps({
+      salesAreas: [],
+      config: {
+        conditionType: 'ZPR0',
+        defaultPriceListType: 'ZC',
+        salesArea: { salesOrganization: 'FQCR', distributionChannel: '01', division: 'SC' },
+        priceListProperty: 'lista_de_precios_sap',
+        currencyProperty: 'moneda_precio_sap',
+        priceSourceProperty: 'origen_precio_sap',
+      },
+    });
+
+    const result = await useCase.execute(
+      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
+      CONTEXT
+    );
+
+    // Las condiciones se consultan con el área de la config, no con ninguna del cliente.
+    expect(priceListClient.fetchConditionCandidates).toHaveBeenCalledWith(expect.objectContaining({
+      salesArea: { salesOrganization: 'FQCR', distributionChannel: '01', division: 'SC' },
+    }));
+    expect(result.data.salesAreaSource).toBe('configuredDefault');
+    // El origen NO puede decir customerPriceList: el cliente no tiene lista.
+    expect(result.data.lineItems[0]).toMatchObject({ Price: 1.28, priceSource: 'defaultPriceList' });
+    expect(result.data.priceListType).toBe('ZC');
+    expect(useCase.logger.warn).toHaveBeenCalledWith(expect.objectContaining({
+      msg: expect.stringContaining('customer has no sales areas in SAP'),
+    }));
+    expect(hubspotPriceClient.updateLineItems).toHaveBeenCalled();
+  });
+
+  it('falla cuando el cliente no tiene áreas y s4PriceList.salesArea no está configurada', async () => {
+    const { useCase } = buildDeps({
+      salesAreas: [],
+      config: {
+        conditionType: 'ZPR0',
+        defaultPriceListType: 'ZC',
+        salesArea: null,
+        priceListProperty: null,
+        currencyProperty: null,
+        priceSourceProperty: null,
+      },
+    });
 
     await expect(useCase.execute(
       { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
       CONTEXT
-    )).rejects.toThrow('has no sales areas');
+    )).rejects.toThrow('s4PriceList.salesArea is not configured');
+  });
+
+  it('deja nota en el deal cuando alguna línea quedó sin precio, y no cuando todas se valorizaron', async () => {
+    const conSalteada = buildDeps({
+      candidatesByMaterial: { 80000017: CANDIDATES_80000017, 99999999: [] },
+    });
+
+    await conSalteada.useCase.execute(
+      {
+        dealId: '77',
+        customer: '105049',
+        lineItems: [
+          { id: '1', itemCode: '80000017', quantity: 1 },
+          { id: '2', itemCode: '99999999', quantity: 1 },
+        ],
+      },
+      CONTEXT
+    );
+
+    expect(conSalteada.notifyLineItemPriceOutcome).toHaveBeenCalledWith(expect.objectContaining({
+      dealId: '77',
+      token: 'token',
+      body: expect.stringContaining('99999999'),
+    }));
+
+    // Todo valorizado: el builder devuelve null y no se crea ninguna nota.
+    const sinSalteadas = buildDeps();
+    await sinSalteadas.useCase.execute(
+      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
+      CONTEXT
+    );
+    expect(sinSalteadas.notifyLineItemPriceOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({ body: null })
+    );
+  });
+
+  it('deja nota con el motivo cuando la corrida falla entera', async () => {
+    const { useCase, notifyLineItemPriceOutcome } = buildDeps({
+      candidatesByMaterial: { 80000017: [] },
+    });
+
+    await expect(useCase.execute(
+      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
+      CONTEXT
+    )).rejects.toThrow('No line item prices could be resolved');
+
+    expect(notifyLineItemPriceOutcome).toHaveBeenCalledWith(expect.objectContaining({
+      dealId: '77',
+      token: 'token',
+      body: expect.stringContaining('no se pudieron actualizar'),
+    }));
+  });
+
+  it('exige notifyLineItemPriceOutcome en el constructor', () => {
+    expect(() => new SyncS4LineItemPricesByPriceList({ dateProvider: () => new Date() }))
+      .toThrow('notifyLineItemPriceOutcome is required');
   });
 
   it('saltea la línea sin tarifa y escribe las demás', async () => {
@@ -621,6 +722,7 @@ describe('SyncS4LineItemPricesByPriceList', () => {
       buildErrorResponseSnapshot: (error) => ({ message: error.message }),
       buildWebhookSyncErrorEntry: (entry) => entry,
       buildLineItemPriceAudit: (auditTrail) => auditTrail,
+      notifyLineItemPriceOutcome: jest.fn(async () => {}),
       dateProvider: () => new Date('2026-08-18T00:00:00.000Z'),
       logger: { warn: jest.fn(), info: jest.fn() },
     });

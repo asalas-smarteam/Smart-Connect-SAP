@@ -5,6 +5,9 @@ import TenantLineItemPriceConfigRepository from '#infrastructure/repositories/Te
 import { createSapTransport } from '#infrastructure/sap/transport/sapTransportFactory.js';
 import { createSapCallRecorder } from '#infrastructure/sap/sapCallRecorder.js';
 import { SAP_FLAVORS } from '#domain/sap/sap-flavor.constants.js';
+import * as hubspotClient from '#infrastructure/hubspot/hubspotClient.js';
+import { buildNotifyLineItemPriceOutcome } from '#infrastructure/hubspot/lineItemPriceNoteNotifier.service.js';
+import { getWebhookFailureNotificationConfig } from '#infrastructure/config/webhookFailureNotification.config.js';
 import logger from '#infrastructure/logger/logger.js';
 import syncLogAdapter from '#infrastructure/sync/SyncLogAdapter.js';
 import requestTenantModelsAdapter from '#infrastructure/tenants/RequestTenantModelsAdapter.js';
@@ -36,6 +39,13 @@ export function buildSyncS4LineItemPrices({ syncLogGateway } = {}) {
       : buildWebhookSyncErrorEntry,
     buildLineItemPriceAudit,
     createSapCallRecorder,
+    // Misma llave de config (`requireMessageHS`) y mismo par createNote+associate que el aviso
+    // de fallo de los webhooks de cotización: para el tenant es una sola cosa que se prende.
+    notifyLineItemPriceOutcome: buildNotifyLineItemPriceOutcome({
+      hubspotClient,
+      getWebhookFailureNotificationConfig,
+      logger,
+    }),
     // Explícito y no por default del constructor: el patrón del default silencioso ya dejó
     // dependencias sin cablear tres veces en este repo, y esta decide la fecha con la que se
     // filtra la vigencia de las condiciones en SAP.

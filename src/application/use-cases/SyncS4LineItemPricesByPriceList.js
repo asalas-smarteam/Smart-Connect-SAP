@@ -1,4 +1,5 @@
 import { resolveS4PriceForMaterial } from '#domain/prices/s4-price-resolution.service.js';
+import { buildLineItemPriceNoteBody } from '#domain/prices/lineItemPriceNote.service.js';
 import { normalizeNumber, toNonEmptyString } from '#shared/utils/string.utils.js';
 
 const NO_PRICE_REASON = 'no ZPR0 condition record for the customer price list,'
@@ -11,6 +12,14 @@ const NO_PRICE_REASON = 'no ZPR0 condition record for the customer price list,'
 // configuration_examples.md; si la propiedad del portal es un desplegable, hay que darle esta
 // opción además de las listas.
 export const PRODUCT_DEFAULT_PRICE_LIST_LABEL = 'PRODUCT_DEFAULT';
+
+// De dónde salió el área de venta con la que se consultaron las condiciones. Viaja al audit y
+// al resultado porque `salesArea` sola no distingue "es el área del cliente" de "es la de la
+// config porque el cliente no tiene ninguna", y son dos situaciones muy distintas de operar.
+export const SALES_AREA_SOURCES = Object.freeze({
+  customer: 'customerSalesArea',
+  configuredDefault: 'configuredDefault',
+});
 
 function normalizeQuantity(value) {
   const normalized = normalizeNumber(value, 0);
@@ -74,13 +83,39 @@ function matchesSalesArea(rowSalesArea, configuredSalesArea) {
 // ZD en CPDO y ZB en DPDO), así que con más de un área hay que elegir explícitamente. Con una
 // sola se usa la del cliente y la config no interviene: es el caso simple y no queremos que
 // una config vieja lo rompa.
+// Sin ninguna área NO se falla: el requerimiento del negocio es que un negocio siempre pueda
+// cotizarse, así que se usa el área de la config y la lista default. El caso aparece tanto con
+// clientes reales sin área como cuando el `idsap` del negocio trae un código que no existe en
+// S/4 (un CardCode de Business One, por ejemplo), y en ese segundo caso el precio sale igual;
+// por eso el origen del área queda en el resultado y en el audit, y se emite un warn.
 function chooseSalesAreaRow(rows, configuredSalesArea, customer) {
   if (rows.length === 0) {
-    throw new Error(`Customer ${customer} has no sales areas in SAP`);
+    // Org y canal son obligatorios: son los dos campos que entran al $filter de las condiciones
+    // (`buildValidityFilter` los exige). Sin ellos no hay consulta posible, ni con fallback.
+    if (!toNonEmptyString(configuredSalesArea?.salesOrganization)
+      || !toNonEmptyString(configuredSalesArea?.distributionChannel)) {
+      throw new Error(
+        `Customer ${customer} has no sales areas in SAP and s4PriceList.salesArea is not`
+        + ' configured (salesOrganization and distributionChannel are required) to fall back to'
+        + ' the default price list'
+      );
+    }
+
+    // A propósito SIN `PriceListType`: el cliente no tiene lista, y ponerle la de config acá
+    // haría que el `source` del precio dijera `customerPriceList` para un precio que salió del
+    // default. Sin ella, `customerPriceListType` queda null y la resolución cae al default sola.
+    return {
+      row: {
+        SalesOrganization: configuredSalesArea.salesOrganization,
+        DistributionChannel: configuredSalesArea.distributionChannel,
+        Division: configuredSalesArea.division ?? null,
+      },
+      source: SALES_AREA_SOURCES.configuredDefault,
+    };
   }
 
   if (rows.length === 1) {
-    return rows[0];
+    return { row: rows[0], source: SALES_AREA_SOURCES.customer };
   }
 
   if (!configuredSalesArea) {
@@ -110,7 +145,7 @@ function chooseSalesAreaRow(rows, configuredSalesArea, customer) {
     );
   }
 
-  return matches[0];
+  return { row: matches[0], source: SALES_AREA_SOURCES.customer };
 }
 
 export class SyncS4LineItemPricesByPriceList {
@@ -122,6 +157,7 @@ export class SyncS4LineItemPricesByPriceList {
     buildWebhookSyncErrorEntry,
     buildLineItemPriceAudit = () => null,
     createSapCallRecorder = () => ({ record: (_options, run) => run(), calls: [], droppedCalls: 0 }),
+    notifyLineItemPriceOutcome,
     dateProvider,
     logger = { warn: () => {} },
   }) {
@@ -133,6 +169,13 @@ export class SyncS4LineItemPricesByPriceList {
       throw new Error('dateProvider is required for SyncS4LineItemPricesByPriceList');
     }
 
+    // Exigida por el mismo motivo que dateProvider: un default no-op acá significa "las notas
+    // nunca se escriben" y ningún test lo distingue de la composición cableada, que es
+    // exactamente el bug que ya se colgó tres veces en este repo.
+    if (typeof notifyLineItemPriceOutcome !== 'function') {
+      throw new Error('notifyLineItemPriceOutcome is required for SyncS4LineItemPricesByPriceList');
+    }
+
     this.credentialRepository = credentialRepository;
     this.createPriceListClient = createPriceListClient;
     this.hubspotPriceClient = hubspotPriceClient;
@@ -140,6 +183,7 @@ export class SyncS4LineItemPricesByPriceList {
     this.buildWebhookSyncErrorEntry = buildWebhookSyncErrorEntry;
     this.buildLineItemPriceAudit = buildLineItemPriceAudit;
     this.createSapCallRecorder = createSapCallRecorder;
+    this.notifyLineItemPriceOutcome = notifyLineItemPriceOutcome;
     this.dateProvider = dateProvider;
     this.logger = logger;
   }
@@ -160,6 +204,9 @@ export class SyncS4LineItemPricesByPriceList {
       amount: null,
       fatalError: null,
     };
+    // Fuera del try: la nota del camino de error los necesita, y ahí ya no están en scope.
+    let hubspotToken = null;
+    let noteContext = { customer, salesArea: null, salesAreaSource: null, priceListType: null };
 
     try {
       if (!dealId) {
@@ -203,6 +250,7 @@ export class SyncS4LineItemPricesByPriceList {
         hubspotCredentials,
         tenantModels,
       });
+      hubspotToken = token;
       const sapConfig = {
         ...(typeof sapCredentials?.toObject === 'function' ? sapCredentials.toObject() : sapCredentials),
         tenantKey,
@@ -212,12 +260,24 @@ export class SyncS4LineItemPricesByPriceList {
         { target: 'sap', method: 'GET', path: '/API_BUSINESS_PARTNER/A_CustomerSalesArea', params: { customer } },
         () => priceListClient.fetchCustomerSalesAreas(customer)
       );
-      const salesAreaRow = chooseSalesAreaRow(
+      const { row: salesAreaRow, source: salesAreaSource } = chooseSalesAreaRow(
         Array.isArray(salesAreaRows) ? salesAreaRows : [],
         config.salesArea,
         customer
       );
       const salesArea = toSalesArea(salesAreaRow);
+
+      if (salesAreaSource === SALES_AREA_SOURCES.configuredDefault) {
+        this.logger.warn?.({
+          msg: 'S4 line item prices: customer has no sales areas in SAP; using the configured'
+            + ' sales area and the default price list',
+          tenantKey,
+          dealId,
+          customer,
+          salesArea,
+          defaultPriceListType: config.defaultPriceListType,
+        });
+      }
       // Vacío es un dato, no un error: 40 de los 5000 clientes revisados no tienen lista.
       //
       // Se guardan SEPARADAS la lista del cliente y la efectiva: al dominio se le pasa la del
@@ -227,6 +287,12 @@ export class SyncS4LineItemPricesByPriceList {
       const customerPriceListType = toNonEmptyString(salesAreaRow?.PriceListType)?.toUpperCase()
         ?? null;
       const effectivePriceListType = customerPriceListType ?? config.defaultPriceListType;
+      noteContext = {
+        customer,
+        salesArea,
+        salesAreaSource,
+        priceListType: effectivePriceListType,
+      };
       const date = this.dateProvider();
       const candidatesByMaterial = new Map();
       const enrichedLineItems = [];
@@ -345,6 +411,7 @@ export class SyncS4LineItemPricesByPriceList {
 
       auditTrail.rounds = [{
         salesArea,
+        salesAreaSource,
         customerPriceListType,
         effectivePriceListType,
         enrichedLineItems,
@@ -400,6 +467,20 @@ export class SyncS4LineItemPricesByPriceList {
           () => this.hubspotPriceClient.updateDealAmount({ token, dealId, totalAmount, tenantKey })
         );
 
+      // Después de las escrituras: la nota cuenta lo que YA pasó. Si algo de esto falla, el
+      // error se propaga y la nota la escribe el camino de error con el motivo real.
+      await this.notifyLineItemPriceOutcome({
+        tenantModels,
+        tenantKey,
+        token,
+        dealId,
+        body: buildLineItemPriceNoteBody({
+          ...noteContext,
+          updatedCount: enrichedLineItems.length,
+          skippedLineItems,
+        }),
+      });
+
       auditTrail.amount = {
         totalAmount,
         currencies,
@@ -412,6 +493,7 @@ export class SyncS4LineItemPricesByPriceList {
           dealId,
           customer,
           salesArea,
+          salesAreaSource,
           priceListType: effectivePriceListType,
           totalAmount,
           currencies,
@@ -444,6 +526,18 @@ export class SyncS4LineItemPricesByPriceList {
         ...auditTrail,
         droppedCalls: callRecorder.droppedCalls,
       });
+      await this.notifyLineItemPriceOutcome({
+        tenantModels,
+        tenantKey,
+        token: hubspotToken,
+        dealId,
+        body: buildLineItemPriceNoteBody({
+          ...noteContext,
+          skippedLineItems: auditTrail.rounds[0]?.skippedLineItems ?? [],
+          fatalErrorMessage: error.message,
+        }),
+      });
+
       error.syncLogWebhookErrors = [
         this.buildWebhookSyncErrorEntry({
           payloadHubspot: { dealId, customer },
