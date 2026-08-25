@@ -43,6 +43,52 @@ export async function find({ token, item, clientConfig, tenantModels }) {
   );
 }
 
+// Dueño actual de un email, con las search properties mapeadas (incluyen
+// internalcode). Lo usa la resolución de emails duplicados de los CE.
+export async function findByEmail({ token, email, clientConfig, tenantModels }) {
+  if (!email) {
+    return null;
+  }
+
+  const properties = await buildMappedSearchProperties({
+    tenantModels,
+    clientConfig,
+    objectType: 'contact',
+    defaults: CONTACT_SEARCH_PROPERTIES,
+  });
+
+  return hubspotClient.findContactByEmail(token, email, { properties });
+}
+
+// Find de ContactEmployees con orden FIJO: internalcode primero, email al
+// final. No usa defaultFindHubspot a propósito: esa config identifica BPs
+// (idsap), que los CE no traen — con ella el find devolvía null siempre y
+// cada corrida intentaba un create.
+export async function findContactEmployee({ token, internalcode, email, clientConfig, tenantModels }) {
+  const properties = await buildMappedSearchProperties({
+    tenantModels,
+    clientConfig,
+    objectType: 'contact',
+    defaults: CONTACT_SEARCH_PROPERTIES,
+  });
+
+  const code = String(internalcode ?? '').trim();
+
+  if (code) {
+    const byCode = await hubspotClient.findContactByProperty(token, 'internalcode', code, { properties });
+
+    if (byCode) {
+      return byCode;
+    }
+  }
+
+  if (email) {
+    return hubspotClient.findContactByEmail(token, email, { properties });
+  }
+
+  return null;
+}
+
 export async function create({ token, item }) {
   return hubspotClient.createContact(token, item);
 }
@@ -104,6 +150,8 @@ export function buildBatchUpdateEntry({ existing, item }) {
 
 export default {
   find,
+  findByEmail,
+  findContactEmployee,
   create,
   update,
   getSearchProperties,
