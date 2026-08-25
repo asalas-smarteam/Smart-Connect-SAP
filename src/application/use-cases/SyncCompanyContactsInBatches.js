@@ -3,6 +3,10 @@ import {
   resolveBypassEmail,
 } from '#application/services/bypassEmail.service.js';
 import { buildCompanyContactPayload } from '#application/services/companyContactPayload.service.js';
+import {
+  claimEmail,
+  resolveContactEmployeeEmail,
+} from '#application/services/contactEmployeeIdentity.service.js';
 import { CrmObjectIndex, normalizeIndexKey, uniquePropertiesFor } from '#application/services/crmObjectIndex.service.js';
 import { buildDuplicateContactEmailReport } from '#application/services/duplicateContactEmail.report.js';
 import { sanitizeProperties } from '#application/services/hubspotPropertyPayload.service.js';
@@ -203,9 +207,47 @@ export class SyncCompanyContactsInBatches {
     // Claim key -> the SAP contacts that carried the value, first one first.
     // Feeds the duplicate report below.
     const collisions = new Map();
+    // Emails reclamados en ESTA corrida, para la regla +InternalCode.
+    const claimedEmails = new Map();
 
     for (const entry of entries) {
       const properties = entry.contactPayload?.properties;
+
+      // Resolución de email duplicado ANTES de find(): con el email ya
+      // resuelto, el tier único de email solo matchea cuando es el mismo
+      // contacto, y la fila que hoy va a un create condenado al 409 llega con
+      // +InternalCode y entra.
+      if (properties?.email) {
+        const cleanEmail = properties.email;
+        const emailKey = normalizeIndexKey(cleanEmail);
+        const ownerRecord = claimedEmails.has(emailKey) ? null : index.emailOwner(cleanEmail);
+        const owner = ownerRecord
+          ? { internalcode: ownerRecord.properties?.internalcode }
+          : null;
+        const ceCode = properties.internalcode ?? entry.sapInternalCode;
+
+        const resolvedEmail = resolveContactEmployeeEmail({
+          email: cleanEmail,
+          internalCode: ceCode,
+          owner,
+          claimedEmails,
+        });
+
+        if (resolvedEmail !== cleanEmail) {
+          this.logger.warn?.('Contact employee con email duplicado: se aplica plus addressing', {
+            sapInternalCode: entry.sapInternalCode,
+            cleanEmail,
+            resolvedEmail,
+          });
+          properties.email = resolvedEmail;
+          // El email limpio sigue duplicado EN SAP: el reporte de calidad de
+          // datos lo tiene que seguir mostrando aunque el sync ya lo resuelva.
+          collisions.get(`email:${emailKey}`)?.entries.push(entry);
+        }
+
+        claimEmail(claimedEmails, resolvedEmail, ceCode);
+      }
+
       const existing = index.find(properties);
       const claims = this.dedupeClaims(properties, fallbackProperty);
       const claimKeys = claims.map(({ key }) => key);

@@ -609,7 +609,7 @@ describe('SyncCompanyContactsInBatches', () => {
     expect(properties).toEqual(['internalcode', 'idsap', 'email', 'firstname', 'phone']);
   });
 
-  it('does not create a second contact for a row whose email an internalcode row already claimed', async () => {
+  it('separa con +InternalCode la fila cuyo email ya reclamó otra fila de la corrida', async () => {
     const useCase = buildUseCase();
     useCase.fieldMappingService.mapRecords.mockResolvedValue([
       { properties: { firstname: 'Ana', internalcode: 'IC-1' } },
@@ -632,13 +632,17 @@ describe('SyncCompanyContactsInBatches', () => {
 
     await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
 
-    expect(useCase.crmBatchClient.batchCreateObjects.mock.calls[0][2].inputs).toHaveLength(1);
-    const mappings = useCase.associationRegistry.registerBaseObjectMappings.mock.calls[0][2];
-    expect(mappings).toEqual(expect.arrayContaining([
-      { sapId: 1, hubspotId: 'hs-c-0' },
-      { sapId: 2, hubspotId: 'hs-c-0' },
-    ]));
-    expect(mappings).toHaveLength(2);
+    // Antes colapsaban en un solo contacto; ahora la segunda fila conserva su
+    // identidad: mismo email en SAP != mismo contacto en HubSpot. La segunda
+    // fila no trae internalcode en el payload, así que el sufijo sale de su
+    // sapInternalCode (2).
+    const inputs = useCase.crmBatchClient.batchCreateObjects.mock.calls[0][2].inputs;
+    expect(inputs).toHaveLength(2);
+    expect(inputs.map((i) => i.properties.email).sort()).toEqual(['ana+2@x.com', 'ana@x.com']);
+    const mappings = useCase.associationRegistry.registerBaseObjectMappings.mock.calls
+      .flatMap((call) => call[2]);
+    expect(mappings).toContainEqual({ sapId: 1, hubspotId: 'hs-c-0' });
+    expect(mappings).toContainEqual({ sapId: 2, hubspotId: 'hs-c-1' });
   });
 
   it('creates a row carrying its own distinct internalcode even when an earlier row claimed its email', async () => {
@@ -875,7 +879,7 @@ describe('SyncCompanyContactsInBatches', () => {
     expect(useCase.crmBatchClient.associateObjectsDefault).toHaveBeenCalledTimes(3);
   });
 
-  it('registers a mapping for every SAP internal code sharing a deduped contact', async () => {
+  it('separa con +InternalCode dos CE de empresas distintas que comparten email', async () => {
     const useCase = buildUseCase();
     const companies = [
       {
@@ -890,12 +894,16 @@ describe('SyncCompanyContactsInBatches', () => {
 
     await useCase.execute({ companies, clientConfig, tenantModels: {}, getToken, syncLogId: null });
 
-    expect(useCase.crmBatchClient.batchCreateObjects.mock.calls[0][2].inputs).toHaveLength(1);
-    const mappings = useCase.associationRegistry.registerBaseObjectMappings.mock.calls[0][2];
-    expect(mappings).toEqual(expect.arrayContaining([
-      { sapId: 9, hubspotId: 'hs-c-0' },
-      { sapId: 10, hubspotId: 'hs-c-0' },
-    ]));
-    expect(mappings).toHaveLength(2);
+    // Antes colapsaban en un solo contacto porque compartían el email (tier de
+    // fallback, sin internalcode mapeado); ahora son DOS CE con InternalCode
+    // distinto (9 y 10) -- mismo email en SAP no es el mismo contacto -- y el
+    // segundo entra con +InternalCode.
+    const inputs = useCase.crmBatchClient.batchCreateObjects.mock.calls[0][2].inputs;
+    expect(inputs).toHaveLength(2);
+    expect(inputs.map((i) => i.properties.email).sort()).toEqual(['shared+10@x.com', 'shared@x.com']);
+    const mappings = useCase.associationRegistry.registerBaseObjectMappings.mock.calls
+      .flatMap((call) => call[2]);
+    expect(mappings).toContainEqual({ sapId: 9, hubspotId: 'hs-c-0' });
+    expect(mappings).toContainEqual({ sapId: 10, hubspotId: 'hs-c-1' });
   });
 });

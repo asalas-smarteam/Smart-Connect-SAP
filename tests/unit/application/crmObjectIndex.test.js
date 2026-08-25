@@ -120,3 +120,27 @@ describe('CrmObjectIndex unique-property tier', () => {
     expect(index.find({ idsap: 'C001', email: 'a@x.com' })).toBeNull();
   });
 });
+
+describe('emailOwner', () => {
+  it('devuelve el dueño actual de un email del tier único', () => {
+    const index = new CrmObjectIndex({
+      records: [{ id: 'hs-1', properties: { internalcode: 'IC-1', email: 'Shared@X.com' } }],
+      identityProperty: 'internalcode',
+      uniqueProperties: ['email'],
+    });
+
+    expect(index.emailOwner(' shared@x.COM ')?.id).toBe('hs-1');
+    expect(index.emailOwner('libre@x.com')).toBeNull();
+    expect(index.emailOwner('')).toBeNull();
+  });
+
+  it('devuelve null cuando el índice no declara email como único (companies)', () => {
+    const index = new CrmObjectIndex({
+      records: [{ id: 'hs-1', properties: { idsap: 'C1', email: 'a@b.com' } }],
+      identityProperty: 'idsap',
+      uniqueProperties: [],
+    });
+
+    expect(index.emailOwner('a@b.com')).toBeNull();
+  });
+});

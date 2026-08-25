@@ -117,6 +117,21 @@ export class CrmObjectIndex {
     return null;
   }
 
+  // Dueño actual de un email según el tier único. Solo lectura: la resolución
+  // de emails duplicados de los CE decide con esto si aplica +InternalCode
+  // ANTES de find(), así el tier único solo matchea cuando es el mismo contacto.
+  emailOwner(email) {
+    const bucket = this.byUnique.get('email');
+
+    if (!bucket) {
+      return null;
+    }
+
+    const key = normalizeIndexKey(email);
+
+    return key ? (bucket.get(key) ?? null) : null;
+  }
+
   get size() {
     return this.byIdentity.size;
   }
