@@ -222,11 +222,23 @@ export function buildServiceLayerUrl(clientConfig, mappings, options = {}) {
       const stringValue = String(value);
 
       switch (operator) {
-        case 'eq': {
+        case 'eq':
+        case 'ne': {
           const normalizedValue = typeof value === 'string'
             ? `'${stringValue.replace(/'/g, "''")}'`
             : stringValue;
-          conditions.push(`${property} eq ${normalizedValue}`);
+          conditions.push(`${property} ${operator} ${normalizedValue}`);
+          return;
+        }
+        case 'ne_or_null': {
+          // `col ne 'X'` deja fuera los registros donde la columna es null (en
+          // OData, igual que en SQL, comparar contra null da "unknown"). El OR
+          // explícito los conserva: es el 'ne' que necesitan los campos
+          // opcionales como GlobalLocationNumber.
+          const normalizedValue = typeof value === 'string'
+            ? `'${stringValue.replace(/'/g, "''")}'`
+            : stringValue;
+          conditions.push(`(${property} eq null or ${property} ne ${normalizedValue})`);
           return;
         }
         case 'ge': {

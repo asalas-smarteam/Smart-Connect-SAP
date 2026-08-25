@@ -4,16 +4,22 @@
 //
 // La conversión es por LISTA de campos, no por forma del valor, a propósito.
 // 'tYES' aparece en muchos campos más (Valid, Frozen, Locked, WasCounted,
-// IndEscala, Active...), así que convertir por forma cambiaría lo que envían
-// mapeos que ningún cliente pidió tocar: uno que hoy escribe 'tYES' en una
-// propiedad de texto pasaría a escribir true, sin aviso y sin error. La regla
-// del proyecto es que un mapeo del cliente no se cambia sin que lo pida.
+// IndEscala...), así que convertir por forma cambiaría lo que envían mapeos que
+// ningún cliente pidió tocar: uno que hoy escribe 'tYES' en una propiedad de
+// texto pasaría a escribir true, sin aviso y sin error. La regla del proyecto
+// es que un mapeo del cliente no se cambia sin que lo pida.
 //
 // Agregar un campo acá es una línea, y aplica a los dos caminos de mapeo
 // (sync programado y webhooks) porque los dos pasan por buildMappedProperties.
+//
+// 'Active' (ContactEmployees.Active) entró el 2026-08-25: HubSpot devolvía 400
+// INVALID_OPTION ("tYES was not one of the allowed options: [true, false]") y
+// ese 400 tumba el POST completo del contacto, así que se perdía el contacto
+// entero -- nombre, email, teléfono -- por una casilla.
 export const SAP_BOOLEAN_SOURCE_FIELDS = Object.freeze([
   'InventoryItem',
   'SalesItem',
+  'Active',
 ]);
 
 export const SAP_BOOLEAN_TRUE = 'tYES';

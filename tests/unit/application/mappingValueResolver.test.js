@@ -240,6 +240,27 @@ describe('buildMappedProperties — campos booleanos de SAP', () => {
     expect(properties).toEqual({ es_inventariable: true, es_vendible: false });
   });
 
+  it('normalizes Active, el campo de ContactEmployees', () => {
+    // HubSpot rechazaba el contacto COMPLETO con 400 INVALID_OPTION porque la
+    // propiedad `active` es una casilla y SAP manda el BoYesNoEnum.
+    const properties = buildMappedProperties({
+      input: { Name: 'Sofia Garcia', Active: 'tYES' },
+      mappings: [
+        { sourceField: 'Name', targetField: 'firstname', isActive: true },
+        { sourceField: 'Active', targetField: 'active', isActive: true },
+      ],
+    });
+
+    expect(properties).toEqual({ firstname: 'Sofia Garcia', active: true });
+
+    const inactive = buildMappedProperties({
+      input: { Active: 'tNO' },
+      mappings: [{ sourceField: 'Active', targetField: 'active', isActive: true }],
+    });
+
+    expect(inactive).toEqual({ active: false });
+  });
+
   it('leaves every other tYES/tNO field alone', () => {
     // Alcance deliberado: `Valid` tambien es un BoYesNoEnum, pero convertirlo
     // cambiaria lo que envia un mapeo que ningun cliente pidio tocar.
