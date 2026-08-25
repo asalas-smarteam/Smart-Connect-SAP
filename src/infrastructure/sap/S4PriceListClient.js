@@ -131,18 +131,46 @@ export class S4PriceListClient {
     this.transport = transport;
   }
 
-  async fetchCustomerSalesAreas(customer) {
+  // El área de ventas la declara el negocio de HubSpot, así que se filtra en SAP: `Customer +
+  // SalesOrganization + DistributionChannel` identifica UNA sola fila (verificado el 2026-08-24
+  // sobre las 8974 filas del sistema: cero clientes con dos filas en el mismo org/canal), y con
+  // eso el desempate desaparece del caso de uso.
+  //
+  // El segundo parámetro es opcional a propósito: sin él filtra sólo por cliente, que es el
+  // camino que necesita el caso de uso para armar la nota que le lista al asesor las áreas que el
+  // cliente SÍ tiene cuando la del negocio no existe.
+  async fetchCustomerSalesAreas(customer, { salesOrganization = null, distributionChannel = null } = {}) {
     const normalized = toNonEmptyString(customer);
+    const salesOrg = toNonEmptyString(salesOrganization);
+    const distChannel = toNonEmptyString(distributionChannel);
+
+    // Los dos o ninguno. Con uno solo el filtro queda a medias y SAP devuelve filas de los otros
+    // canales; el llamador las tomaría por el área del negocio y escribiría los precios de otra.
+    // Fallar acá es la única forma de que eso se note.
+    if (Boolean(salesOrg) !== Boolean(distChannel)) {
+      throw new Error(
+        'fetchCustomerSalesAreas: salesOrganization and distributionChannel must be provided'
+        + ` together; received salesOrganization=${JSON.stringify(salesOrganization)}`
+        + ` distributionChannel=${JSON.stringify(distributionChannel)}`
+      );
+    }
 
     if (!normalized) {
       return [];
+    }
+
+    const conditions = [equalsLiteral('Customer', normalized)];
+
+    if (salesOrg && distChannel) {
+      conditions.push(equalsLiteral('SalesOrganization', salesOrg));
+      conditions.push(equalsLiteral('DistributionChannel', distChannel));
     }
 
     return this.transport.fetchAll({
       path: CUSTOMER_SALES_AREA_PATH,
       query: {
         $select: CUSTOMER_SALES_AREA_SELECT,
-        $filter: enc(equalsLiteral('Customer', normalized)),
+        $filter: enc(conditions.join(' and ')),
       },
     });
   }

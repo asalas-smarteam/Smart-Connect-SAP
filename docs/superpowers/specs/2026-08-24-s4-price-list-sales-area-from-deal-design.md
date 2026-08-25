@@ -110,6 +110,19 @@ cotiza sin que nadie lo note. La nota lleva la lista de áreas reales del client
 que le dice al asesor qué poner — y para armarla hace falta una segunda consulta, sin el filtro de
 org/canal, que sólo se hace en este camino de error.
 
+En la práctica sobrescribe poco: la propiedad que se toca es la **nativa `price` del line item**
+(`HubspotLineItemPriceClient.js:60`), y el único que la escribe es este webhook. El sync de productos
+escribe en los campos de `fieldsPricesHS` — para este tenant `["hs_price_usd"]`, que es también el
+default de `product.handler.js:16` — y **nunca** toca la `price` nativa del producto. Como HubSpot
+siembra el `price` de una línea nueva desde la `price` nativa del producto, las líneas nacen en 0.
+El único caso donde el 0 pisa algo válido es cuando una corrida anterior de este mismo webhook ya
+había escrito un precio y después cambió la organización del negocio, que es exactamente cuando se
+quiere el 0.
+
+`fieldsPricesHS` **no** participa de este flujo: el webhook escribe `price` sin leer esa config. Si
+en algún momento se quiere que también escriba `hs_price_usd` en la línea, es un cambio aparte — hoy
+esa propiedad existe en productos, no en line items.
+
 Ojo con el orden: los 0 se escriben **antes** de lanzar el error, por el mismo camino que las
 escrituras normales (`updateLineItems` + `updateDealAmount`), para que queden en el audit del evento.
 
@@ -185,9 +198,11 @@ queda así:
   combinación. Sin él la config es inválida, igual que hoy.
 - `salesArea` deja de leerse. Si queda en la config no molesta, pero el normalizador la ignora.
 
-Esta tabla son los valores **mayoritarios de hoy**, no una decisión del negocio. Hay que
-confirmárselos al cliente antes de cargarlos: el default sólo se usa para clientes cuya
-`PriceListType` viene vacía, y son 391 en todo el sistema.
+Esta tabla son los valores **mayoritarios de hoy**, calculados de los datos, no una decisión del
+negocio. Se cargan así **para que el desarrollo y las pruebas funcionen**, y el cliente los confirma
+o los cambia después (decidido el 2026-08-24). Cambiarlos es editar la Configuration, no tocar
+código. El impacto es acotado: el default sólo se usa para clientes cuya `PriceListType` viene
+vacía, y son 391 en todo el sistema.
 
 ### La moneda del negocio: desempate y guardia
 
@@ -271,8 +286,10 @@ no está registrado es un problema comercial, no un hueco de datos.
 2. **`s4PriceList.salesArea` estaba en DPDO/01**, que tiene 2145 clientes pero sólo 397 condiciones
    vigentes, mientras MQGT tiene 8613 entre sus dos canales. Eso explica los dos materiales sin
    precio que aparecieron probando.
-3. **Escribir 0 sobrescribe** precios que podían estar bien. Es la decisión tomada, pero conviene que
-   el cliente lo sepa antes de que pase con un negocio real.
+3. **Escribir 0 sobrescribe la `price` de la línea.** El riesgo es bajo porque nadie más escribe esa
+   propiedad (el sync de productos usa `hs_price_usd`), así que sólo pisa un precio puesto por una
+   corrida anterior de este mismo webhook. Igual conviene que el cliente lo sepa antes de que pase
+   con un negocio real.
 4. Si las propiedades del negocio se hacen desplegables, hay que cargarles las organizaciones y
    canales reales. Ojo con la trampa de las enumeraciones de HubSpot: si el portal guarda el label
    como value y SAP manda el código, el filtro sale vacío y no falla nada.

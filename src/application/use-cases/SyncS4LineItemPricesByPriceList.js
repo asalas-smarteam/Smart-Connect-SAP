@@ -13,12 +13,11 @@ const NO_PRICE_REASON = 'no ZPR0 condition record for the customer price list,'
 // opción además de las listas.
 export const PRODUCT_DEFAULT_PRICE_LIST_LABEL = 'PRODUCT_DEFAULT';
 
-// De dónde salió el área de venta con la que se consultaron las condiciones. Viaja al audit y
-// al resultado porque `salesArea` sola no distingue "es el área del cliente" de "es la de la
-// config porque el cliente no tiene ninguna", y son dos situaciones muy distintas de operar.
-export const SALES_AREA_SOURCES = Object.freeze({
-  customer: 'customerSalesArea',
-  configuredDefault: 'configuredDefault',
+// Motivos por los que el negocio no se pudo valorizar, tal como los recibe la nota. Son códigos
+// y no textos porque el texto vive en el dominio de la nota; acá sólo se clasifica.
+export const PRICE_FAILURE_REASONS = Object.freeze({
+  salesAreaMissing: 'salesAreaMissing',
+  salesAreaNotFound: 'salesAreaNotFound',
 });
 
 function normalizeQuantity(value) {
@@ -52,100 +51,39 @@ function describeSalesAreaRows(rows) {
   return rows.map((row) => describeSalesArea(toSalesArea(row))).join(', ');
 }
 
-// `division` se compara SOLO cuando los dos lados la traen.
+// El área de ventas la declara el NEGOCIO (`sales_organization` + `distribution_channel`), así
+// que la consulta a SAP ya llega filtrada por ella y acá sólo queda validar el resultado. Antes
+// esto desempataba entre las áreas del cliente con la config del tenant, y no podía funcionar:
+// un cliente tiene hasta cinco áreas con listas distintas (100061: ZD en CPDO, ZC en DPDO, ZD en
+// GPDO, ZD en MQDO, ZC en TMDO) y en qué organización se cotiza es una decisión comercial, no un
+// dato deducible del maestro.
 //
-// Por qué: hay clientes cuyas filas de A_CustomerSalesArea llegan con `Division` vacía. Si la
-// comparación exigiera los tres campos, ese cliente no tendría configuración posible — sin
-// `division` en la config el área colapsaba a null y el error pedía "configurá salesArea"
-// aunque estuviera configurada, y con `division` el error decía que no pertenece al cliente.
-// Ignorarla no afloja el filtro contra SAP: `division` nunca entra al $filter de las
-// condiciones (ruling de Task 2), sólo sirve para desempatar entre áreas del mismo cliente. Si
-// después de ignorarla quedan dos áreas empatadas, se falla explícitamente pidiendo la división
-// en vez de elegir una al azar.
-function matchesSalesArea(rowSalesArea, configuredSalesArea) {
-  const wantedOrg = toNonEmptyString(configuredSalesArea?.salesOrganization)?.toUpperCase() ?? null;
-  const wantedChannel = toNonEmptyString(configuredSalesArea?.distributionChannel) ?? null;
-  const wantedDivision = toNonEmptyString(configuredSalesArea?.division)?.toUpperCase() ?? null;
-
-  if (rowSalesArea.salesOrganization !== wantedOrg
-    || rowSalesArea.distributionChannel !== wantedChannel) {
-    return false;
-  }
-
-  if (!wantedDivision || !rowSalesArea.division) {
-    return true;
-  }
-
-  return rowSalesArea.division === wantedDivision;
-}
-
-// Un cliente puede tener una lista de precios distinta por organización de ventas (100053 es
-// ZD en CPDO y ZB en DPDO), así que con más de un área hay que elegir explícitamente. Con una
-// sola se usa la del cliente y la config no interviene: es el caso simple y no queremos que
-// una config vieja lo rompa.
-// Sin ninguna área NO se falla: el requerimiento del negocio es que un negocio siempre pueda
-// cotizarse, así que se usa el área de la config y la lista default. El caso aparece tanto con
-// clientes reales sin área como cuando el `idsap` del negocio trae un código que no existe en
-// S/4 (un CardCode de Business One, por ejemplo), y en ese segundo caso el precio sale igual;
-// por eso el origen del área queda en el resultado y en el audit, y se emite un warn.
-function chooseSalesAreaRow(rows, configuredSalesArea, customer) {
+// `Customer + SalesOrganization + DistributionChannel` identifica una sola fila: verificado el
+// 2026-08-24 sobre las 8974 filas del sistema, cero clientes con dos filas en el mismo org/canal
+// y `Division` = `SC` en todas. El caso de más de una fila igual se contempla y falla explícito:
+// si SAP cambia y aparece una segunda división, hay que enterarse en vez de elegir al azar.
+function chooseSalesAreaRow(rows, { customer, salesOrganization, distributionChannel }) {
   if (rows.length === 0) {
-    // Org y canal son obligatorios: son los dos campos que entran al $filter de las condiciones
-    // (`buildValidityFilter` los exige). Sin ellos no hay consulta posible, ni con fallback.
-    if (!toNonEmptyString(configuredSalesArea?.salesOrganization)
-      || !toNonEmptyString(configuredSalesArea?.distributionChannel)) {
-      throw new Error(
-        `Customer ${customer} has no sales areas in SAP and s4PriceList.salesArea is not`
-        + ' configured (salesOrganization and distributionChannel are required) to fall back to'
-        + ' the default price list'
-      );
-    }
-
-    // A propósito SIN `PriceListType`: el cliente no tiene lista, y ponerle la de config acá
-    // haría que el `source` del precio dijera `customerPriceList` para un precio que salió del
-    // default. Sin ella, `customerPriceListType` queda null y la resolución cae al default sola.
-    return {
-      row: {
-        SalesOrganization: configuredSalesArea.salesOrganization,
-        DistributionChannel: configuredSalesArea.distributionChannel,
-        Division: configuredSalesArea.division ?? null,
-      },
-      source: SALES_AREA_SOURCES.configuredDefault,
-    };
+    // Tipado y no reconocido por el texto: el llamador tiene que escribir ceros y una nota antes
+    // de propagarlo, y parsear `error.message` para decidir eso es frágil.
+    throw Object.assign(
+      new Error(
+        `Customer ${customer} is not registered in sales area`
+        + ` ${salesOrganization}/${distributionChannel} in SAP`
+      ),
+      { salesAreaNotFound: true }
+    );
   }
 
   if (rows.length === 1) {
-    return { row: rows[0], source: SALES_AREA_SOURCES.customer };
+    return rows[0];
   }
 
-  if (!configuredSalesArea) {
-    throw new Error(
-      `Customer ${customer} has ${rows.length} sales areas in SAP`
-      + ` (${describeSalesAreaRows(rows)});`
-      + ' configure s4PriceList.salesArea (salesOrganization/distributionChannel/division,'
-      + ' division optional) to choose one'
-    );
-  }
-
-  const matches = rows.filter((row) => matchesSalesArea(toSalesArea(row), configuredSalesArea));
-
-  if (matches.length === 0) {
-    throw new Error(
-      `Configured s4PriceList.salesArea ${describeSalesArea(configuredSalesArea)} does not belong`
-      + ` to customer ${customer}; the customer sales areas are:`
-      + ` ${describeSalesAreaRows(rows)} (salesOrganization/distributionChannel/division)`
-    );
-  }
-
-  if (matches.length > 1) {
-    throw new Error(
-      `Configured s4PriceList.salesArea ${describeSalesArea(configuredSalesArea)} matches`
-      + ` ${matches.length} sales areas of customer ${customer}`
-      + ` (${describeSalesAreaRows(matches)}); add s4PriceList.salesArea.division to choose one`
-    );
-  }
-
-  return { row: matches[0], source: SALES_AREA_SOURCES.customer };
+  throw new Error(
+    `Customer ${customer} has ${rows.length} rows in sales area`
+    + ` ${salesOrganization}/${distributionChannel} (${describeSalesAreaRows(rows)});`
+    + ' the division is needed to choose one'
+  );
 }
 
 export class SyncS4LineItemPricesByPriceList {
@@ -191,6 +129,11 @@ export class SyncS4LineItemPricesByPriceList {
   async execute(payload, { tenantModels, tenant, tenantKey }) {
     const dealId = toNonEmptyString(payload?.dealId);
     const customer = toNonEmptyString(payload?.customer);
+    const salesOrganization = toNonEmptyString(payload?.salesOrganization)?.toUpperCase() ?? null;
+    // Sin `toUpperCase`: SAP devuelve el canal como '01' y así entra al $filter y a la clave del
+    // mapa de listas por defecto.
+    const distributionChannel = toNonEmptyString(payload?.distributionChannel);
+    const dealCurrency = toNonEmptyString(payload?.dealCurrency)?.toUpperCase() ?? null;
     const lineItems = Array.isArray(payload?.lineItems) ? payload.lineItems : [];
     // El grabador se crea por invocación y viaja por parámetro, nunca en `this`: el caso de
     // uso es singleton en composition y guardarlo mezclaría el tráfico de un tenant con otro.
@@ -206,7 +149,14 @@ export class SyncS4LineItemPricesByPriceList {
     };
     // Fuera del try: la nota del camino de error los necesita, y ahí ya no están en scope.
     let hubspotToken = null;
-    let noteContext = { customer, salesArea: null, salesAreaSource: null, priceListType: null };
+    let priceListClient = null;
+    let noteContext = {
+      customer,
+      salesArea: null,
+      priceListType: null,
+      reasonCode: null,
+      customerSalesAreas: [],
+    };
 
     try {
       if (!dealId) {
@@ -220,6 +170,12 @@ export class SyncS4LineItemPricesByPriceList {
       if (lineItems.length === 0) {
         throw new Error('lineItems must be a non-empty array');
       }
+
+      // El área de ventas del negocio se valida ACÁ pero se lanza más abajo, después de tener el
+      // token de HubSpot. Parece un orden arbitrario y no lo es: el asesor sólo se entera de que
+      // le falta el campo por la nota en el negocio, y la nota necesita el token. Lanzar antes
+      // dejaría el error únicamente en Mongo, donde no lo ve nadie fuera de soporte.
+      const missingSalesArea = !salesOrganization || !distributionChannel;
 
       const config = await this.credentialRepository.resolveS4PriceListConfig({ tenantModels });
 
@@ -251,46 +207,62 @@ export class SyncS4LineItemPricesByPriceList {
         tenantModels,
       });
       hubspotToken = token;
+
+      // Recién acá se lanza: ver el comentario de `missingSalesArea`. Los precios NO se tocan —
+      // sin área no se consultó nada en SAP, así que no hay nada que afirmar sobre las líneas.
+      if (missingSalesArea) {
+        noteContext = { ...noteContext, reasonCode: PRICE_FAILURE_REASONS.salesAreaMissing };
+
+        throw Object.assign(
+          new Error(
+            'Deal has no sales organization or distribution channel'
+            + ` (received salesOrganization=${JSON.stringify(payload?.salesOrganization)}`
+            + ` distributionChannel=${JSON.stringify(payload?.distributionChannel)})`
+          ),
+          { salesAreaMissing: true }
+        );
+      }
+
       const sapConfig = {
         ...(typeof sapCredentials?.toObject === 'function' ? sapCredentials.toObject() : sapCredentials),
         tenantKey,
       };
-      const priceListClient = this.createPriceListClient({ sapConfig });
+      priceListClient = this.createPriceListClient({ sapConfig });
       const salesAreaRows = await callRecorder.record(
-        { target: 'sap', method: 'GET', path: '/API_BUSINESS_PARTNER/A_CustomerSalesArea', params: { customer } },
-        () => priceListClient.fetchCustomerSalesAreas(customer)
+        {
+          target: 'sap',
+          method: 'GET',
+          path: '/API_BUSINESS_PARTNER/A_CustomerSalesArea',
+          params: { customer, salesOrganization, distributionChannel },
+        },
+        () => priceListClient.fetchCustomerSalesAreas(customer, {
+          salesOrganization,
+          distributionChannel,
+        })
       );
-      const { row: salesAreaRow, source: salesAreaSource } = chooseSalesAreaRow(
+      const salesAreaRow = chooseSalesAreaRow(
         Array.isArray(salesAreaRows) ? salesAreaRows : [],
-        config.salesArea,
-        customer
+        { customer, salesOrganization, distributionChannel }
       );
       const salesArea = toSalesArea(salesAreaRow);
-
-      if (salesAreaSource === SALES_AREA_SOURCES.configuredDefault) {
-        this.logger.warn?.({
-          msg: 'S4 line item prices: customer has no sales areas in SAP; using the configured'
-            + ' sales area and the default price list',
-          tenantKey,
-          dealId,
-          customer,
-          salesArea,
-          defaultPriceListType: config.defaultPriceListType,
-        });
-      }
-      // Vacío es un dato, no un error: 40 de los 5000 clientes revisados no tienen lista.
+      // Vacío es un dato, no un error: 391 clientes del sistema no tienen lista asignada.
       //
       // Se guardan SEPARADAS la lista del cliente y la efectiva: al dominio se le pasa la del
       // cliente tal cual (null si no tiene), porque si se le pasaba la de config disfrazada de
       // lista del cliente, el `source` del resultado decía `customerPriceList` para un precio
-      // que en realidad salió del default de config. La efectiva es sólo para reportar.
+      // que en realidad salió del default. La efectiva es sólo para reportar.
       const customerPriceListType = toNonEmptyString(salesAreaRow?.PriceListType)?.toUpperCase()
         ?? null;
-      const effectivePriceListType = customerPriceListType ?? config.defaultPriceListType;
+      // El default es POR ÁREA y no global: la lista mayoritaria cambia según la combinación, y
+      // un default global acierta en 5 de las 16 que existen (verificado el 2026-08-24). El mapa
+      // se resuelve acá y al dominio le llega un solo código: no conoce la clave compuesta.
+      const areaDefaultPriceListType = config.defaultPriceListBySalesArea?.[
+        `${salesOrganization}/${distributionChannel}`
+      ] ?? config.defaultPriceListType;
+      const effectivePriceListType = customerPriceListType ?? areaDefaultPriceListType;
       noteContext = {
-        customer,
+        ...noteContext,
         salesArea,
-        salesAreaSource,
         priceListType: effectivePriceListType,
       };
       const date = this.dateProvider();
@@ -308,7 +280,7 @@ export class SyncS4LineItemPricesByPriceList {
             itemCode: itemCode ?? null,
             reason: 'line item has no id or hs_sku',
             priceListType: effectivePriceListType,
-            defaultPriceListType: config.defaultPriceListType,
+            defaultPriceListType: areaDefaultPriceListType,
             salesArea,
           });
           continue;
@@ -338,8 +310,39 @@ export class SyncS4LineItemPricesByPriceList {
         const resolved = resolveS4PriceForMaterial({
           candidates: candidatesByMaterial.get(itemCode),
           customerPriceListType,
-          defaultPriceListType: config.defaultPriceListType,
+          defaultPriceListType: areaDefaultPriceListType,
+          dealCurrency,
         });
+
+        // El campo `price` del line item NO lleva moneda propia: hereda la del negocio. Escribir
+        // ahí una tarifa en otra moneda es un precio silenciosamente equivocado, no un redondeo
+        // — en DPDO/01 hay 200 condiciones en USD y 136 en DOP sobre materiales distintos, así
+        // que el caso es real. Se saltea la línea y la nota lo dice.
+        if (resolved?.currencyMismatch) {
+          const reason = `condition currency ${resolved.currency} does not match the deal`
+            + ` currency ${dealCurrency}`;
+
+          this.logger.warn?.({
+            msg: 'Line item skipped: SAP condition currency does not match the deal currency',
+            tenantKey,
+            dealId,
+            lineItemId: id,
+            itemCode,
+            conditionCurrency: resolved.currency,
+            dealCurrency,
+            conditionRecord: resolved.conditionRecord,
+            salesArea,
+          });
+          skippedLineItems.push({
+            id,
+            itemCode,
+            reason,
+            priceListType: effectivePriceListType,
+            defaultPriceListType: areaDefaultPriceListType,
+            salesArea,
+          });
+          continue;
+        }
 
         if (!resolved) {
           this.logger.warn?.({
@@ -350,7 +353,7 @@ export class SyncS4LineItemPricesByPriceList {
             itemCode,
             customerPriceListType,
             effectivePriceListType,
-            defaultPriceListType: config.defaultPriceListType,
+            defaultPriceListType: areaDefaultPriceListType,
             salesArea,
           });
           skippedLineItems.push({
@@ -358,7 +361,7 @@ export class SyncS4LineItemPricesByPriceList {
             itemCode,
             reason: NO_PRICE_REASON,
             priceListType: effectivePriceListType,
-            defaultPriceListType: config.defaultPriceListType,
+            defaultPriceListType: areaDefaultPriceListType,
             salesArea,
           });
           continue;
@@ -411,7 +414,6 @@ export class SyncS4LineItemPricesByPriceList {
 
       auditTrail.rounds = [{
         salesArea,
-        salesAreaSource,
         customerPriceListType,
         effectivePriceListType,
         enrichedLineItems,
@@ -493,7 +495,6 @@ export class SyncS4LineItemPricesByPriceList {
           dealId,
           customer,
           salesArea,
-          salesAreaSource,
           priceListType: effectivePriceListType,
           totalAmount,
           currencies,
@@ -516,6 +517,98 @@ export class SyncS4LineItemPricesByPriceList {
         audit: this.buildLineItemPriceAudit({ ...auditTrail, droppedCalls: callRecorder.droppedCalls }),
       };
     } catch (error) {
+      // El cliente no está registrado en el área que declara el negocio: los precios se ponen en
+      // 0 y el negocio queda en 0.
+      //
+      // Es destructivo a propósito y la decisión es del cliente (2026-08-24): un 0 es
+      // obviamente inválido y frena la cotización, mientras un precio de una corrida anterior al
+      // lado de un área equivocada se cotiza sin que nadie lo note. En la práctica pisa poco: la
+      // propiedad es la `price` nativa del line item y el único que la escribe es este webhook
+      // (el sync de productos usa los campos de `fieldsPricesHS`, por defecto `hs_price_usd`, y
+      // no toca la `price` nativa del producto, así que las líneas nacen en 0).
+      if (error?.salesAreaNotFound && hubspotToken && priceListClient) {
+        // Segunda consulta SIN filtro de área: es lo único que le dice al asesor qué poner. Si
+        // falla, se sigue: la nota queda peor pero los ceros importan más.
+        let customerSalesAreas = [];
+
+        try {
+          const allRows = await callRecorder.record(
+            {
+              target: 'sap',
+              method: 'GET',
+              path: '/API_BUSINESS_PARTNER/A_CustomerSalesArea',
+              params: { customer },
+            },
+            () => priceListClient.fetchCustomerSalesAreas(customer)
+          );
+
+          customerSalesAreas = (Array.isArray(allRows) ? allRows : []).map((row) => ({
+            salesOrganization: toNonEmptyString(row?.SalesOrganization)?.toUpperCase() ?? null,
+            distributionChannel: toNonEmptyString(row?.DistributionChannel) ?? null,
+            priceListType: toNonEmptyString(row?.PriceListType)?.toUpperCase() ?? null,
+          }));
+        } catch (listError) {
+          this.logger.warn?.({
+            msg: 'S4 line item prices: could not list the customer sales areas for the note',
+            tenantKey,
+            dealId,
+            customer,
+            error: listError.message,
+          });
+        }
+
+        noteContext = {
+          ...noteContext,
+          salesArea: { salesOrganization, distributionChannel, division: null },
+          reasonCode: PRICE_FAILURE_REASONS.salesAreaNotFound,
+          customerSalesAreas,
+        };
+
+        // `quantity` va con su valor real: buildHubspotBatchPayload escribe precio Y cantidad en
+        // la misma llamada, así que omitirla la sobreescribiría con 1.
+        const zeroedLineItems = lineItems
+          .filter((lineItem) => toNonEmptyString(lineItem?.id))
+          .map((lineItem) => ({
+            id: toNonEmptyString(lineItem.id),
+            itemCode: toNonEmptyString(lineItem?.itemCode),
+            quantity: normalizeQuantity(lineItem?.quantity),
+            Price: 0,
+            lineTotal: 0,
+            omitDiscount: true,
+          }));
+
+        if (zeroedLineItems.length > 0) {
+          try {
+            await callRecorder.record(
+              { target: 'hubspot', method: 'POST', path: '/crm/v3/objects/line_items/batch/update' },
+              () => this.hubspotPriceClient.updateLineItems({
+                token: hubspotToken,
+                enrichedLineItems: zeroedLineItems,
+                tenantKey,
+              })
+            );
+            await callRecorder.record(
+              { target: 'hubspot', method: 'PATCH', path: `/crm/v3/objects/deals/${dealId}` },
+              () => this.hubspotPriceClient.updateDealAmount({
+                token: hubspotToken,
+                dealId,
+                totalAmount: 0,
+                tenantKey,
+              })
+            );
+          } catch (zeroError) {
+            this.logger.error?.({
+              msg: 'S4 line item prices: could not zero the line items of a deal whose sales area'
+                + ' does not belong to the customer',
+              tenantKey,
+              dealId,
+              customer,
+              error: zeroError.message,
+            });
+          }
+        }
+      }
+
       auditTrail.fatalError = {
         message: error.message,
         status: error?.response?.status ?? null,

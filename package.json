@@ -19,7 +19,7 @@
   "scripts": {
     "dev": "npx nodemon src/main/server.js",
     "dev:all": "bash -lc 'trap \"kill 0\" EXIT INT TERM; npm run dev & npm run dev:worker & wait'",
-    "start": "NODE_ENV=production node src/main/server.js",
+    "start": "node src/main/server.js",
     "start:api": "NODE_ENV=production node src/main/server.js",
     "start:worker": "NODE_ENV=production node src/main/worker.js",
     "dev:worker": "npx nodemon src/main/worker.js",

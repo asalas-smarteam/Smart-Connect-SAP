@@ -21,6 +21,13 @@ const SUPPORTED_LINE_ITEM_PROPERTY = 'quantity';
 // CRM_UI evita bucles: las escrituras del propio integrador llegan con changeSource INTEGRATION.
 const SUPPORTED_PROPERTY_CHANGE_SOURCE = 'CRM_UI';
 
+// Propiedades del negocio que declaran el área de ventas y la moneda. En constantes exportadas
+// y no como literales en la llamada, para que el test asierte contra la misma fuente que el
+// código: si el nombre cambia en el portal, se cambia acá y el test sigue siendo válido.
+export const DEAL_SALES_ORG_PROPERTY = 'sales_organization';
+export const DEAL_DISTRIBUTION_CHANNEL_PROPERTY = 'distribution_channel';
+export const DEAL_CURRENCY_PROPERTY = 'deal_currency_code';
+
 const DEBOUNCE_CONFIG_KEY = 'requireSkippedInWebhooksInPropertyChange';
 const DEBOUNCE_DEFAULT = { requireSkipped: true, secondsToSkipped: 3 };
 const DUPLICATE_ERROR_MESSAGE = 'Duplicate event';
@@ -203,9 +210,30 @@ export class S4PriceListLineItemPriceWebhookService {
     }
 
     try {
+      // `properties` explícitas: sin ellas HubSpot devuelve su set por defecto, que NO incluye
+      // las dos propiedades del área de ventas. Nada más abajo depende de una propiedad del deal
+      // que llegara por default — `resolveCustomer` usa las asociaciones y hace sus propios GET a
+      // company/contact con `properties: ['idsap', 'idSap']`, y `extractLineItemAssociationIds`
+      // también lee asociaciones, no propiedades.
       const deal = await this.fetchHubspotObject(token, 'deals', dealId, {
+        properties: [
+          DEAL_SALES_ORG_PROPERTY,
+          DEAL_DISTRIBUTION_CHANNEL_PROPERTY,
+          DEAL_CURRENCY_PROPERTY,
+        ],
         associations: ['companies', 'contacts', 'line_items'],
       });
+      const salesOrganization = toNonEmptyString(
+        deal?.properties?.[DEAL_SALES_ORG_PROPERTY]
+      )?.toUpperCase() ?? null;
+      // El canal NO se pasa a mayúsculas ni se re-normaliza: SAP lo devuelve como '01' y así
+      // tiene que viajar, tanto al $filter como a la clave del mapa de listas por defecto.
+      const distributionChannel = toNonEmptyString(
+        deal?.properties?.[DEAL_DISTRIBUTION_CHANNEL_PROPERTY]
+      );
+      const dealCurrency = toNonEmptyString(
+        deal?.properties?.[DEAL_CURRENCY_PROPERTY]
+      )?.toUpperCase() ?? null;
       // El cliente se resuelve ANTES de tocar las líneas: sin cliente no hay lista de precios
       // que aplicar y el evento se rechaza sin importar el estado de las líneas.
       const customer = await this.resolveCustomer(token, deal);
@@ -234,6 +262,9 @@ export class S4PriceListLineItemPriceWebhookService {
         payload: {
           dealId,
           customer,
+          salesOrganization,
+          distributionChannel,
+          dealCurrency,
           lineItems: lineItems.map((lineItem) => ({
             id: lineItem.id,
             itemCode: lineItem.itemCode,
@@ -242,7 +273,7 @@ export class S4PriceListLineItemPriceWebhookService {
           lineItemFailures: failures,
         },
         executionId: createdEvent._id,
-        meta: { eventKind, dealId, customer },
+        meta: { eventKind, dealId, customer, salesOrganization, distributionChannel },
       };
     } catch (error) {
       await LineItemPriceWebhookEvent.updateOne(

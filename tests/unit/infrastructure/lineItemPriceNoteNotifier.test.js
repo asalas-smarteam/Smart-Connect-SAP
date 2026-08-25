@@ -110,18 +110,93 @@ describe('buildLineItemPriceNoteBody', () => {
     expect(body).toContain('quedaron con el precio que ya tenían');
   });
 
-  it('avisa cuando el área de ventas salió de la config y no del cliente', () => {
+  // El área de ventas ya no puede salir de la config: la declara el negocio. Ese texto no puede
+  // sobrevivir en el archivo o la nota mentiría sobre de dónde salió el precio.
+  it('ya no existe el aviso del fallback al área configurada', () => {
     const body = buildLineItemPriceNoteBody({
-      customer: 'C00036',
+      customer: '100061',
       salesArea: { salesOrganization: 'DPDO', distributionChannel: '01', division: 'SC' },
-      salesAreaSource: 'configuredDefault',
       priceListType: 'ZC',
       updatedCount: 0,
       skippedLineItems: [{ itemCode: '80000017', reason: 'sin condición' }],
     });
 
-    expect(body).toContain('no tiene área de ventas registrada en SAP');
-    expect(body).toContain('Verificá el código SAP del cliente');
+    expect(body).not.toContain('no tiene área de ventas registrada en SAP');
+    expect(body).not.toContain('configuradas por defecto');
+  });
+
+  it('con salesAreaMissing pide los campos y dice que los precios quedaron como estaban', () => {
+    const body = buildLineItemPriceNoteBody({
+      customer: '100061',
+      reasonCode: 'salesAreaMissing',
+      fatalErrorMessage: 'Deal has no sales organization or distribution channel',
+    });
+
+    expect(body).toContain('falta la organización de ventas');
+    expect(body).toContain('Completá los dos campos');
+    expect(body).toContain('quedaron como estaban');
+    // NO puede decir que puso nada en 0: en este camino no se tocó ninguna línea.
+    expect(body).not.toContain('se pusieron en 0');
+  });
+
+  it('con salesAreaNotFound dice que los precios se pusieron en 0 y lista las áreas reales', () => {
+    const body = buildLineItemPriceNoteBody({
+      customer: '100061',
+      salesArea: { salesOrganization: 'MQGT', distributionChannel: '01', division: null },
+      reasonCode: 'salesAreaNotFound',
+      fatalErrorMessage: 'Customer 100061 is not registered in sales area MQGT/01 in SAP',
+      customerSalesAreas: [
+        { salesOrganization: 'CPDO', distributionChannel: '01', priceListType: 'ZD' },
+        { salesOrganization: 'DPDO', distributionChannel: '01', priceListType: 'ZC' },
+      ],
+    });
+
+    expect(body).toContain('no está registrado en esta área de ventas');
+    expect(body).toContain('MQGT/01');
+    expect(body).toContain('CPDO/01 (lista ZD), DPDO/01 (lista ZC)');
+    expect(body).toContain('se pusieron en 0');
+  });
+
+  it('con salesAreaNotFound y sin áreas legibles omite la frase entera', () => {
+    const body = buildLineItemPriceNoteBody({
+      customer: '100061',
+      reasonCode: 'salesAreaNotFound',
+      fatalErrorMessage: 'Customer 100061 is not registered in sales area MQGT/01 in SAP',
+      customerSalesAreas: [],
+    });
+
+    expect(body).toContain('no está registrado en esta área de ventas');
+    expect(body).not.toContain('Las áreas de ventas que este cliente tiene');
+  });
+
+  it('descarta las áreas incompletas de la lista en vez de imprimir nulls', () => {
+    const body = buildLineItemPriceNoteBody({
+      customer: '100061',
+      reasonCode: 'salesAreaNotFound',
+      fatalErrorMessage: 'no registrado',
+      customerSalesAreas: [
+        { salesOrganization: 'CPDO', distributionChannel: null, priceListType: 'ZD' },
+        { salesOrganization: 'DPDO', distributionChannel: '01', priceListType: null },
+      ],
+    });
+
+    expect(body).toContain('DPDO/01');
+    expect(body).not.toContain('CPDO');
+    expect(body).not.toContain('null');
+  });
+
+  it('escapa el HTML de un código de área malicioso', () => {
+    const body = buildLineItemPriceNoteBody({
+      customer: '100061',
+      reasonCode: 'salesAreaNotFound',
+      fatalErrorMessage: 'no registrado',
+      customerSalesAreas: [
+        { salesOrganization: '<img src=x>', distributionChannel: '01', priceListType: 'ZD' },
+      ],
+    });
+
+    expect(body).not.toContain('<img');
+    expect(body).toContain('&lt;img src=x&gt;');
   });
 
   it('escapa el HTML de los datos que vienen de SAP y de HubSpot', () => {

@@ -23,7 +23,7 @@ function buildDeps({
   config = {
     conditionType: 'ZPR0',
     defaultPriceListType: 'ZA',
-    salesArea: { salesOrganization: 'FQCR', distributionChannel: '01', division: 'SC' },
+    defaultPriceListBySalesArea: {},
     priceListProperty: 'lista_de_precios_sap',
     currencyProperty: 'moneda_precio_sap',
     priceSourceProperty: 'origen_precio_sap',
@@ -76,7 +76,7 @@ describe('SyncS4LineItemPricesByPriceList', () => {
     const { useCase, hubspotPriceClient } = buildDeps();
 
     const result = await useCase.execute(
-      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 3 }] },
+      { dealId: '77', customer: '105049', salesOrganization: 'FQCR', distributionChannel: '01', lineItems: [{ id: '1', itemCode: '80000017', quantity: 3 }] },
       CONTEXT
     );
 
@@ -106,29 +106,263 @@ describe('SyncS4LineItemPricesByPriceList', () => {
     );
   });
 
-  it('usa la única área de ventas del cliente e ignora la configurada', async () => {
-    const { useCase, priceListClient } = buildDeps({
-      salesAreas: [{ Customer: '105049', SalesOrganization: 'MQGT', DistributionChannel: '02', Division: 'SC', PriceListType: 'ZB' }],
+  it('consulta el área de ventas que declara el negocio, no todas las del cliente', async () => {
+    const { useCase, priceListClient } = buildDeps();
+
+    await useCase.execute(
+      { dealId: '77', customer: '105049', salesOrganization: 'fqcr', distributionChannel: '01', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
+      CONTEXT
+    );
+
+    // La organización se normaliza a mayúsculas; el canal viaja INTACTO ('01', no '1').
+    expect(priceListClient.fetchCustomerSalesAreas).toHaveBeenCalledWith('105049', {
+      salesOrganization: 'FQCR',
+      distributionChannel: '01',
+    });
+  });
+
+  it('usa el default de la combinación org/canal cuando el cliente no tiene lista', async () => {
+    const { useCase } = buildDeps({
+      salesAreas: [{ Customer: '105049', SalesOrganization: 'FQCR', DistributionChannel: '01', PriceListType: '' }],
+      config: {
+        conditionType: 'ZPR0',
+        defaultPriceListType: 'ZC',
+        defaultPriceListBySalesArea: { 'FQCR/01': 'ZD' },
+        priceListProperty: null,
+        currencyProperty: 'moneda_precio_sap',
+        priceSourceProperty: null,
+      },
       candidatesByMaterial: {
-        80000017: [{ ...CANDIDATES_80000017[0], priceListType: 'ZB', conditionRateValue: 2 }],
+        80000017: [
+          { ...CANDIDATES_80000017[0], conditionRecord: 'ZC-1', priceListType: 'ZC', conditionRateValue: 9.99 },
+          { ...CANDIDATES_80000017[0], conditionRecord: 'ZD-1', priceListType: 'ZD', conditionRateValue: 2.05 },
+        ],
       },
     });
 
     const result = await useCase.execute(
-      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
+      { dealId: '77', customer: '105049', salesOrganization: 'FQCR', distributionChannel: '01', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
       CONTEXT
     );
 
-    expect(priceListClient.fetchConditionCandidates).toHaveBeenCalledWith(
-      expect.objectContaining({ salesArea: { salesOrganization: 'MQGT', distributionChannel: '02', division: 'SC' } })
-    );
-    expect(result.data.priceListType).toBe('ZB');
-    expect(result.data.lineItems[0].Price).toBe(2);
+    // Gana ZD (el default de FQCR/01), no ZC (el global): si mandara el global, el precio
+    // sería 9.99.
+    expect(result.data.priceListType).toBe('ZD');
+    expect(result.data.lineItems[0].Price).toBe(2.05);
   });
 
-  // M1 de la revisión final: el caso de uso sustituía la lista del cliente por la de config
-  // ANTES de llamar al dominio, así que el origen reportado decía `customerPriceList` para un
-  // precio que en realidad salió del default de config.
+  it('cae al defaultPriceListType global cuando la combinación no está en el mapa', async () => {
+    const { useCase } = buildDeps({
+      salesAreas: [{ Customer: '105049', SalesOrganization: 'FQCR', DistributionChannel: '01', PriceListType: '' }],
+      config: {
+        conditionType: 'ZPR0',
+        defaultPriceListType: 'ZA',
+        defaultPriceListBySalesArea: { 'MQGT/01': 'ZD' },
+        priceListProperty: null,
+        currencyProperty: 'moneda_precio_sap',
+        priceSourceProperty: null,
+      },
+      candidatesByMaterial: {
+        80000017: [{ ...CANDIDATES_80000017[0], priceListType: 'ZA', conditionRateValue: 2.08 }],
+      },
+    });
+
+    const result = await useCase.execute(
+      { dealId: '77', customer: '105049', salesOrganization: 'FQCR', distributionChannel: '01', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
+      CONTEXT
+    );
+
+    expect(result.data.priceListType).toBe('ZA');
+    expect(result.data.lineItems[0].Price).toBe(2.08);
+  });
+
+  it('el audit de la corrida ya no reporta salesAreaSource', async () => {
+    const { useCase } = buildDeps();
+
+    const result = await useCase.execute(
+      { dealId: '77', customer: '105049', salesOrganization: 'FQCR', distributionChannel: '01', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
+      CONTEXT
+    );
+
+    expect(result.data).not.toHaveProperty('salesAreaSource');
+    expect(result.audit.rounds[0]).not.toHaveProperty('salesAreaSource');
+  });
+
+  // Cero filas: el cliente NO está registrado en el área que declara el negocio. Los precios se
+  // ponen en 0 (decisión del cliente, 2026-08-24) y la nota lista las áreas reales.
+  it('con el cliente fuera del área declarada pone los precios en 0, avisa y falla', async () => {
+    const { useCase, hubspotPriceClient, notifyLineItemPriceOutcome, priceListClient } = buildDeps({
+      salesAreas: [],
+    });
+    // La segunda consulta (sin filtro de área) es la que lista las áreas reales del cliente.
+    priceListClient.fetchCustomerSalesAreas = jest.fn(async (_customer, area) => (
+      area
+        ? []
+        : [
+          { Customer: '105049', SalesOrganization: 'CPDO', DistributionChannel: '01', PriceListType: 'ZD' },
+          { Customer: '105049', SalesOrganization: 'DPDO', DistributionChannel: '01', PriceListType: 'ZC' },
+        ]
+    ));
+
+    await expect(useCase.execute(
+      {
+        dealId: '77',
+        customer: '105049',
+        salesOrganization: 'MQGT',
+        distributionChannel: '01',
+        lineItems: [
+          { id: '1', itemCode: '80000017', quantity: 4 },
+          { id: '2', itemCode: '80000029', quantity: 7 },
+        ],
+      },
+      CONTEXT
+    )).rejects.toThrow('is not registered in sales area MQGT/01');
+
+    // La cantidad viaja con su valor REAL: buildHubspotBatchPayload escribe precio y cantidad en
+    // la misma llamada, así que omitirla la sobreescribiría con 1.
+    expect(hubspotPriceClient.updateLineItems).toHaveBeenCalledWith(expect.objectContaining({
+      enrichedLineItems: [
+        expect.objectContaining({ id: '1', quantity: 4, Price: 0 }),
+        expect.objectContaining({ id: '2', quantity: 7, Price: 0 }),
+      ],
+    }));
+    expect(hubspotPriceClient.updateDealAmount).toHaveBeenCalledWith(
+      expect.objectContaining({ dealId: '77', totalAmount: 0 })
+    );
+    expect(notifyLineItemPriceOutcome).toHaveBeenCalledWith(expect.objectContaining({
+      body: expect.stringContaining('no está registrado en esta área de ventas'),
+    }));
+    expect(notifyLineItemPriceOutcome.mock.calls[0][0].body).toContain('CPDO/01');
+    expect(notifyLineItemPriceOutcome.mock.calls[0][0].body).toContain('DPDO/01');
+  });
+
+  it('si no se pueden listar las áreas del cliente, igual pone los precios en 0', async () => {
+    const { useCase, hubspotPriceClient, notifyLineItemPriceOutcome, priceListClient } = buildDeps();
+    priceListClient.fetchCustomerSalesAreas = jest.fn(async (_customer, area) => {
+      if (area) return [];
+      throw new Error('SAP 500');
+    });
+
+    await expect(useCase.execute(
+      { dealId: '77', customer: '105049', salesOrganization: 'MQGT', distributionChannel: '01', lineItems: [{ id: '1', itemCode: '80000017', quantity: 2 }] },
+      CONTEXT
+    )).rejects.toThrow('is not registered in sales area');
+
+    expect(hubspotPriceClient.updateLineItems).toHaveBeenCalledWith(expect.objectContaining({
+      enrichedLineItems: [expect.objectContaining({ id: '1', quantity: 2, Price: 0 })],
+    }));
+    // La nota queda sin la lista de áreas, pero no dice "las áreas son:" y corta.
+    expect(notifyLineItemPriceOutcome.mock.calls[0][0].body)
+      .not.toContain('Las áreas de ventas que este cliente tiene');
+  });
+
+  it('con más de una fila en la misma área falla pidiendo la división, sin tocar HubSpot', async () => {
+    const { useCase, hubspotPriceClient } = buildDeps({
+      salesAreas: [
+        { Customer: '105049', SalesOrganization: 'FQCR', DistributionChannel: '01', Division: 'SC', PriceListType: 'ZC' },
+        { Customer: '105049', SalesOrganization: 'FQCR', DistributionChannel: '01', Division: 'CH', PriceListType: 'ZD' },
+      ],
+    });
+
+    await expect(useCase.execute(
+      { dealId: '77', customer: '105049', salesOrganization: 'FQCR', distributionChannel: '01', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
+      CONTEXT
+    )).rejects.toThrow(/has 2 rows in sales area FQCR\/01.*division is needed/s);
+
+    expect(hubspotPriceClient.updateLineItems).not.toHaveBeenCalled();
+  });
+
+  // Campos vacíos: los precios NO se tocan. Sin área no se consultó nada en SAP, así que no hay
+  // nada que afirmar sobre las líneas.
+  it.each([
+    ['sin organización', { salesOrganization: '  ', distributionChannel: '01' }],
+    ['sin canal', { salesOrganization: 'FQCR', distributionChannel: null }],
+  ])('falla %s con la nota pidiendo el campo y sin tocar los precios', async (_label, area) => {
+    const { useCase, hubspotPriceClient, notifyLineItemPriceOutcome, priceListClient } = buildDeps();
+
+    await expect(useCase.execute(
+      { dealId: '77', customer: '105049', ...area, lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
+      CONTEXT
+    )).rejects.toThrow('Deal has no sales organization or distribution channel');
+
+    expect(hubspotPriceClient.updateLineItems).not.toHaveBeenCalled();
+    expect(hubspotPriceClient.updateDealAmount).not.toHaveBeenCalled();
+    expect(priceListClient.fetchCustomerSalesAreas).not.toHaveBeenCalled();
+    expect(notifyLineItemPriceOutcome).toHaveBeenCalledWith(expect.objectContaining({
+      body: expect.stringContaining('falta la organización de ventas'),
+    }));
+  });
+
+  // La `price` del line item hereda la moneda del negocio, así que escribir ahí una tarifa en
+  // otra moneda es un precio silenciosamente equivocado.
+  it('saltea la línea cuya condición está en otra moneda y escribe las demás', async () => {
+    const { useCase, notifyLineItemPriceOutcome } = buildDeps({
+      candidatesByMaterial: {
+        80000017: CANDIDATES_80000017,
+        80000029: [{ ...CANDIDATES_80000017[0], material: '80000029', conditionCurrency: 'DOP', conditionRateValue: 75 }],
+      },
+    });
+
+    const result = await useCase.execute(
+      {
+        dealId: '77',
+        customer: '105049',
+        salesOrganization: 'FQCR',
+        distributionChannel: '01',
+        dealCurrency: 'USD',
+        lineItems: [
+          { id: '1', itemCode: '80000017', quantity: 1 },
+          { id: '2', itemCode: '80000029', quantity: 1 },
+        ],
+      },
+      CONTEXT
+    );
+
+    expect(result.data.lineItems).toHaveLength(1);
+    expect(result.data.lineItems[0].id).toBe('1');
+    expect(result.data.skippedLineItems).toEqual([
+      expect.objectContaining({
+        id: '2',
+        itemCode: '80000029',
+        reason: 'condition currency DOP does not match the deal currency USD',
+      }),
+    ]);
+    expect(notifyLineItemPriceOutcome.mock.calls[0][0].body)
+      .toContain('does not match the deal currency USD');
+  });
+
+  it('sin dealCurrency no hay guardia de moneda y la condición se escribe tal cual', async () => {
+    const { useCase } = buildDeps({
+      candidatesByMaterial: {
+        80000017: [{ ...CANDIDATES_80000017[0], conditionCurrency: 'DOP', conditionRateValue: 75 }],
+      },
+    });
+
+    const result = await useCase.execute(
+      { dealId: '77', customer: '105049', salesOrganization: 'FQCR', distributionChannel: '01', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
+      CONTEXT
+    );
+
+    expect(result.data.lineItems[0]).toMatchObject({ Price: 75, Currency: 'DOP' });
+    expect(result.data.skippedLineItems).toEqual([]);
+  });
+
+  it('si TODAS las líneas fallan por moneda, el negocio falla y la nota lo explica', async () => {
+    const { useCase, notifyLineItemPriceOutcome } = buildDeps({
+      candidatesByMaterial: {
+        80000017: [{ ...CANDIDATES_80000017[0], conditionCurrency: 'DOP', conditionRateValue: 75 }],
+      },
+    });
+
+    await expect(useCase.execute(
+      { dealId: '77', customer: '105049', salesOrganization: 'FQCR', distributionChannel: '01', dealCurrency: 'USD', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
+      CONTEXT
+    )).rejects.toThrow('No line item prices could be resolved');
+
+    expect(notifyLineItemPriceOutcome.mock.calls[0][0].body)
+      .toContain('does not match the deal currency USD');
+  });
+
   it('cae a la lista default cuando el cliente no tiene PriceListType, y el origen reportado es defaultPriceList', async () => {
     const { useCase } = buildDeps({
       salesAreas: [{ Customer: '105049', SalesOrganization: 'FQCR', DistributionChannel: '01', Division: 'SC', PriceListType: '' }],
@@ -138,7 +372,7 @@ describe('SyncS4LineItemPricesByPriceList', () => {
     });
 
     const result = await useCase.execute(
-      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
+      { dealId: '77', customer: '105049', salesOrganization: 'FQCR', distributionChannel: '01', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
       CONTEXT
     );
 
@@ -169,7 +403,7 @@ describe('SyncS4LineItemPricesByPriceList', () => {
     });
 
     const result = await useCase.execute(
-      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
+      { dealId: '77', customer: '105049', salesOrganization: 'FQCR', distributionChannel: '01', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
       CONTEXT
     );
 
@@ -198,6 +432,8 @@ describe('SyncS4LineItemPricesByPriceList', () => {
       {
         dealId: '77',
         customer: '105049',
+        salesOrganization: 'FQCR',
+        distributionChannel: '01',
         lineItems: [
           { id: '1', itemCode: '80000017', quantity: 1 },
           { id: '2', itemCode: '80000029', quantity: 1 },
@@ -233,6 +469,8 @@ describe('SyncS4LineItemPricesByPriceList', () => {
       {
         dealId: '77',
         customer: '105049',
+        salesOrganization: 'FQCR',
+        distributionChannel: '01',
         lineItems: [
           { id: '1', itemCode: '80000017', quantity: 1 },
           { id: '2', itemCode: '80000029', quantity: 1 },
@@ -266,7 +504,7 @@ describe('SyncS4LineItemPricesByPriceList', () => {
     useCase.logger = { warn, info: jest.fn() };
 
     const result = await useCase.execute(
-      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
+      { dealId: '77', customer: '105049', salesOrganization: 'FQCR', distributionChannel: '01', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
       CONTEXT
     );
 
@@ -287,190 +525,13 @@ describe('SyncS4LineItemPricesByPriceList', () => {
     const { useCase } = buildDeps();
 
     const result = await useCase.execute(
-      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
+      { dealId: '77', customer: '105049', salesOrganization: 'FQCR', distributionChannel: '01', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
       CONTEXT
     );
 
     expect(result.audit.rounds[0].enrichedLineItems[0]).toEqual(
       expect.objectContaining({ conditionQuantityUnit: 'KG', conditionRecord: '0000418608' })
     );
-  });
-
-  // I6 de la revisión final: con `Division` vacía en las filas de S/4 no había configuración
-  // posible. La comparación ignora `division` cuando alguno de los dos lados la trae vacía.
-  it('elige el área configurada aunque las filas de SAP traigan Division vacía', async () => {
-    const { useCase, priceListClient } = buildDeps({
-      salesAreas: [
-        { Customer: '105049', SalesOrganization: 'CPDO', DistributionChannel: '01', Division: '', PriceListType: 'ZD' },
-        { Customer: '105049', SalesOrganization: 'FQCR', DistributionChannel: '01', Division: '', PriceListType: 'ZC' },
-      ],
-    });
-
-    await useCase.execute(
-      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
-      CONTEXT
-    );
-
-    expect(priceListClient.fetchConditionCandidates).toHaveBeenCalledWith(
-      expect.objectContaining({
-        salesArea: { salesOrganization: 'FQCR', distributionChannel: '01', division: null },
-      })
-    );
-  });
-
-  it('los mensajes de error de área muestran las áreas del cliente y la configurada', async () => {
-    const { useCase: withoutConfig } = buildDeps({
-      salesAreas: [
-        { Customer: '105049', SalesOrganization: 'CPDO', DistributionChannel: '01', Division: 'SC', PriceListType: 'ZD' },
-        { Customer: '105049', SalesOrganization: 'FQCR', DistributionChannel: '01', Division: '', PriceListType: 'ZC' },
-      ],
-      config: {
-        conditionType: 'ZPR0', defaultPriceListType: 'ZA', salesArea: null, priceListProperty: null, currencyProperty: null, priceSourceProperty: null,
-      },
-    });
-
-    // Sin config: el error lista las áreas que el cliente TIENE, con la división vacía visible.
-    const noConfigError = await withoutConfig.execute(
-      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
-      CONTEXT
-    ).catch((caught) => caught);
-    expect(noConfigError.message).toContain('CPDO/01/SC');
-    expect(noConfigError.message).toContain('FQCR/01/(empty)');
-
-    const { useCase: mismatched } = buildDeps({
-      salesAreas: [
-        { Customer: '105049', SalesOrganization: 'CPDO', DistributionChannel: '01', Division: 'SC', PriceListType: 'ZD' },
-        { Customer: '105049', SalesOrganization: 'MQGT', DistributionChannel: '02', Division: 'SC', PriceListType: 'ZB' },
-      ],
-    });
-
-    // Con config que no calza: el error muestra los DOS lados de la comparación.
-    const mismatchError = await mismatched.execute(
-      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
-      CONTEXT
-    ).catch((caught) => caught);
-    expect(mismatchError.message).toContain('FQCR/01/SC');
-    expect(mismatchError.message).toContain('CPDO/01/SC, MQGT/02/SC');
-  });
-
-  it('falla pidiendo la división cuando el área configurada sin division empata con dos del cliente', async () => {
-    const { useCase } = buildDeps({
-      salesAreas: [
-        { Customer: '105049', SalesOrganization: 'FQCR', DistributionChannel: '01', Division: 'SC', PriceListType: 'ZC' },
-        { Customer: '105049', SalesOrganization: 'FQCR', DistributionChannel: '01', Division: 'MP', PriceListType: 'ZD' },
-      ],
-      config: {
-        conditionType: 'ZPR0',
-        defaultPriceListType: 'ZA',
-        salesArea: { salesOrganization: 'FQCR', distributionChannel: '01', division: null },
-        priceListProperty: null,
-        currencyProperty: null,
-        priceSourceProperty: null,
-      },
-    });
-
-    await expect(useCase.execute(
-      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
-      CONTEXT
-    )).rejects.toThrow(/matches 2 sales areas .*add s4PriceList\.salesArea\.division/);
-  });
-
-  it('elige el área configurada cuando el cliente tiene varias', async () => {
-    const { useCase, priceListClient } = buildDeps({
-      salesAreas: [
-        { Customer: '105049', SalesOrganization: 'CPDO', DistributionChannel: '01', Division: 'SC', PriceListType: 'ZD' },
-        { Customer: '105049', SalesOrganization: 'FQCR', DistributionChannel: '01', Division: 'SC', PriceListType: 'ZC' },
-      ],
-    });
-
-    await useCase.execute(
-      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
-      CONTEXT
-    );
-
-    expect(priceListClient.fetchConditionCandidates).toHaveBeenCalledWith(
-      expect.objectContaining({ salesArea: { salesOrganization: 'FQCR', distributionChannel: '01', division: 'SC' } })
-    );
-  });
-
-  it('falla cuando el cliente tiene varias áreas y no hay ninguna configurada', async () => {
-    const { useCase } = buildDeps({
-      salesAreas: [
-        { Customer: '105049', SalesOrganization: 'CPDO', DistributionChannel: '01', Division: 'SC', PriceListType: 'ZD' },
-        { Customer: '105049', SalesOrganization: 'FQCR', DistributionChannel: '01', Division: 'SC', PriceListType: 'ZC' },
-      ],
-      config: { conditionType: 'ZPR0', defaultPriceListType: 'ZA', salesArea: null, priceListProperty: null, currencyProperty: null },
-    });
-
-    await expect(useCase.execute(
-      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
-      CONTEXT
-    )).rejects.toThrow('has 2 sales areas');
-  });
-
-  it('falla cuando el área configurada no pertenece al cliente', async () => {
-    const { useCase } = buildDeps({
-      salesAreas: [
-        { Customer: '105049', SalesOrganization: 'CPDO', DistributionChannel: '01', Division: 'SC', PriceListType: 'ZD' },
-        { Customer: '105049', SalesOrganization: 'MQGT', DistributionChannel: '01', Division: 'SC', PriceListType: 'ZB' },
-      ],
-    });
-
-    await expect(useCase.execute(
-      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
-      CONTEXT
-    )).rejects.toThrow('does not belong to customer');
-  });
-
-  it('cae al área configurada y la lista default cuando el cliente no tiene áreas en SAP', async () => {
-    const { useCase, priceListClient, hubspotPriceClient } = buildDeps({
-      salesAreas: [],
-      config: {
-        conditionType: 'ZPR0',
-        defaultPriceListType: 'ZC',
-        salesArea: { salesOrganization: 'FQCR', distributionChannel: '01', division: 'SC' },
-        priceListProperty: 'lista_de_precios_sap',
-        currencyProperty: 'moneda_precio_sap',
-        priceSourceProperty: 'origen_precio_sap',
-      },
-    });
-
-    const result = await useCase.execute(
-      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
-      CONTEXT
-    );
-
-    // Las condiciones se consultan con el área de la config, no con ninguna del cliente.
-    expect(priceListClient.fetchConditionCandidates).toHaveBeenCalledWith(expect.objectContaining({
-      salesArea: { salesOrganization: 'FQCR', distributionChannel: '01', division: 'SC' },
-    }));
-    expect(result.data.salesAreaSource).toBe('configuredDefault');
-    // El origen NO puede decir customerPriceList: el cliente no tiene lista.
-    expect(result.data.lineItems[0]).toMatchObject({ Price: 1.28, priceSource: 'defaultPriceList' });
-    expect(result.data.priceListType).toBe('ZC');
-    expect(useCase.logger.warn).toHaveBeenCalledWith(expect.objectContaining({
-      msg: expect.stringContaining('customer has no sales areas in SAP'),
-    }));
-    expect(hubspotPriceClient.updateLineItems).toHaveBeenCalled();
-  });
-
-  it('falla cuando el cliente no tiene áreas y s4PriceList.salesArea no está configurada', async () => {
-    const { useCase } = buildDeps({
-      salesAreas: [],
-      config: {
-        conditionType: 'ZPR0',
-        defaultPriceListType: 'ZC',
-        salesArea: null,
-        priceListProperty: null,
-        currencyProperty: null,
-        priceSourceProperty: null,
-      },
-    });
-
-    await expect(useCase.execute(
-      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
-      CONTEXT
-    )).rejects.toThrow('s4PriceList.salesArea is not configured');
   });
 
   it('deja nota en el deal cuando alguna línea quedó sin precio, y no cuando todas se valorizaron', async () => {
@@ -482,6 +543,8 @@ describe('SyncS4LineItemPricesByPriceList', () => {
       {
         dealId: '77',
         customer: '105049',
+        salesOrganization: 'FQCR',
+        distributionChannel: '01',
         lineItems: [
           { id: '1', itemCode: '80000017', quantity: 1 },
           { id: '2', itemCode: '99999999', quantity: 1 },
@@ -499,7 +562,7 @@ describe('SyncS4LineItemPricesByPriceList', () => {
     // Todo valorizado: el builder devuelve null y no se crea ninguna nota.
     const sinSalteadas = buildDeps();
     await sinSalteadas.useCase.execute(
-      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
+      { dealId: '77', customer: '105049', salesOrganization: 'FQCR', distributionChannel: '01', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
       CONTEXT
     );
     expect(sinSalteadas.notifyLineItemPriceOutcome).toHaveBeenCalledWith(
@@ -513,7 +576,7 @@ describe('SyncS4LineItemPricesByPriceList', () => {
     });
 
     await expect(useCase.execute(
-      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
+      { dealId: '77', customer: '105049', salesOrganization: 'FQCR', distributionChannel: '01', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
       CONTEXT
     )).rejects.toThrow('No line item prices could be resolved');
 
@@ -538,6 +601,8 @@ describe('SyncS4LineItemPricesByPriceList', () => {
       {
         dealId: '77',
         customer: '105049',
+        salesOrganization: 'FQCR',
+        distributionChannel: '01',
         lineItems: [
           { id: '1', itemCode: '80000017', quantity: 1 },
           { id: '2', itemCode: '99999999', quantity: 1 },
@@ -565,7 +630,7 @@ describe('SyncS4LineItemPricesByPriceList', () => {
     const { useCase, hubspotPriceClient } = buildDeps({ candidatesByMaterial: {} });
 
     await expect(useCase.execute(
-      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
+      { dealId: '77', customer: '105049', salesOrganization: 'FQCR', distributionChannel: '01', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
       CONTEXT
     )).rejects.toThrow('No line item prices could be resolved');
 
@@ -579,6 +644,8 @@ describe('SyncS4LineItemPricesByPriceList', () => {
       {
         dealId: '77',
         customer: '105049',
+        salesOrganization: 'FQCR',
+        distributionChannel: '01',
         lineItems: [
           { id: '1', itemCode: '80000017', quantity: 1 },
           { id: '2', itemCode: '80000017', quantity: 2 },
@@ -594,7 +661,7 @@ describe('SyncS4LineItemPricesByPriceList', () => {
     const { useCase } = buildDeps({ salesAreas: [] });
 
     const error = await useCase.execute(
-      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
+      { dealId: '77', customer: '105049', salesOrganization: 'FQCR', distributionChannel: '01', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
       CONTEXT
     ).catch((caught) => caught);
 
@@ -620,7 +687,7 @@ describe('SyncS4LineItemPricesByPriceList', () => {
     });
 
     const error = await useCase.execute(
-      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
+      { dealId: '77', customer: '105049', salesOrganization: 'FQCR', distributionChannel: '01', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
       CONTEXT
     ).catch((caught) => caught);
 
@@ -648,6 +715,8 @@ describe('SyncS4LineItemPricesByPriceList', () => {
       {
         dealId: '77',
         customer: '105049',
+        salesOrganization: 'FQCR',
+        distributionChannel: '01',
         lineItems: [
           { id: '1', itemCode: '80000017', quantity: 1 },
           { id: '2', itemCode: '', quantity: 1 },
@@ -728,7 +797,7 @@ describe('SyncS4LineItemPricesByPriceList', () => {
     });
 
     await expect(useCase.execute(
-      { dealId: '77', customer: '105049', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
+      { dealId: '77', customer: '105049', salesOrganization: 'FQCR', distributionChannel: '01', lineItems: [{ id: '1', itemCode: '80000017', quantity: 1 }] },
       CONTEXT
     // Mensaje REAL de S4PriceListClient.buildValidityFilter, no uno inventado en un doble.
     )).rejects.toThrow('salesArea.distributionChannel is required for fetchConditionCandidates');

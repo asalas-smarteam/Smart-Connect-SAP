@@ -93,6 +93,51 @@ describe('S4PriceListClient', () => {
     expect(transport.fetchAll).not.toHaveBeenCalled();
   });
 
+  // El área de ventas la declara el negocio de HubSpot, así que se filtra en SAP y la respuesta
+  // trae 0 o 1 fila: `Customer + SalesOrganization + DistributionChannel` identifica una sola
+  // (verificado el 2026-08-24 sobre las 8974 filas del sistema, cero duplicados).
+  it('filtra también por organización de ventas y canal cuando llegan los dos', async () => {
+    const transport = buildTransport({ salesAreas: [{ Customer: '100061', PriceListType: 'ZD' }] });
+    const client = new S4PriceListClient({ transport });
+
+    const rows = await client.fetchCustomerSalesAreas('100061', {
+      salesOrganization: 'CPDO',
+      distributionChannel: '01',
+    });
+
+    expect(rows).toEqual([{ Customer: '100061', PriceListType: 'ZD' }]);
+    expect(filterOf(transport, CUSTOMER_SALES_AREA_PATH)).toBe(
+      "Customer eq '100061' and SalesOrganization eq 'CPDO' and DistributionChannel eq '01'"
+    );
+  });
+
+  // Sin el segundo argumento se comporta como antes: ese camino lo usa el caso de uso para armar
+  // la nota que le lista al asesor las áreas que el cliente SÍ tiene.
+  it('sin el segundo argumento sigue filtrando sólo por cliente', async () => {
+    const transport = buildTransport({ salesAreas: [{ Customer: '100061' }] });
+    const client = new S4PriceListClient({ transport });
+
+    await client.fetchCustomerSalesAreas('100061');
+
+    expect(filterOf(transport, CUSTOMER_SALES_AREA_PATH)).toBe("Customer eq '100061'");
+  });
+
+  // Un filtro a medias devuelve filas de otros canales y el llamador no tiene forma de notarlo:
+  // creería que ésa es el área del negocio y escribiría los precios de otra.
+  it.each([
+    ['sin canal', { salesOrganization: 'CPDO' }],
+    ['sin organizacion', { distributionChannel: '01' }],
+    ['con el canal vacio', { salesOrganization: 'CPDO', distributionChannel: '   ' }],
+  ])('lanza %s en vez de armar un filtro a medias', async (_label, area) => {
+    const transport = buildTransport();
+    const client = new S4PriceListClient({ transport });
+
+    await expect(client.fetchCustomerSalesAreas('100061', area)).rejects.toThrow(
+      /salesOrganization and distributionChannel must be provided together/
+    );
+    expect(transport.fetchAll).not.toHaveBeenCalled();
+  });
+
   // Este test AFIRMABA que la hora del momento (15:04:05) viajaba tal cual a los dos literales.
   // Documentaba el comportamiento equivocado: las fechas de vigencia de SAP son fechas puras a
   // medianoche UTC, así que con la hora puesta `ConditionValidityEndDate ge datetime'…T15:04:05'`

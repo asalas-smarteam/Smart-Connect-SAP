@@ -39,6 +39,8 @@ describe('resolveS4PriceForMaterial', () => {
       // permite reconstruir después de dónde salió un precio unitario raro.
       conditionQuantityUnit: 'KG',
       source: S4_PRICE_SOURCES.CUSTOMER_PRICE_LIST,
+      // Sin dealCurrency no hay nada contra qué comparar, así que nunca hay desajuste.
+      currencyMismatch: false,
     });
   });
 
@@ -186,5 +188,108 @@ describe('resolveS4PriceForMaterial', () => {
       customerPriceListType: 'ZC',
       defaultPriceListType: 'ZD',
     })).toBeNull();
+  });
+});
+
+// dealCurrency: desempate entre candidatos y guardia. Los datos que lo motivan (verificados el
+// 2026-08-24 contra el S/4 de Multiquímica): en MKDO/01 hay 97 combinaciones material+lista con
+// default de producto en USD Y en DOP, y hoy gana el que Gateway devuelva primero.
+describe('resolveS4PriceForMaterial con dealCurrency', () => {
+  const dosMonedas = [
+    candidate({ conditionRecord: '0000200002', conditionTable: '501', priceListType: null, conditionRateValue: 120, conditionCurrency: 'DOP' }),
+    candidate({ conditionRecord: '0000200001', conditionTable: '501', priceListType: null, conditionRateValue: 2, conditionCurrency: 'USD' }),
+  ];
+
+  it('elige el candidato en la moneda del negocio', () => {
+    const result = resolveS4PriceForMaterial({
+      candidates: dosMonedas,
+      customerPriceListType: null,
+      defaultPriceListType: 'ZC',
+      dealCurrency: 'DOP',
+    });
+
+    expect(result).toMatchObject({
+      price: 120,
+      currency: 'DOP',
+      conditionRecord: '0000200002',
+      currencyMismatch: false,
+    });
+  });
+
+  it('es reproducible cuando ninguna moneda coincide: gana el conditionRecord menor', () => {
+    const enOrden = resolveS4PriceForMaterial({
+      candidates: dosMonedas, defaultPriceListType: 'ZC', dealCurrency: 'GTQ',
+    });
+    const alReves = resolveS4PriceForMaterial({
+      candidates: [...dosMonedas].reverse(), defaultPriceListType: 'ZC', dealCurrency: 'GTQ',
+    });
+
+    expect(enOrden.conditionRecord).toBe('0000200001');
+    expect(alReves.conditionRecord).toBe('0000200001');
+    expect(enOrden.currencyMismatch).toBe(true);
+  });
+
+  it('sin dealCurrency el resultado es reproducible igual, y currencyMismatch es false', () => {
+    const a = resolveS4PriceForMaterial({ candidates: dosMonedas, defaultPriceListType: 'ZC' });
+    const b = resolveS4PriceForMaterial({
+      candidates: [...dosMonedas].reverse(), defaultPriceListType: 'ZC',
+    });
+
+    expect(a.conditionRecord).toBe('0000200001');
+    expect(b.conditionRecord).toBe('0000200001');
+    expect(a.currencyMismatch).toBe(false);
+  });
+
+  it('la prioridad de tablas manda sobre la moneda: 501 gana aunque la 504 tenga la del negocio', () => {
+    const result = resolveS4PriceForMaterial({
+      candidates: [
+        candidate({ conditionRecord: '0000300001', conditionTable: '504', priceListType: null, conditionRateValue: 9, conditionCurrency: 'DOP' }),
+        candidate({ conditionRecord: '0000300002', conditionTable: '501', priceListType: null, conditionRateValue: 3, conditionCurrency: 'USD' }),
+      ],
+      defaultPriceListType: 'ZC',
+      dealCurrency: 'DOP',
+    });
+
+    expect(result).toMatchObject({
+      conditionRecord: '0000300002',
+      currency: 'USD',
+      currencyMismatch: true,
+    });
+  });
+
+  it('NO descarta el candidato por moneda: la lista del cliente gana aunque no coincida', () => {
+    const result = resolveS4PriceForMaterial({
+      candidates: [
+        candidate({ conditionRecord: '0000111922', conditionTable: '502', priceListType: 'ZC', conditionRateValue: 1.95, conditionCurrency: 'USD' }),
+        candidate({ conditionRecord: '0000400001', conditionTable: '501', priceListType: null, conditionRateValue: 88, conditionCurrency: 'DOP' }),
+      ],
+      customerPriceListType: 'ZC',
+      defaultPriceListType: 'ZD',
+      dealCurrency: 'DOP',
+    });
+
+    expect(result).toMatchObject({
+      conditionRecord: '0000111922',
+      source: S4_PRICE_SOURCES.CUSTOMER_PRICE_LIST,
+      currencyMismatch: true,
+    });
+  });
+
+  it('desempata por moneda TAMBIEN dentro de la lista de precios, no solo en el default', () => {
+    const result = resolveS4PriceForMaterial({
+      candidates: [
+        candidate({ conditionRecord: '0000500001', conditionTable: '502', priceListType: 'ZC', conditionRateValue: 1.95, conditionCurrency: 'USD' }),
+        candidate({ conditionRecord: '0000500002', conditionTable: '502', priceListType: 'ZC', conditionRateValue: 115, conditionCurrency: 'DOP' }),
+      ],
+      customerPriceListType: 'ZC',
+      defaultPriceListType: 'ZD',
+      dealCurrency: 'DOP',
+    });
+
+    expect(result).toMatchObject({
+      conditionRecord: '0000500002',
+      currency: 'DOP',
+      currencyMismatch: false,
+    });
   });
 });

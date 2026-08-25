@@ -1,0 +1,422 @@
+[
+  {
+    "name": "a0002_instock",
+    "label": "CENTRAL En stock",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0002_committed",
+    "label": "CENTRAL Comprometido",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0002_ordered",
+    "label": "CENTRAL Solicitado",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0001_instock",
+    "label": "IMPORTACION En stock",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0001_committed",
+    "label": "IMPORTACION Comprometido",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0001_ordered",
+    "label": "IMPORTACION Solicitado",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0003_instock",
+    "label": "TALLER AMC En stock",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0003_committed",
+    "label": "TALLER AMC Comprometido",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0003_ordered",
+    "label": "TALLER AMC Solicitado",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0004_instock",
+    "label": "GARANTIA En stock",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0004_committed",
+    "label": "GARANTIA Comprometido",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0004_ordered",
+    "label": "GARANTIA Solicitado",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0005_instock",
+    "label": "PENDIENTE NOTA DE CRÉDITO En stock",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0005_committed",
+    "label": "PENDIENTE NOTA DE CRÉDITO Comprometido",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0005_ordered",
+    "label": "PENDIENTE NOTA DE CRÉDITO Solicitado",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0006_instock",
+    "label": "PENDIENTE DE FACTURAR En stock",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0006_committed",
+    "label": "PENDIENTE DE FACTURAR Comprometido",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0006_ordered",
+    "label": "PENDIENTE DE FACTURAR Solicitado",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0007_instock",
+    "label": "MANTO. PROGRAMADOS En stock",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0007_committed",
+    "label": "MANTO. PROGRAMADOS Comprometido",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0007_ordered",
+    "label": "MANTO. PROGRAMADOS Solicitado",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0008_instock",
+    "label": "BODEGA MAL ESTADO En stock",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0008_committed",
+    "label": "BODEGA MAL ESTADO Comprometido",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0008_ordered",
+    "label": "BODEGA MAL ESTADO Solicitado",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0009_instock",
+    "label": "MUESTRAS En stock",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0009_committed",
+    "label": "MUESTRAS Comprometido",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0009_ordered",
+    "label": "MUESTRAS Solicitado",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0010_instock",
+    "label": "AGRECA XELA En stock",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0010_committed",
+    "label": "AGRECA XELA Comprometido",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0010_ordered",
+    "label": "AGRECA XELA Solicitado",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0011_instock",
+    "label": "AGRECA PALIN ESTE En stock",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0011_committed",
+    "label": "AGRECA PALIN ESTE Comprometido",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0011_ordered",
+    "label": "AGRECA PALIN ESTE Solicitado",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0012_instock",
+    "label": "AGREGA PALIN OESTE En stock",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0012_committed",
+    "label": "AGREGA PALIN OESTE Comprometido",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0012_ordered",
+    "label": "AGREGA PALIN OESTE Solicitado",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0013_instock",
+    "label": "AGRECA En stock",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0013_committed",
+    "label": "AGRECA Comprometido",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0013_ordered",
+    "label": "AGRECA Solicitado",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a9999_instock",
+    "label": "PROVEEDURIA En stock",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a9999_committed",
+    "label": "PROVEEDURIA Comprometido",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a9999_ordered",
+    "label": "PROVEEDURIA Solicitado",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a9998_instock",
+    "label": "INSUMOS En stock",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a9998_committed",
+    "label": "INSUMOS Comprometido",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a9998_ordered",
+    "label": "INSUMOS Solicitado",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0014_instock",
+    "label": "CALERUEGA 3486222 En stock",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0014_committed",
+    "label": "CALERUEGA 3486222 Comprometido",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0014_ordered",
+    "label": "CALERUEGA 3486222 Solicitado",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0015_instock",
+    "label": "CALERUEGA 3373339 En stock",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0015_committed",
+    "label": "CALERUEGA 3373339 Comprometido",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0015_ordered",
+    "label": "CALERUEGA 3373339 Solicitado",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0016_instock",
+    "label": "CALERUEGA 3335280 En stock",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0016_committed",
+    "label": "CALERUEGA 3335280 Comprometido",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0016_ordered",
+    "label": "CALERUEGA 3335280 Solicitado",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0017_instock",
+    "label": "PRODIVA GA37 API213147 En stock",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0017_committed",
+    "label": "PRODIVA GA37 API213147 Comprometido",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0017_ordered",
+    "label": "PRODIVA GA37 API213147 Solicitado",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0018_instock",
+    "label": "VITALI GA37 AII 384939 En stock",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0018_committed",
+    "label": "VITALI GA37 AII 384939 Comprometido",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  },
+  {
+    "name": "a0018_ordered",
+    "label": "VITALI GA37 AII 384939 Solicitado",
+    "type": "number",
+    "fieldType": "number",
+    "groupName": "productinformation"
+  }
+]
