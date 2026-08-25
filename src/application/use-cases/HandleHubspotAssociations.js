@@ -3,6 +3,11 @@ import {
   resolveBypassEmail,
 } from '#application/services/bypassEmail.service.js';
 import { buildCompanyContactPayload } from '#application/services/companyContactPayload.service.js';
+import {
+  claimEmail,
+  resolveContactEmployeeEmail,
+} from '#application/services/contactEmployeeIdentity.service.js';
+import { normalizeIndexKey } from '#application/services/crmObjectIndex.service.js';
 
 export const ASSOCIATION_MAP = Object.freeze({
   deal: ['contact', 'company', 'product'],
@@ -241,6 +246,11 @@ export class HandleHubspotAssociations {
     let sapContacts;
     let mappedContacts;
     let bypassEmail;
+    // Emails reclamados en ESTA llamada. Vive acá y no en la instancia: el
+    // use-case se comparte entre tenants. Cubre a los gemelos del mismo BP;
+    // entre BPs lo cubre la búsqueda, con el 409 del create como respaldo
+    // para la ventana de consistencia eventual de la Search API.
+    const claimedEmails = new Map();
 
     try {
       // B1 embeds ContactEmployees in the company record; S/4 attaches the
@@ -273,6 +283,13 @@ export class HandleHubspotAssociations {
         'contactEmployee'
       );
       bypassEmail = await this.getBypassEmail({ tenantModels });
+
+      // Un BP persona ya existe como contacto con su propio email: cualquier
+      // CE que lo comparta debe separarse con +InternalCode, no resolverse al
+      // padre (era el caso "auto-asociación -> skip" que dejaba al CE sin crear).
+      if (parentObjectType === 'contact') {
+        claimEmail(claimedEmails, item?.properties?.email, '#parent');
+      }
     } catch (setupError) {
       this.logger.error?.('Company contact sync error:', setupError);
       contactErrors.push(buildContactErrorEntry({
@@ -356,9 +373,52 @@ export class HandleHubspotAssociations {
           continue;
         }
 
-        const existingContact = await this.contactHandler.find({
+        // Resolución de email duplicado: el dueño del email limpio lo
+        // conserva; cualquier otro CE va con localpart+InternalCode@domain.
+        if (contactPayload.properties.email) {
+          const cleanEmail = contactPayload.properties.email;
+          // El código del CE en el espacio del payload (en B1 y S/4 coincide
+          // con sapInternalCode; el payload manda porque es lo que HubSpot
+          // guarda en `internalcode` y contra lo que se compara al dueño).
+          const ceCode = contactPayload.properties.internalcode ?? sapInternalCode;
+
+          let owner = null;
+          if (!claimedEmails.has(normalizeIndexKey(cleanEmail))) {
+            const ownerRecord = await this.contactHandler.findByEmail({
+              token,
+              email: cleanEmail,
+              clientConfig,
+              tenantModels,
+            });
+            owner = ownerRecord
+              ? { internalcode: ownerRecord.properties?.internalcode }
+              : null;
+          }
+
+          const resolvedEmail = resolveContactEmployeeEmail({
+            email: cleanEmail,
+            internalCode: ceCode,
+            owner,
+            claimedEmails,
+          });
+
+          if (resolvedEmail !== cleanEmail) {
+            this.logger.warn?.('Contact employee con email duplicado: se aplica plus addressing', {
+              sapInternalCode,
+              sapCompanyId,
+              cleanEmail,
+              resolvedEmail,
+            });
+          }
+
+          contactPayload.properties.email = resolvedEmail;
+          claimEmail(claimedEmails, resolvedEmail, ceCode);
+        }
+
+        const existingContact = await this.contactHandler.findContactEmployee({
           token,
-          item: contactPayload,
+          internalcode: contactPayload.properties.internalcode ?? sapInternalCode,
+          email: contactPayload.properties.email,
           clientConfig,
           tenantModels,
         });
