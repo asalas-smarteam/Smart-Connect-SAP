@@ -1,11 +1,15 @@
 import { jest } from '@jest/globals';
 import { HandleHubspotAssociations } from '../../../src/application/use-cases/HandleHubspotAssociations.js';
 
-// Harness calcado del de syncCompanyContactsS4.test.js, con los finders nuevos.
+// Identidad de los ContactEmployees en el camino secuencial. La regla vigente
+// (el plus addressing +InternalCode se probó y se REVIRTIÓ porque duplicaba
+// contactos cuando el dueño del email no tenía internalcode):
+//   1. si existe por internalcode -> update;
+//   2. si no, existe por email -> update (adopta el internalcode);
+//   3. si no existe por ninguno -> create + asociación al BP.
 function buildHandler() {
   const contactHandler = {
     find: jest.fn(async () => null),
-    findByEmail: jest.fn(async () => null),
     findContactEmployee: jest.fn(async () => null),
     create: jest.fn(async ({ item }) => ({ id: `hs-${item.properties.internalcode}` })),
     update: jest.fn(async () => ({})),
@@ -45,15 +49,14 @@ function buildCompanyItem(contactEmployees) {
   };
 }
 
-describe('syncCompanyContacts — emails duplicados entre ContactEmployees', () => {
-  it('el primero conserva el email limpio y el segundo va con +InternalCode', async () => {
+describe('syncCompanyContacts — identidad de ContactEmployees (sin plus addressing)', () => {
+  it('el email del CE se envía TAL CUAL viene de SAP, nunca reescrito', async () => {
     const { handler, contactHandler } = buildHandler();
 
     const { contactErrors } = await handler.syncCompanyContacts({
       token: 't',
       item: buildCompanyItem([
         { InternalCode: 91643, Name: 'Marleni', E_Mail: 'recepcion@tecnopack.net' },
-        { InternalCode: 91794, Name: 'Sofia', E_Mail: 'recepcion@tecnopack.net' },
       ]),
       clientConfig,
       tenantModels: {},
@@ -61,35 +64,12 @@ describe('syncCompanyContacts — emails duplicados entre ContactEmployees', () 
     });
 
     expect(contactErrors).toEqual([]);
-    const emails = contactHandler.create.mock.calls.map(([{ item }]) => item.properties.email);
-    expect(emails).toEqual(['recepcion@tecnopack.net', 'recepcion+91794@tecnopack.net']);
-  });
-
-  it('si el email limpio ya es de otro contacto en HubSpot, aplica el plus', async () => {
-    const { handler, contactHandler } = buildHandler();
-    contactHandler.findByEmail.mockResolvedValueOnce({
-      id: 'hs-viejo',
-      properties: { internalcode: '99999', email: 'recepcion@tecnopack.net' },
-    });
-
-    await handler.syncCompanyContacts({
-      token: 't',
-      item: buildCompanyItem([{ InternalCode: 91643, Name: 'Marleni', E_Mail: 'recepcion@tecnopack.net' }]),
-      clientConfig,
-      tenantModels: {},
-      companyHubspotId: 'hs-co-1',
-    });
-
     expect(contactHandler.create.mock.calls[0][0].item.properties.email)
-      .toBe('recepcion+91643@tecnopack.net');
+      .toBe('recepcion@tecnopack.net');
   });
 
-  it('el dueño del email limpio (mismo internalcode) lo conserva y se actualiza', async () => {
+  it('regla 1: si existe por internalcode, actualiza ese contacto', async () => {
     const { handler, contactHandler } = buildHandler();
-    contactHandler.findByEmail.mockResolvedValue({
-      id: 'hs-mismo',
-      properties: { internalcode: '91643', email: 'recepcion@tecnopack.net' },
-    });
     contactHandler.findContactEmployee.mockResolvedValue({
       id: 'hs-mismo',
       properties: { internalcode: '91643', email: 'recepcion@tecnopack.net' },
@@ -105,31 +85,65 @@ describe('syncCompanyContacts — emails duplicados entre ContactEmployees', () 
 
     expect(contactHandler.create).not.toHaveBeenCalled();
     expect(contactHandler.update).toHaveBeenCalledWith(expect.objectContaining({ id: 'hs-mismo' }));
-    // El find del CE va por findContactEmployee (internalcode primero), no por el find genérico.
+    // El find del CE es findContactEmployee (internalcode primero, email al
+    // final), nunca el find genérico gobernado por defaultFindHubspot.
     expect(contactHandler.findContactEmployee).toHaveBeenCalledWith(expect.objectContaining({
       internalcode: 91643,
+      email: 'recepcion@tecnopack.net',
     }));
     expect(contactHandler.find).not.toHaveBeenCalled();
   });
 
-  it('padre contact: el CE con el mismo email del padre se separa con +InternalCode y se asocia', async () => {
+  it('regla 2: dos CEs con el mismo email resuelven al MISMO contacto (update, no duplicado ni 409)', async () => {
     const { handler, contactHandler, associationService } = buildHandler();
+    // Marleni no existe todavía; Sofia matchea por email al contacto que
+    // Marleni acaba de crear (el mock emula el fallback por email del handler).
+    contactHandler.findContactEmployee
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'hs-91643',
+        properties: { internalcode: '91643', email: 'recepcion@tecnopack.net' },
+      });
+
+    const { contactErrors } = await handler.syncCompanyContacts({
+      token: 't',
+      item: buildCompanyItem([
+        { InternalCode: 91643, Name: 'Marleni', E_Mail: 'recepcion@tecnopack.net' },
+        { InternalCode: 91794, Name: 'Sofia', E_Mail: 'recepcion@tecnopack.net' },
+      ]),
+      clientConfig,
+      tenantModels: {},
+      companyHubspotId: 'hs-co-1',
+    });
+
+    expect(contactErrors).toEqual([]);
+    expect(contactHandler.create).toHaveBeenCalledTimes(1);
+    expect(contactHandler.update).toHaveBeenCalledWith(expect.objectContaining({ id: 'hs-91643' }));
+    // Los emails salen tal cual vienen de SAP, sin sufijos.
+    expect(contactHandler.create.mock.calls[0][0].item.properties.email)
+      .toBe('recepcion@tecnopack.net');
+    // Ambos sapIds quedan asociados al BP aunque compartan contacto.
+    expect(associationService.associateObjectsBySapId).toHaveBeenCalledTimes(2);
+  });
+
+  it('regla 3: si no existe por internalcode ni email, crea y asocia al BP', async () => {
+    const { handler, contactHandler, associationService, associationRegistry } = buildHandler();
 
     await handler.syncCompanyContacts({
       token: 't',
-      item: {
-        properties: { idsap: 'BP-P1', email: 'na@gmail.com' },
-        rawSapData: { CardCode: 'BP-P1', EmailAddress: 'na@gmail.com', ContactEmployees: [
-          { InternalCode: 91643, Name: 'LUIS GOMEZ', E_Mail: 'na@gmail.com' },
-        ] },
-      },
+      item: buildCompanyItem([{ InternalCode: 91643, Name: 'Marleni', E_Mail: 'recepcion@tecnopack.net' }]),
       clientConfig,
       tenantModels: {},
-      companyHubspotId: 'hs-parent-contact',
-      parentObjectType: 'contact',
+      companyHubspotId: 'hs-co-1',
     });
 
-    expect(contactHandler.create.mock.calls[0][0].item.properties.email).toBe('na+91643@gmail.com');
-    expect(associationService.associateObjectsBySapId).toHaveBeenCalled();
+    expect(contactHandler.create).toHaveBeenCalledTimes(1);
+    expect(associationRegistry.registerBaseObjectMapping).toHaveBeenCalledWith(
+      'cred-1', 'contact', 91643, 'hs-91643', {}
+    );
+    expect(associationService.associateObjectsBySapId).toHaveBeenCalledWith(
+      't', 'cred-1', 'company', 'hs-co-1', 'contact',
+      [{ hubspotId: 'hs-91643', sapId: 91643 }], {}
+    );
   });
 });

@@ -1,7 +1,7 @@
 # ContactEmployees con email duplicado: identidad por internalcode + email `+InternalCode`
 
 **Fecha:** 2026-08-25
-**Estado:** aprobado (diseño validado en sesión con el usuario)
+**Estado:** REVERTIDO 2026-08-25 — el plus addressing duplicó contactos en producción (el dueño del email limpio no tenía internalcode y la regla lo trató como "otro"); queda solo el find de CE internalcode→email y el flujo update-por-email/create. Ver commit de reversión.
 **Tenant que lo motivó:** Printer (B1), BP `CLO061498` con dos ContactEmployees que comparten `recepcion@tecnopack.net`
 
 ## Problema

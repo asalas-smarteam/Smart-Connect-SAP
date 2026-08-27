@@ -15,7 +15,7 @@ jest.unstable_mockModule(
 );
 
 const hubspotClient = await import('../../../src/infrastructure/hubspot/hubspotClient.js');
-const { findContactEmployee, findByEmail } = await import(
+const { findContactEmployee } = await import(
   '../../../src/infrastructure/hubspot/handlers/contact.handler.js'
 );
 
@@ -56,20 +56,5 @@ describe('findContactEmployee', () => {
 
     const empty = await findContactEmployee({ token: 't', internalcode: '', email: '', clientConfig: {}, tenantModels: {} });
     expect(empty).toBeNull();
-  });
-});
-
-describe('findByEmail', () => {
-  it('delega en findContactByEmail con las search properties mapeadas', async () => {
-    hubspotClient.findContactByEmail.mockResolvedValueOnce({ id: 'hs-3', properties: { internalcode: '91643' } });
-
-    const result = await findByEmail({ token: 't', email: 'x@y.com', clientConfig: {}, tenantModels: {} });
-
-    expect(result?.id).toBe('hs-3');
-  });
-
-  it('devuelve null sin email', async () => {
-    expect(await findByEmail({ token: 't', email: '', clientConfig: {}, tenantModels: {} })).toBeNull();
-    expect(hubspotClient.findContactByEmail).not.toHaveBeenCalled();
   });
 });
