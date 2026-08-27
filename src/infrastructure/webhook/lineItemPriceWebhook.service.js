@@ -65,6 +65,24 @@ async function resolveMiscPriceCalculationConfig(tenantModels) {
   return configuration?.value ?? null;
 }
 
+// Nombre de la propiedad HS donde vive el descuento de la línea (el mismo campo que escribe
+// buildDiscountProperties): el mapeado en requireDiscounts o el estándar `discount`. Se lee
+// con findOne y no con tenantConfigurationService.getValue porque getValue hace upsert.
+async function resolveDiscountReadProperty(tenantModels) {
+  const Configuration = tenantModels?.Configuration;
+
+  if (typeof Configuration?.findOne !== 'function') {
+    return 'discount';
+  }
+
+  const query = Configuration.findOne({ key: 'requireDiscounts' });
+  const configuration = typeof query?.lean === 'function'
+    ? await query.lean()
+    : await query;
+
+  return toNonEmptyString(configuration?.value?.fieldMappings?.Discount) || 'discount';
+}
+
 function resolveObjectIdSap(record) {
   return (
     toNonEmptyString(record?.properties?.idsap)
@@ -448,7 +466,7 @@ async function handlePropertyChangeEventSkipped(payload, { tenantModels, tenant 
   }
 }
 
-async function buildLegacyPayload(payload, token, miscPriceCalculationConfig = null) {
+async function buildLegacyPayload(payload, token, miscPriceCalculationConfig = null, discountReadProperty = 'discount') {
   const dealId = toNonEmptyString(payload?.fromObjectId);
 
   if (!dealId) {
@@ -473,10 +491,12 @@ async function buildLegacyPayload(payload, token, miscPriceCalculationConfig = n
     : null;
 
   // Una línea ilegible ya no tumba al resto: viaja en lineItemFailures hasta el audit.
+  // El descuento actual se lee junto con el resto: si la línea ya trae un descuento manual
+  // del asesor, SyncLineItemPrices lo conserva en vez de pisarlo con el de SAP.
   const { lineItems, failures } = await readLineItems({
     token,
     lineItemIds,
-    extraProperties: [miscSourceProperty].filter(Boolean),
+    extraProperties: [miscSourceProperty, discountReadProperty].filter(Boolean),
   });
 
   if (lineItems.length === 0) {
@@ -683,10 +703,16 @@ const lineItemPriceWebhookService = {
         tenantModels
       );
       const miscPriceCalculationConfig = await resolveMiscPriceCalculationConfig(tenantModels);
+      const discountReadProperty = await resolveDiscountReadProperty(tenantModels);
 
       return {
         skip: false,
-        payload: await buildLegacyPayload(payload, token, miscPriceCalculationConfig),
+        payload: await buildLegacyPayload(
+          payload,
+          token,
+          miscPriceCalculationConfig,
+          discountReadProperty
+        ),
         executionId: createdEvent._id,
       };
     } catch (error) {

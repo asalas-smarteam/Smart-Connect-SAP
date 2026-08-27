@@ -821,7 +821,7 @@ describe('SyncLineItemPrices', () => {
     expect(hubspotPriceClient.readLineItems).toHaveBeenCalledWith({
       token: 'hubspot-token',
       lineItemIds: ['line-1'],
-      extraProperties: ['misc', 'price'],
+      extraProperties: ['misc', 'price', 'discount'],
     });
     expect(hubspotPriceClient.updateLineItems).toHaveBeenCalledTimes(2);
     // La ronda 2 escribe el precio CON uplift (115), y `safe_price_value` sigue llevando la base
@@ -896,6 +896,132 @@ describe('SyncLineItemPrices', () => {
         warehouseStockProperties: { A01_stock: 8 },
       },
     ]);
+  });
+
+  // El caso que originó el cambio: el asesor pone un descuento a mano en HubSpot, el webhook
+  // dispara la revalorización, y SAP (que no conoce ese descuento) devolvía 0 y lo pisaba.
+  it('keeps the discount already present in HubSpot instead of overwriting it with the SAP one', async () => {
+    const sapDiscountClient = {
+      fetchActiveDiscountGroups: jest.fn().mockResolvedValue([
+        {
+          ValidFrom: '2026-01-01T00:00:00Z',
+          ValidTo: '2026-12-31T00:00:00Z',
+          DiscountGroupLineCollection: [
+            { ObjectType: 'dgboItems', ObjectCode: 'A0001', Discount: 12 },
+          ],
+        },
+      ]),
+    };
+    const { useCase, credentialRepository, hubspotPriceClient } = createUseCase({
+      sapDiscountClient,
+    });
+
+    credentialRepository.resolveDiscountConfig = jest.fn().mockResolvedValue({
+      isRequired: true,
+      fieldMappings: { Discount: 'hs_discount_percentage' },
+    });
+
+    await useCase.execute(
+      {
+        dealId: 'deal-1',
+        cardCode: 'C20000',
+        lineItems: [{
+          itemCode: 'A0001',
+          id: 'line-1',
+          quantity: 2,
+          properties: { hs_discount_percentage: '7.5' },
+        }],
+      },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    const { enrichedLineItems } = hubspotPriceClient.updateLineItems.mock.calls[0][0];
+    expect(enrichedLineItems[0].Discount).toBe(7.5);
+    expect(enrichedLineItems[0]._discountHsProperty).toBe('hs_discount_percentage');
+  });
+
+  it('falls back to the SAP discount when the HubSpot discount field is 0 or empty', async () => {
+    const sapDiscountClient = {
+      fetchActiveDiscountGroups: jest.fn().mockResolvedValue([
+        {
+          ValidFrom: '2026-01-01T00:00:00Z',
+          ValidTo: '2026-12-31T00:00:00Z',
+          DiscountGroupLineCollection: [
+            { ObjectType: 'dgboItems', ObjectCode: 'A0001', Discount: 12 },
+            { ObjectType: 'dgboItems', ObjectCode: 'B0002', Discount: 9 },
+          ],
+        },
+      ]),
+    };
+    const { useCase, credentialRepository, hubspotPriceClient } = createUseCase({
+      sapDiscountClient,
+    });
+
+    credentialRepository.resolveDiscountConfig = jest.fn().mockResolvedValue({
+      isRequired: true,
+      fieldMappings: { Discount: 'hs_discount_percentage' },
+    });
+
+    await useCase.execute(
+      {
+        dealId: 'deal-1',
+        cardCode: 'C20000',
+        lineItems: [
+          {
+            itemCode: 'A0001',
+            id: 'line-1',
+            quantity: 2,
+            properties: { hs_discount_percentage: '0' },
+          },
+          {
+            itemCode: 'B0002',
+            id: 'line-2',
+            quantity: 1,
+            properties: {},
+          },
+        ],
+      },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    const { enrichedLineItems } = hubspotPriceClient.updateLineItems.mock.calls[0][0];
+    expect(enrichedLineItems[0].Discount).toBe(12);
+    expect(enrichedLineItems[1].Discount).toBe(9);
+  });
+
+  // Sin requireDiscounts configurado, el campo que se preserva es el estándar `discount`:
+  // es el mismo que buildDiscountProperties escribe cuando no hay mapeo configurado.
+  it('keeps the standard discount property when no discount mapping is configured', async () => {
+    const { useCase, hubspotPriceClient } = createUseCase();
+
+    await useCase.execute(
+      {
+        dealId: 'deal-1',
+        cardCode: 'C20000',
+        lineItems: [{
+          itemCode: 'A0001',
+          id: 'line-1',
+          quantity: 2,
+          properties: { discount: '5' },
+        }],
+      },
+      {
+        tenantModels: { HubspotCredentials: {}, SapCredentials: {}, Configuration: {} },
+        tenant: {},
+        tenantKey: 'tenant_1',
+      }
+    );
+
+    const { enrichedLineItems } = hubspotPriceClient.updateLineItems.mock.calls[0][0];
+    expect(enrichedLineItems[0].Discount).toBe(5);
   });
 
   it('returns an audit with the failed line and its stage', async () => {
