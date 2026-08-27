@@ -1,4 +1,9 @@
 import { jest } from '@jest/globals';
+import {
+  DEAL_CURRENCY_PROPERTY,
+  DEAL_DISTRIBUTION_CHANNEL_PROPERTY,
+  DEAL_SALES_ORG_PROPERTY,
+} from '../../../src/infrastructure/webhook/s4PriceListLineItemPriceWebhook.service.js';
 import { S4PriceListLineItemPriceWebhookService } from '../../../src/infrastructure/webhook/s4PriceListLineItemPriceWebhook.service.js';
 
 const ASSOCIATION_EVENT = {
@@ -78,6 +83,12 @@ const ASSOCIATION_CLAIM_FILTER = {
 function buildService({
   deal = {
     id: '77',
+    // El área de ventas la declara el negocio: son propiedades obligatorias al crearlo.
+    properties: {
+      sales_organization: 'mqgt',
+      distribution_channel: '01',
+      deal_currency_code: 'usd',
+    },
     associations: {
       companies: { results: [{ id: '900' }] },
       'line items': { results: [{ id: '1' }, { id: '2' }] },
@@ -125,11 +136,86 @@ describe('S4PriceListLineItemPriceWebhookService.preparePayload', () => {
     expect(result.payload).toEqual({
       dealId: '77',
       customer: '105049',
+      // Organización y moneda en mayúsculas; el canal INTACTO: SAP devuelve '01' y un '1'
+      // normalizado nunca matchearía la clave del mapa de defaults.
+      salesOrganization: 'MQGT',
+      distributionChannel: '01',
+      dealCurrency: 'USD',
       lineItems: [
         { id: '1', itemCode: '80000017', quantity: '3' },
         { id: '2', itemCode: '80000029', quantity: '1' },
       ],
       lineItemFailures: [],
+    });
+  });
+
+  it('pide al deal las tres propiedades del área de ventas y la moneda', async () => {
+    const { service, fetchHubspotObject } = buildService();
+
+    await service.preparePayload(ASSOCIATION_EVENT, {
+      tenantModels: buildTenantModels(),
+      tenant: {},
+      tenantKey: 'multiquimica',
+    });
+
+    expect(fetchHubspotObject).toHaveBeenCalledWith(
+      'token',
+      'deals',
+      '77',
+      expect.objectContaining({
+        properties: expect.arrayContaining([
+          DEAL_SALES_ORG_PROPERTY,
+          DEAL_DISTRIBUTION_CHANNEL_PROPERTY,
+          DEAL_CURRENCY_PROPERTY,
+        ]),
+        // Las asociaciones se siguen pidiendo: de ahí salen el cliente y las líneas.
+        associations: ['companies', 'contacts', 'line_items'],
+      })
+    );
+  });
+
+  // El adapter sólo transporta. Quien decide qué hacer con el vacío es el caso de uso, que es el
+  // único que puede escribirle la nota al asesor pidiéndole que complete el campo.
+  it('propaga null cuando el negocio no trae las propiedades, sin fallar', async () => {
+    const { service } = buildService({
+      deal: {
+        id: '77',
+        properties: {},
+        associations: {
+          companies: { results: [{ id: '900' }] },
+          'line items': { results: [{ id: '1' }, { id: '2' }] },
+        },
+      },
+    });
+
+    const result = await service.preparePayload(ASSOCIATION_EVENT, {
+      tenantModels: buildTenantModels(),
+      tenant: {},
+      tenantKey: 'multiquimica',
+    });
+
+    expect(result.skip).toBe(false);
+    expect(result.payload).toMatchObject({
+      salesOrganization: null,
+      distributionChannel: null,
+      dealCurrency: null,
+    });
+  });
+
+  it('lleva el área de ventas al meta, para que el log y el skip la muestren', async () => {
+    const { service } = buildService();
+
+    const result = await service.preparePayload(ASSOCIATION_EVENT, {
+      tenantModels: buildTenantModels(),
+      tenant: {},
+      tenantKey: 'multiquimica',
+    });
+
+    expect(result.meta).toMatchObject({
+      dealId: '77',
+      customer: '105049',
+      salesOrganization: 'MQGT',
+      distributionChannel: '01',
     });
   });
 
@@ -238,6 +324,11 @@ describe('S4PriceListLineItemPriceWebhookService.preparePayload', () => {
     };
     const deal = {
       id: '77',
+      properties: {
+        sales_organization: 'mqgt',
+        distribution_channel: '01',
+        deal_currency_code: 'usd',
+      },
       associations: {
         companies: { results: [{ id: '900' }] },
         'line items': { results: [{ id: '1' }, { id: '2' }] },
@@ -278,6 +369,9 @@ describe('S4PriceListLineItemPriceWebhookService.preparePayload', () => {
     expect(result.payload).toEqual({
       dealId: '77',
       customer: '105049',
+      salesOrganization: 'MQGT',
+      distributionChannel: '01',
+      dealCurrency: 'USD',
       lineItems: [
         { id: '1', itemCode: '80000017', quantity: '3' },
         { id: '2', itemCode: '80000029', quantity: '1' },
@@ -345,6 +439,9 @@ describe('S4PriceListLineItemPriceWebhookService.preparePayload', () => {
     expect(result.payload).toEqual({
       dealId: '77',
       customer: '105049',
+      salesOrganization: 'MQGT',
+      distributionChannel: '01',
+      dealCurrency: 'USD',
       lineItems: [
         { id: '1', itemCode: '80000017', quantity: '3' },
         { id: '2', itemCode: '80000029', quantity: '1' },

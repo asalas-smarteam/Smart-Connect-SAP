@@ -1,4 +1,4 @@
-const ALLOWED_OPERATORS = ['eq', 'ge', 'startswith', 'not_startswith'];
+const ALLOWED_OPERATORS = ['eq', 'ne', 'ne_or_null', 'ge', 'startswith', 'not_startswith'];
 const FILTER_CONTROLLED_FIELDS = ['isDefault', 'isDynamic', 'editable'];
 
 export function normalizeFilterKey(filter) {

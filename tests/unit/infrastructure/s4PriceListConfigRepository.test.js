@@ -25,7 +25,7 @@ describe('TenantLineItemPriceConfigRepository.resolveS4PriceListConfig', () => {
       tenantModels: buildTenantModels({
         conditionType: 'ZPR0',
         defaultPriceListType: 'zc',
-        salesArea: { salesOrganization: 'FQCR', distributionChannel: '01', division: 'SC' },
+        defaultPriceListBySalesArea: { ' dpdo/01 ': 'zc', 'CPDO/01': 'ZD' },
         priceListProperty: 'lista_de_precios_sap',
         currencyProperty: 'moneda_precio_sap',
         priceSourceProperty: 'origen_precio_sap',
@@ -35,11 +35,25 @@ describe('TenantLineItemPriceConfigRepository.resolveS4PriceListConfig', () => {
     expect(config).toEqual({
       conditionType: 'ZPR0',
       defaultPriceListType: 'ZC',
-      salesArea: { salesOrganization: 'FQCR', distributionChannel: '01', division: 'SC' },
+      defaultPriceListBySalesArea: { 'DPDO/01': 'ZC', 'CPDO/01': 'ZD' },
       priceListProperty: 'lista_de_precios_sap',
       currencyProperty: 'moneda_precio_sap',
       priceSourceProperty: 'origen_precio_sap',
     });
+  });
+
+  // El área de ventas ahora la declara el negocio de HubSpot, no la config: si un documento viejo
+  // todavía trae `salesArea`, el resultado NO puede exponerla o el caso de uso tendría dos
+  // fuentes para lo mismo y ninguna forma de saber cuál gana.
+  it('ignora un salesArea que haya quedado en el documento', async () => {
+    const config = await repository.resolveS4PriceListConfig({
+      tenantModels: buildTenantModels({
+        defaultPriceListType: 'ZC',
+        salesArea: { salesOrganization: 'FQCR', distributionChannel: '01', division: 'SC' },
+      }),
+    });
+
+    expect(config).not.toHaveProperty('salesArea');
   });
 
   // M3 de la revisión final: se leía con tenantConfigurationService.getValue(..., null), que
@@ -66,45 +80,65 @@ describe('TenantLineItemPriceConfigRepository.resolveS4PriceListConfig', () => {
     expect(tenantModels.Configuration.updateOne).not.toHaveBeenCalled();
   });
 
-  // I6 de la revisión final: `division` es opcional. Hay clientes cuyas filas de
-  // A_CustomerSalesArea traen `Division` vacía; exigiéndola, el área colapsaba a null y no había
-  // configuración posible. Los dos campos que SÍ entran al $filter siguen siendo obligatorios.
-  it('acepta un salesArea sin division (division no entra al filtro de condiciones)', async () => {
-    const config = await repository.resolveS4PriceListConfig({
-      tenantModels: buildTenantModels({
-        defaultPriceListType: 'ZC',
-        salesArea: { salesOrganization: 'fqcr', distributionChannel: '01' },
-      }),
-    });
-
-    expect(config.salesArea).toEqual({
-      salesOrganization: 'FQCR',
-      distributionChannel: '01',
-      division: null,
-    });
-  });
-
   it('usa ZPR0 como conditionType por defecto y deja opcionales en null', async () => {
     const config = await repository.resolveS4PriceListConfig({
       tenantModels: buildTenantModels({ defaultPriceListType: 'ZC' }),
     });
 
     expect(config.conditionType).toBe('ZPR0');
-    expect(config.salesArea).toBeNull();
+    expect(config.defaultPriceListBySalesArea).toEqual({});
     expect(config.priceListProperty).toBeNull();
     expect(config.currencyProperty).toBeNull();
     expect(config.priceSourceProperty).toBeNull();
   });
 
-  it('descarta un salesArea sin distributionChannel en vez de armar un filtro a medias', async () => {
+  it.each([
+    ['ausente', undefined],
+    ['null', null],
+    ['un arreglo', [['DPDO/01', 'ZC']]],
+    ['un string', 'DPDO/01=ZC'],
+  ])('devuelve {} cuando defaultPriceListBySalesArea es %s', async (_label, mapa) => {
     const config = await repository.resolveS4PriceListConfig({
       tenantModels: buildTenantModels({
         defaultPriceListType: 'ZC',
-        salesArea: { salesOrganization: 'FQCR' },
+        defaultPriceListBySalesArea: mapa,
       }),
     });
 
-    expect(config.salesArea).toBeNull();
+    expect(config.defaultPriceListBySalesArea).toEqual({});
+  });
+
+  // Una clave mal escrita NO puede dejar sin precios a todo el tenant: se descarta esa entrada y
+  // esa combinación cae al `defaultPriceListType`, que es obligatorio justamente para eso.
+  it.each([
+    ['sin barra', { DPDO01: 'ZC' }],
+    ['con dos barras', { 'DPDO/01/SC': 'ZC' }],
+    ['con la organizacion vacia', { '/01': 'ZC' }],
+    ['con el canal vacio', { 'DPDO/': 'ZC' }],
+    ['con valor vacio', { 'DPDO/01': '   ' }],
+  ])('descarta la entrada %s y conserva las validas', async (_label, mala) => {
+    const config = await repository.resolveS4PriceListConfig({
+      tenantModels: buildTenantModels({
+        defaultPriceListType: 'ZC',
+        defaultPriceListBySalesArea: { ...mala, 'MQGT/01': 'ZA' },
+      }),
+    });
+
+    expect(config.defaultPriceListBySalesArea).toEqual({ 'MQGT/01': 'ZA' });
+  });
+
+  // El canal NO se re-normaliza numéricamente a propósito: SAP devuelve "01", y hacer que "1" sea
+  // equivalente esconde una config mal cargada en vez de mostrarla.
+  it('no equipara el canal "1" con el "01" que devuelve SAP', async () => {
+    const config = await repository.resolveS4PriceListConfig({
+      tenantModels: buildTenantModels({
+        defaultPriceListType: 'ZC',
+        defaultPriceListBySalesArea: { 'DPDO/1': 'ZD' },
+      }),
+    });
+
+    expect(config.defaultPriceListBySalesArea).toEqual({ 'DPDO/1': 'ZD' });
+    expect(config.defaultPriceListBySalesArea['DPDO/01']).toBeUndefined();
   });
 
   it('falla con mensaje accionable cuando no hay documento de config', async () => {

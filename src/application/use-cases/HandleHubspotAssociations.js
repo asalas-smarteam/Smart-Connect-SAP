@@ -356,9 +356,15 @@ export class HandleHubspotAssociations {
           continue;
         }
 
-        const existingContact = await this.contactHandler.find({
+        // Identidad del CE: internalcode primero, email al final. Sin
+        // reescritura del email — dos CEs que comparten correo resuelven al
+        // MISMO contacto de HubSpot a propósito (email único del portal); el
+        // plus addressing (+InternalCode) se probó y se revirtió porque
+        // duplicaba contactos cuando el dueño del email no tenía internalcode.
+        const existingContact = await this.contactHandler.findContactEmployee({
           token,
-          item: contactPayload,
+          internalcode: contactPayload.properties.internalcode ?? sapInternalCode,
+          email: contactPayload.properties.email,
           clientConfig,
           tenantModels,
         });

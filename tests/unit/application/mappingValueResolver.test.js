@@ -1,6 +1,7 @@
 import {
   buildMappedProperties,
   hasMappedValue,
+  normalizeHubspotPhone,
   normalizeSapBoolean,
   resolveValueByPath,
 } from '../../../src/application/services/mappingValueResolver.service.js';
@@ -239,6 +240,27 @@ describe('buildMappedProperties — campos booleanos de SAP', () => {
     expect(properties).toEqual({ es_inventariable: true, es_vendible: false });
   });
 
+  it('normalizes Active, el campo de ContactEmployees', () => {
+    // HubSpot rechazaba el contacto COMPLETO con 400 INVALID_OPTION porque la
+    // propiedad `active` es una casilla y SAP manda el BoYesNoEnum.
+    const properties = buildMappedProperties({
+      input: { Name: 'Sofia Garcia', Active: 'tYES' },
+      mappings: [
+        { sourceField: 'Name', targetField: 'firstname', isActive: true },
+        { sourceField: 'Active', targetField: 'active', isActive: true },
+      ],
+    });
+
+    expect(properties).toEqual({ firstname: 'Sofia Garcia', active: true });
+
+    const inactive = buildMappedProperties({
+      input: { Active: 'tNO' },
+      mappings: [{ sourceField: 'Active', targetField: 'active', isActive: true }],
+    });
+
+    expect(inactive).toEqual({ active: false });
+  });
+
   it('leaves every other tYES/tNO field alone', () => {
     // Alcance deliberado: `Valid` tambien es un BoYesNoEnum, pero convertirlo
     // cambiaria lo que envia un mapeo que ningun cliente pidio tocar.
@@ -272,5 +294,109 @@ describe('buildMappedProperties — campos booleanos de SAP', () => {
     });
 
     expect(properties).toEqual({ es_vendible: false });
+  });
+});
+
+describe('normalizeHubspotPhone', () => {
+  it('deja pasar un E.164 que ya viene bien', () => {
+    expect(normalizeHubspotPhone('+50259877130')).toBe('+50259877130');
+    expect(normalizeHubspotPhone('+18884827768')).toBe('+18884827768');
+  });
+
+  it('quita separadores cosméticos cuando el país ya está presente', () => {
+    // No se inventa nada: el '+506' ya venía en el dato, solo se compacta.
+    expect(normalizeHubspotPhone('+506 3192 3094')).toBe('+50631923094');
+    expect(normalizeHubspotPhone('+1 (888) 482-7768')).toBe('+18884827768');
+    expect(normalizeHubspotPhone('+1.888.482.7768')).toBe('+18884827768');
+    expect(normalizeHubspotPhone('  +50631923094  ')).toBe('+50631923094');
+  });
+
+  it('conserva la extensión, que HubSpot sí acepta', () => {
+    expect(normalizeHubspotPhone('+18884827768 ext 123')).toBe('+18884827768 ext 123');
+    expect(normalizeHubspotPhone('+1 888 482 7768 x123')).toBe('+18884827768 ext 123');
+    expect(normalizeHubspotPhone('+18884827768 ext. 123')).toBe('+18884827768 ext 123');
+  });
+
+  it('nulifica el caso reportado: 8 dígitos sin código de país', () => {
+    // '3192 3094' es el valor real de Phone1 que devolvió INVALID_PHONE_NUMBER.
+    // No se le pega un prefijo porque 8 dígitos son ambiguos entre +506 y +502:
+    // un teléfono válido pero equivocado no lo detecta nadie.
+    expect(normalizeHubspotPhone('3192 3094')).toBeNull();
+    expect(normalizeHubspotPhone('2222-3333')).toBeNull();
+    expect(normalizeHubspotPhone('50631923094')).toBeNull();
+  });
+
+  it('nulifica basura que no es un teléfono', () => {
+    expect(normalizeHubspotPhone('8888 9999 / 2222 1111')).toBeNull();
+    expect(normalizeHubspotPhone('no tiene')).toBeNull();
+    expect(normalizeHubspotPhone('+0123456789')).toBeNull();
+    expect(normalizeHubspotPhone('+')).toBeNull();
+    expect(normalizeHubspotPhone(0)).toBeNull();
+  });
+
+  it('nulifica un E.164 más largo que los 15 dígitos del estándar', () => {
+    expect(normalizeHubspotPhone('+1234567890123456')).toBeNull();
+  });
+
+  it('no toca los huecos: null, undefined y vacío viajan tal cual', () => {
+    // '' significa "existe el campo y está vacío en SAP" y esa distinción la usa
+    // la cadena de fallback; convertirlo a null la cambiaría sin necesidad.
+    expect(normalizeHubspotPhone(null)).toBeNull();
+    expect(normalizeHubspotPhone(undefined)).toBeUndefined();
+    expect(normalizeHubspotPhone('')).toBe('');
+    expect(normalizeHubspotPhone('   ')).toBe('   ');
+  });
+});
+
+describe('buildMappedProperties — teléfonos de HubSpot', () => {
+  it('nulifica phone cuando el Phone1 de SAP no es E.164', () => {
+    const properties = buildMappedProperties({
+      input: { CardCode: 'C001', Phone1: '3192 3094' },
+      mappings: [{ _id: 1, sourceField: 'Phone1', targetField: 'phone', isActive: true }],
+    });
+
+    expect(properties.phone).toBeNull();
+  });
+
+  it('normaliza sin importar de qué campo de SAP venga', () => {
+    const properties = buildMappedProperties({
+      input: { to_BusinessPartnerAddress: { to_PhoneNumber: { PhoneNumber: '+506 3192 3094' } } },
+      mappings: [{
+        _id: 1,
+        sourceField: 'to_BusinessPartnerAddress.to_PhoneNumber.PhoneNumber',
+        targetField: 'phone',
+        isActive: true,
+      }],
+    });
+
+    expect(properties.phone).toBe('+50631923094');
+  });
+
+  it('no toca otros targetField que contienen teléfonos sin mapear', () => {
+    const properties = buildMappedProperties({
+      input: { Phone1: '3192 3094', Phone2: '2222 3333' },
+      mappings: [
+        { _id: 1, sourceField: 'Phone1', targetField: 'phone', isActive: true },
+        { _id: 2, sourceField: 'Phone2', targetField: 'telefono_secundario', isActive: true },
+      ],
+    });
+
+    expect(properties.phone).toBeNull();
+    expect(properties.telefono_secundario).toBe('2222 3333');
+  });
+
+  it('un teléfono inválido no bloquea el siguiente eslabón de la cadena', () => {
+    // Consecuencia deseada de normalizar ANTES de asignar: hasMappedValue(null)
+    // es false, así que el fallback sigue buscando en vez de quedarse pegado.
+    const properties = buildMappedProperties({
+      input: { Phone1: '3192 3094', Phone2: '+50631923094' },
+      mappings: [
+        { _id: 1, sourceField: 'Phone1', targetField: 'phone', isActive: true },
+        { _id: 2, sourceField: 'Phone2', targetField: 'phone', isActive: true },
+      ],
+      fallbackConfig: { enabled: true },
+    });
+
+    expect(properties.phone).toBe('+50631923094');
   });
 });

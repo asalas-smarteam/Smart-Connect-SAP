@@ -121,6 +121,20 @@ describe('buildS4ODataQuery', () => {
       .toBe("Customer ne '' and BusinessPartnerGrouping eq 'ZC01'");
   });
 
+  it('keeps null values with the ne_or_null operator', () => {
+    const config = {
+      ...baseConfig,
+      filters: [
+        { property: 'BusinessPartnerGrouping', operator: 'ne_or_null', value: 'ZK99' },
+      ],
+    };
+
+    const { query } = buildS4ODataQuery(config, flatMappings, {});
+
+    expect(decodeURIComponent(query.$filter))
+      .toBe("(BusinessPartnerGrouping eq null or BusinessPartnerGrouping ne 'ZK99')");
+  });
+
   it('renders dynamic filters as Edm.DateTime literals', () => {
     const config = {
       ...baseConfig,

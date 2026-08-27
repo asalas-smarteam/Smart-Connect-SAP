@@ -17,6 +17,45 @@ function normalizeOptionalNumber(value) {
   return Number.isFinite(normalized) ? normalized : null;
 }
 
+// Lista de precios por defecto para cada área de ventas, con la clave `"ORG/CANAL"`.
+//
+// Es por área y no global porque la lista mayoritaria cambia según la combinación: verificado el
+// 2026-08-24 sobre las 16 combinaciones del S/4 de Multiquímica, un default global acierta en 5.
+//
+// Una entrada mal escrita se DESCARTA y se avisa, en vez de lanzar: esto lo carga una persona a
+// mano en Mongo, y una clave con un typo no puede dejar sin precios a todo el tenant — esa
+// combinación cae al `defaultPriceListType`, que es obligatorio justamente para eso.
+//
+// El canal NO se re-normaliza numéricamente: SAP devuelve `"01"`, así que `"1"` simplemente no
+// matchea. Equipararlos escondería una config mal cargada en lugar de mostrarla.
+function normalizeDefaultPriceListBySalesArea(value, log = console) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  const normalized = {};
+
+  for (const [rawKey, rawValue] of Object.entries(value)) {
+    const key = String(rawKey ?? '').trim().toUpperCase();
+    const segments = key.split('/');
+    const priceListType = toNonEmptyString(rawValue)?.toUpperCase() ?? null;
+
+    if (segments.length !== 2 || !segments[0] || !segments[1] || !priceListType) {
+      log.warn?.({
+        msg: 's4PriceList.defaultPriceListBySalesArea entry ignored:'
+          + ' the key must be "SALESORG/DISTRIBUTIONCHANNEL" and the value a price list type',
+        key: rawKey,
+        value: rawValue,
+      });
+      continue;
+    }
+
+    normalized[key] = priceListType;
+  }
+
+  return normalized;
+}
+
 function normalizeTaxSettings(configuration) {
   const rawConfiguration = typeof configuration?.toObject === 'function'
     ? configuration.toObject()
@@ -116,7 +155,7 @@ export class TenantLineItemPriceConfigRepository {
       throw new Error(
         'Configuration s4PriceList is required for the S4 line item price webhook,'
         + ' e.g. { "conditionType": "ZPR0", "defaultPriceListType": "ZC",'
-        + ' "salesArea": { "salesOrganization": "FQCR", "distributionChannel": "01", "division": "SC" } }'
+        + ' "defaultPriceListBySalesArea": { "DPDO/01": "ZC", "MQGT/01": "ZA" } }'
       );
     }
 
@@ -126,22 +165,18 @@ export class TenantLineItemPriceConfigRepository {
       throw new Error('s4PriceList.defaultPriceListType is required');
     }
 
-    const salesOrganization = toNonEmptyString(value.salesArea?.salesOrganization)?.toUpperCase() ?? null;
-    const distributionChannel = toNonEmptyString(value.salesArea?.distributionChannel) ?? null;
-    const division = toNonEmptyString(value.salesArea?.division)?.toUpperCase() ?? null;
-    // `salesOrganization` y `distributionChannel` son obligatorios juntos: son los dos que
-    // entran al $filter de las condiciones, y un área a medias devolvería precios de otro canal.
-    // `division` es OPCIONAL: nunca entra al filtro, sólo desempata entre áreas del mismo
-    // cliente, y hay clientes cuyas filas de S/4 la traen vacía — exigirla los dejaba sin
-    // ninguna configuración posible (ver matchesSalesArea en SyncS4LineItemPricesByPriceList).
-    const salesArea = salesOrganization && distributionChannel
-      ? { salesOrganization, distributionChannel, division }
-      : null;
+    // `salesArea` YA NO se lee: el área de ventas la declara el negocio de HubSpot
+    // (`sales_organization` + `distribution_channel`). Un documento viejo puede seguir trayendo
+    // la clave y no molesta, pero no puede aparecer en el resultado — dos fuentes para lo mismo
+    // sin regla de precedencia es exactamente cómo se termina cotizando en un área que nadie
+    // eligió.
 
     return {
       conditionType: toNonEmptyString(value.conditionType)?.toUpperCase() ?? 'ZPR0',
       defaultPriceListType,
-      salesArea,
+      defaultPriceListBySalesArea: normalizeDefaultPriceListBySalesArea(
+        value.defaultPriceListBySalesArea
+      ),
       priceListProperty: toNonEmptyString(value.priceListProperty),
       currencyProperty: toNonEmptyString(value.currencyProperty),
       priceSourceProperty: toNonEmptyString(value.priceSourceProperty),

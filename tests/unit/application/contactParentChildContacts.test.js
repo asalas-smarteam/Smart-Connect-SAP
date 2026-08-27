@@ -22,6 +22,8 @@ function buildHandler() {
     },
     contactHandler: {
       find: jest.fn().mockResolvedValue({ id: '900' }),
+      findByEmail: jest.fn().mockResolvedValue(null),
+      findContactEmployee: jest.fn().mockResolvedValue({ id: '900' }),
       update: jest.fn().mockResolvedValue({ id: '900' }),
       create: jest.fn().mockResolvedValue({ id: '900' }),
     },
@@ -78,7 +80,7 @@ describe('padre contacto -> contactos hijo', () => {
   // GUARDA DE AUTO-ASOCIACION: caso nuevo, imposible con un padre company.
   it('descarta el par cuando el hijo resuelve al mismo contacto que el padre', async () => {
     const { handler, associateObjectsBySapId } = buildHandler();
-    handler.contactHandler.find = jest.fn().mockResolvedValue({ id: '100' }); // el mismo id del padre
+    handler.contactHandler.findContactEmployee = jest.fn().mockResolvedValue({ id: '100' }); // el mismo id del padre
 
     const item = {
       properties: { idsap: 'C1' },
@@ -104,7 +106,7 @@ describe('padre contacto -> contactos hijo', () => {
   // de esta tarea.
   it('NO descarta el par cuando el padre es company aunque el id del hijo coincida numericamente', async () => {
     const { handler, associateObjectsBySapId } = buildHandler();
-    handler.contactHandler.find = jest.fn().mockResolvedValue({ id: '100' }); // coincide con el id de la company, pero son tipos distintos
+    handler.contactHandler.findContactEmployee = jest.fn().mockResolvedValue({ id: '100' }); // coincide con el id de la company, pero son tipos distintos
 
     const item = {
       properties: { idsap: 'C1' },

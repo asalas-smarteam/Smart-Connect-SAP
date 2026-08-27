@@ -1,0 +1,61 @@
+Name,Label,Type,Field type,Group
+a0002_instock,"CENTRAL En stock",number,number,productinformation
+a0002_committed,"CENTRAL Comprometido",number,number,productinformation
+a0002_ordered,"CENTRAL Solicitado",number,number,productinformation
+a0001_instock,"IMPORTACION En stock",number,number,productinformation
+a0001_committed,"IMPORTACION Comprometido",number,number,productinformation
+a0001_ordered,"IMPORTACION Solicitado",number,number,productinformation
+a0003_instock,"TALLER AMC En stock",number,number,productinformation
+a0003_committed,"TALLER AMC Comprometido",number,number,productinformation
+a0003_ordered,"TALLER AMC Solicitado",number,number,productinformation
+a0004_instock,"GARANTIA En stock",number,number,productinformation
+a0004_committed,"GARANTIA Comprometido",number,number,productinformation
+a0004_ordered,"GARANTIA Solicitado",number,number,productinformation
+a0005_instock,"PENDIENTE NOTA DE CRÉDITO En stock",number,number,productinformation
+a0005_committed,"PENDIENTE NOTA DE CRÉDITO Comprometido",number,number,productinformation
+a0005_ordered,"PENDIENTE NOTA DE CRÉDITO Solicitado",number,number,productinformation
+a0006_instock,"PENDIENTE DE FACTURAR En stock",number,number,productinformation
+a0006_committed,"PENDIENTE DE FACTURAR Comprometido",number,number,productinformation
+a0006_ordered,"PENDIENTE DE FACTURAR Solicitado",number,number,productinformation
+a0007_instock,"MANTO. PROGRAMADOS En stock",number,number,productinformation
+a0007_committed,"MANTO. PROGRAMADOS Comprometido",number,number,productinformation
+a0007_ordered,"MANTO. PROGRAMADOS Solicitado",number,number,productinformation
+a0008_instock,"BODEGA MAL ESTADO En stock",number,number,productinformation
+a0008_committed,"BODEGA MAL ESTADO Comprometido",number,number,productinformation
+a0008_ordered,"BODEGA MAL ESTADO Solicitado",number,number,productinformation
+a0009_instock,"MUESTRAS En stock",number,number,productinformation
+a0009_committed,"MUESTRAS Comprometido",number,number,productinformation
+a0009_ordered,"MUESTRAS Solicitado",number,number,productinformation
+a0010_instock,"AGRECA XELA En stock",number,number,productinformation
+a0010_committed,"AGRECA XELA Comprometido",number,number,productinformation
+a0010_ordered,"AGRECA XELA Solicitado",number,number,productinformation
+a0011_instock,"AGRECA PALIN ESTE En stock",number,number,productinformation
+a0011_committed,"AGRECA PALIN ESTE Comprometido",number,number,productinformation
+a0011_ordered,"AGRECA PALIN ESTE Solicitado",number,number,productinformation
+a0012_instock,"AGREGA PALIN OESTE En stock",number,number,productinformation
+a0012_committed,"AGREGA PALIN OESTE Comprometido",number,number,productinformation
+a0012_ordered,"AGREGA PALIN OESTE Solicitado",number,number,productinformation
+a0013_instock,"AGRECA En stock",number,number,productinformation
+a0013_committed,"AGRECA Comprometido",number,number,productinformation
+a0013_ordered,"AGRECA Solicitado",number,number,productinformation
+a9999_instock,"PROVEEDURIA En stock",number,number,productinformation
+a9999_committed,"PROVEEDURIA Comprometido",number,number,productinformation
+a9999_ordered,"PROVEEDURIA Solicitado",number,number,productinformation
+a9998_instock,"INSUMOS En stock",number,number,productinformation
+a9998_committed,"INSUMOS Comprometido",number,number,productinformation
+a9998_ordered,"INSUMOS Solicitado",number,number,productinformation
+a0014_instock,"CALERUEGA 3486222 En stock",number,number,productinformation
+a0014_committed,"CALERUEGA 3486222 Comprometido",number,number,productinformation
+a0014_ordered,"CALERUEGA 3486222 Solicitado",number,number,productinformation
+a0015_instock,"CALERUEGA 3373339 En stock",number,number,productinformation
+a0015_committed,"CALERUEGA 3373339 Comprometido",number,number,productinformation
+a0015_ordered,"CALERUEGA 3373339 Solicitado",number,number,productinformation
+a0016_instock,"CALERUEGA 3335280 En stock",number,number,productinformation
+a0016_committed,"CALERUEGA 3335280 Comprometido",number,number,productinformation
+a0016_ordered,"CALERUEGA 3335280 Solicitado",number,number,productinformation
+a0017_instock,"PRODIVA GA37 API213147 En stock",number,number,productinformation
+a0017_committed,"PRODIVA GA37 API213147 Comprometido",number,number,productinformation
+a0017_ordered,"PRODIVA GA37 API213147 Solicitado",number,number,productinformation
+a0018_instock,"VITALI GA37 AII 384939 En stock",number,number,productinformation
+a0018_committed,"VITALI GA37 AII 384939 Comprometido",number,number,productinformation
+a0018_ordered,"VITALI GA37 AII 384939 Solicitado",number,number,productinformation

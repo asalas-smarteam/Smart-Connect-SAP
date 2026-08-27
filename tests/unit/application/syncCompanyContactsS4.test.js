@@ -7,6 +7,8 @@ import { HandleHubspotAssociations } from '../../../src/application/use-cases/Ha
 function buildHandler({ bypassEmail = true } = {}) {
   const contactHandler = {
     find: jest.fn(async () => null),
+    findByEmail: jest.fn(async () => null),
+    findContactEmployee: jest.fn(async () => null),
     create: jest.fn(async ({ item }) => ({ id: `hs-${item.properties.internalcode}` })),
     update: jest.fn(async () => ({})),
   };

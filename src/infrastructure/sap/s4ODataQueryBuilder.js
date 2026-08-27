@@ -171,6 +171,14 @@ function buildFilterConditions(clientConfig, options) {
         conditions.push(`${property} ${operator} ${literal}`);
         return;
       }
+      case 'ne_or_null': {
+        // Como en B1: `col ne 'X'` descarta los null, el OR explícito los deja.
+        const literal = typeof value === 'number' || typeof value === 'boolean'
+          ? stringValue
+          : `'${escapeODataLiteral(stringValue)}'`;
+        conditions.push(`(${property} eq null or ${property} ne ${literal})`);
+        return;
+      }
       case 'in': {
         // OData v2 has no `in` operator; it renders as an OR group.
         // Used for multi-value business filters such as

@@ -22,7 +22,7 @@ function describeSalesArea(salesArea) {
   ].map((part) => toNonEmptyString(part) ?? '-').join('/');
 }
 
-function buildContextLine({ customer, salesArea, priceListType, salesAreaSource }) {
+function buildContextLine({ customer, salesArea, priceListType }) {
   const parts = [];
 
   if (toNonEmptyString(customer)) {
@@ -41,17 +41,33 @@ function buildContextLine({ customer, salesArea, priceListType, salesAreaSource 
     return '';
   }
 
-  let line = `<p>${parts.join(' &middot; ')}</p>`;
+  return `<p>${parts.join(' &middot; ')}</p>`;
+}
 
-  // El asesor tiene que saber que el precio NO salió de la ficha del cliente: si el cliente no
-  // tiene área de ventas en SAP (o su código no existe allá), el precio es el de la lista por
-  // defecto y puede no ser el que le corresponde negociado.
-  if (salesAreaSource === 'configuredDefault') {
-    line += '<p>El cliente no tiene área de ventas registrada en SAP, así que se usaron el área'
-      + ' y la lista de precios configuradas por defecto. Verificá el código SAP del cliente.</p>';
+// Áreas que el cliente SÍ tiene en SAP. Es lo único que le dice al asesor qué poner en el
+// negocio, así que cuando no se pudieron leer se omite la frase entera en lugar de dejar un
+// "las áreas son:" colgando.
+function buildCustomerSalesAreasLine(customerSalesAreas) {
+  const described = (Array.isArray(customerSalesAreas) ? customerSalesAreas : [])
+    .map((area) => {
+      const org = toNonEmptyString(area?.salesOrganization);
+      const channel = toNonEmptyString(area?.distributionChannel);
+
+      if (!org || !channel) {
+        return null;
+      }
+
+      const list = toNonEmptyString(area?.priceListType);
+      return `${org}/${channel}${list ? ` (lista ${list})` : ''}`;
+    })
+    .filter(Boolean);
+
+  if (described.length === 0) {
+    return '';
   }
 
-  return line;
+  return '<p>Las áreas de ventas que este cliente tiene en SAP son:'
+    + ` ${escapeHtml(described.join(', '))}.</p>`;
 }
 
 function buildSkippedList(skippedLineItems) {
@@ -75,11 +91,12 @@ function buildSkippedList(skippedLineItems) {
 export function buildLineItemPriceNoteBody({
   customer = null,
   salesArea = null,
-  salesAreaSource = null,
   priceListType = null,
   updatedCount = 0,
   skippedLineItems = [],
   fatalErrorMessage = null,
+  reasonCode = null,
+  customerSalesAreas = [],
 } = {}) {
   const skipped = Array.isArray(skippedLineItems) ? skippedLineItems : [];
   const fatal = toNonEmptyString(fatalErrorMessage);
@@ -88,7 +105,27 @@ export function buildLineItemPriceNoteBody({
     return null;
   }
 
-  const context = buildContextLine({ customer, salesArea, priceListType, salesAreaSource });
+  const context = buildContextLine({ customer, salesArea, priceListType });
+
+  // El negocio no trae organización o canal. Los precios NO se tocaron (sin área no se consultó
+  // nada en SAP), así que la nota no puede afirmar nada sobre las líneas: sólo pide el campo.
+  if (reasonCode === 'salesAreaMissing') {
+    return '<p><strong>Precios de SAP: falta la organización de ventas</strong></p>'
+      + context
+      + '<p>Este negocio no tiene Organización o Canal de distribución. Completá los dos campos y'
+      + ' volvé a guardar una línea para recalcular los precios.</p>'
+      + '<p>Los precios de las líneas quedaron como estaban.</p>';
+  }
+
+  // El cliente no está registrado en el área que declara el negocio. Acá los precios SÍ se
+  // pusieron en 0, y la nota tiene que decirlo junto con las áreas reales del cliente.
+  if (reasonCode === 'salesAreaNotFound') {
+    return '<p><strong>Precios de SAP: el cliente no está registrado en esta área de ventas</strong></p>'
+      + context
+      + buildCustomerSalesAreasLine(customerSalesAreas)
+      + '<p>Los precios de las líneas se pusieron en 0. Corregí la organización de ventas del'
+      + ' negocio, o pedí que se registre el cliente en esta área en SAP.</p>';
+  }
 
   if (fatal) {
     return '<p><strong>Precios de SAP: no se pudieron actualizar</strong></p>'

@@ -7,6 +7,7 @@ import {
   SAP_BOOLEAN_SOURCE_FIELDS,
   SAP_BOOLEAN_TRUE,
 } from '#domain/sap/sap-boolean-fields.constants.js';
+import { HUBSPOT_PHONE_TARGET_FIELDS } from '#domain/sap/hubspot-phone-fields.constants.js';
 
 const SAP_BOOLEAN_FIELD_SET = new Set(
   SAP_BOOLEAN_SOURCE_FIELDS.map((field) => field.toLowerCase())
@@ -44,6 +45,83 @@ function isSapBooleanField(sourceField) {
   const lastSegment = segments[segments.length - 1].trim().toLowerCase();
 
   return SAP_BOOLEAN_FIELD_SET.has(lastSegment);
+}
+
+const HUBSPOT_PHONE_FIELD_SET = new Set(
+  HUBSPOT_PHONE_TARGET_FIELDS.map((field) => field.toLowerCase())
+);
+
+// E.164: '+', un primer dígito 1-9 y hasta 15 dígitos en total. Es lo que pide
+// HubSpot cuando el portal tiene la validación de teléfono activada.
+const E164_PATTERN = /^\+[1-9]\d{1,14}$/;
+
+// 'ext 123', 'ext. 123' o 'x123' al final. HubSpot acepta la extensión separada
+// del número, así que se preserva en vez de tirar el teléfono completo.
+const EXTENSION_PATTERN = /\s*(?:ext|extension|x)\.?\s*(\d{1,6})\s*$/i;
+
+// Separadores que la gente escribe en SAP y que no cambian el número.
+const COSMETIC_PATTERN = /[\s()\-.]/g;
+
+// Un teléfono que no se puede volver E.164 se va como null A PROPÓSITO.
+//
+// No se le pega un código de país deducido: '3192 3094' son 8 dígitos y eso es
+// ambiguo entre +506 (Costa Rica) y +502 (Guatemala), así que adivinar produce
+// un número válido pero equivocado, que nadie detecta nunca. Y no se deja pasar
+// intacto porque HubSpot responde 400 INVALID_PHONE_NUMBER y ahí se pierde el
+// registro COMPLETO -- nombre, email, cédula --, no solo el teléfono.
+//
+// Lo único que se arregla es lo cosmético sobre un número que YA trae su país:
+// '+506 3192 3094' -> '+50631923094'. Ahí no se inventa nada.
+export function normalizeHubspotPhone(value) {
+  if (value === null || typeof value === 'undefined') {
+    return value;
+  }
+
+  const raw = String(value).trim();
+
+  // '' (o solo espacios) es un HUECO, no un teléfono inválido: significa que el
+  // campo existe en SAP y está vacío, y la cadena de fallback usa esa
+  // distinción. Se devuelve el valor original sin tocarlo.
+  if (raw === '') {
+    return value;
+  }
+
+  const extensionMatch = EXTENSION_PATTERN.exec(raw);
+  const extension = extensionMatch ? extensionMatch[1] : null;
+  const numberPart = extensionMatch ? raw.slice(0, extensionMatch.index) : raw;
+
+  const compact = numberPart.replace(COSMETIC_PATTERN, '');
+
+  if (!E164_PATTERN.test(compact)) {
+    return null;
+  }
+
+  return extension ? `${compact} ext ${extension}` : compact;
+}
+
+// Por targetField y no por sourceField: la validación que falla es la de la
+// propiedad de HubSpot, así que da igual de qué campo de SAP venga el dato.
+function isHubspotPhoneField(targetField) {
+  if (!targetField) {
+    return false;
+  }
+
+  return HUBSPOT_PHONE_FIELD_SET.has(String(targetField).trim().toLowerCase());
+}
+
+// Único lugar donde se decide qué normalización aplica a un valor mapeado. Las
+// dos reglas son excluyentes: los booleanos van por el campo de SAP, los
+// teléfonos por la propiedad de HubSpot.
+function normalizeMappedValue({ value, sourceField, targetField }) {
+  if (isSapBooleanField(sourceField)) {
+    return normalizeSapBoolean(value);
+  }
+
+  if (isHubspotPhoneField(targetField)) {
+    return normalizeHubspotPhone(value);
+  }
+
+  return value;
 }
 
 // A blank string is a GAP, not a value: SAP fills either BPTaxNumber or
@@ -158,9 +236,14 @@ export function buildMappedProperties({ input, mappings, fallbackConfig = null }
 
     const value = resolveValueByPath(input, mapping.sourceField, options);
 
-    properties[targetField] = isSapBooleanField(mapping.sourceField)
-      ? normalizeSapBoolean(value)
-      : value;
+    // Se normaliza ANTES de asignar, no después: así un teléfono inválido queda
+    // en null, hasMappedValue(null) es false y el siguiente eslabón de la cadena
+    // de fallback todavía tiene su turno.
+    properties[targetField] = normalizeMappedValue({
+      value,
+      sourceField: mapping.sourceField,
+      targetField,
+    });
   }
 
   return properties;
@@ -169,6 +252,7 @@ export function buildMappedProperties({ input, mappings, fallbackConfig = null }
 export default {
   buildMappedProperties,
   hasMappedValue,
+  normalizeHubspotPhone,
   normalizeSapBoolean,
   resolveValueByPath,
 };

@@ -24,17 +24,45 @@ function inTables(candidate, tables) {
   return tables.includes(String(candidate?.conditionTable ?? '').trim());
 }
 
-function pickByPriceList(candidates, priceListType) {
+// Orden con el que se elige entre candidatos que empatan en origen y tabla.
+//
+// Existe porque `find` sobre el arreglo crudo hacía ganar al que Gateway devolviera primero, y
+// eso NO es reproducible: en MKDO/01 hay 97 combinaciones material+lista con default de producto
+// en USD y en DOP a la vez (verificado el 2026-08-24), así que dos corridas del mismo negocio
+// podían escribir precios distintos.
+//
+// Primero la moneda del negocio, después el `conditionRecord` ascendente. El segundo criterio no
+// es cosmético: es el que hace determinista el caso en que NINGÚN candidato tiene la moneda del
+// negocio, que es justo cuando el precio se va a escribir en una moneda equivocada y hay que
+// poder reconstruir cuál se eligió.
+function compareCandidates(dealCurrency) {
+  const wanted = toNonEmptyString(dealCurrency);
+
+  return (a, b) => {
+    if (wanted) {
+      const aMatches = toNonEmptyString(a?.conditionCurrency) === wanted ? 0 : 1;
+      const bMatches = toNonEmptyString(b?.conditionCurrency) === wanted ? 0 : 1;
+
+      if (aMatches !== bMatches) {
+        return aMatches - bMatches;
+      }
+    }
+
+    return String(a?.conditionRecord ?? '').localeCompare(String(b?.conditionRecord ?? ''));
+  };
+}
+
+function pickByPriceList(candidates, priceListType, dealCurrency) {
   const wanted = toNonEmptyString(priceListType);
 
   if (!wanted) {
     return null;
   }
 
-  return candidates.find(
-    (candidate) => inTables(candidate, PRICE_LIST_CONDITION_TABLES)
-      && toNonEmptyString(candidate.priceListType) === wanted
-  ) ?? null;
+  return candidates
+    .filter((candidate) => inTables(candidate, PRICE_LIST_CONDITION_TABLES)
+      && toNonEmptyString(candidate.priceListType) === wanted)
+    .sort(compareCandidates(dealCurrency))[0] ?? null;
 }
 
 // Un material puede tener default de producto en la 501 Y en la 504 con tarifas distintas. Con
@@ -43,12 +71,14 @@ function pickByPriceList(candidates, priceListType) {
 // de PRODUCT_DEFAULT_CONDITION_TABLES: primero la 501, después la 504. Se recorre tabla por
 // tabla (no candidato por candidato) justamente para que el orden que manda sea el de las tablas
 // y no el de la respuesta.
-function pickProductDefault(candidates) {
+// La prioridad de tablas (501 antes que 504) queda POR ENCIMA del desempate por moneda: el orden
+// de las tablas es una decisión tomada, la moneda sólo desempata dentro de una misma tabla.
+function pickProductDefault(candidates, dealCurrency) {
   for (const table of PRODUCT_DEFAULT_CONDITION_TABLES) {
-    const match = candidates.find(
-      (candidate) => inTables(candidate, [table])
-        && !toNonEmptyString(candidate.priceListType)
-    );
+    const match = candidates
+      .filter((candidate) => inTables(candidate, [table])
+        && !toNonEmptyString(candidate.priceListType))
+      .sort(compareCandidates(dealCurrency))[0];
 
     if (match) {
       return match;
@@ -73,19 +103,23 @@ export function resolveS4PriceForMaterial({
   candidates = [],
   customerPriceListType = null,
   defaultPriceListType = null,
+  dealCurrency = null,
 } = {}) {
   const usable = (Array.isArray(candidates) ? candidates : []).filter(isUsable);
+  const wantedCurrency = toNonEmptyString(dealCurrency);
   const attempts = [
-    [pickByPriceList(usable, customerPriceListType), S4_PRICE_SOURCES.CUSTOMER_PRICE_LIST],
-    [pickByPriceList(usable, defaultPriceListType), S4_PRICE_SOURCES.DEFAULT_PRICE_LIST],
-    [pickProductDefault(usable), S4_PRICE_SOURCES.PRODUCT_DEFAULT],
+    [pickByPriceList(usable, customerPriceListType, dealCurrency), S4_PRICE_SOURCES.CUSTOMER_PRICE_LIST],
+    [pickByPriceList(usable, defaultPriceListType, dealCurrency), S4_PRICE_SOURCES.DEFAULT_PRICE_LIST],
+    [pickProductDefault(usable, dealCurrency), S4_PRICE_SOURCES.PRODUCT_DEFAULT],
   ];
 
   for (const [candidate, source] of attempts) {
     if (candidate) {
+      const currency = toNonEmptyString(candidate.conditionCurrency);
+
       return {
         price: toUnitPrice(candidate),
-        currency: toNonEmptyString(candidate.conditionCurrency),
+        currency,
         priceListType: toNonEmptyString(candidate.priceListType),
         conditionRecord: toNonEmptyString(candidate.conditionRecord),
         // Se devuelve la unidad de la condición SIN convertir nada: el precio unitario se calcula
@@ -94,6 +128,11 @@ export function resolveS4PriceForMaterial({
         // salió un precio raro.
         conditionQuantityUnit: toNonEmptyString(candidate.conditionQuantityUnit),
         source,
+        // El candidato NO se descarta por moneda: descartarlo acá haría que un material con su
+        // única tarifa en otra moneda cayera al default del producto y se escribiera un precio de
+        // otra lista, que es peor. El dominio informa; quien decide saltear la línea es el caso
+        // de uso, que es el que puede contárselo al asesor en la nota del negocio.
+        currencyMismatch: Boolean(wantedCurrency) && currency !== wantedCurrency,
       };
     }
   }

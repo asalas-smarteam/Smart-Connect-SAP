@@ -95,21 +95,36 @@ Detalle: s4PriceList
 Precios de line items para tenants S/4 (`sapFlavor: "S4"`). Solo la usa el webhook `POST /webhooks/hubspot/line-items/prices/s4`; el flujo de B1 no la lee.
 
 - `conditionType`: condición de precio de venta en SAP. En Multiquímica es `ZPR0`. Default `ZPR0`.
-- `defaultPriceListType`: lista de precios a usar cuando el cliente no tiene una asignada en su área de ventas, o cuando la suya no tiene tarifa vigente para ese material. Obligatoria.
-- `salesArea`: área de ventas a usar cuando el cliente tiene varias (un mismo cliente puede tener una lista distinta por organización de ventas). Si el cliente tiene una sola, se usa la suya y esta config se ignora. `salesOrganization` y `distributionChannel` son obligatorias juntas (son las dos que entran al filtro de condiciones en SAP); `division` es opcional y sólo desempata cuando el cliente tiene dos áreas que difieren únicamente en ella — si las filas de S/4 del cliente traen `Division` vacía, la comparación la ignora. Si el área configurada queda empatada con más de una del cliente, el flujo falla pidiendo la división en vez de elegir una.
+- `defaultPriceListType`: lista de precios a usar cuando el cliente no tiene una asignada en su área de ventas, o cuando la suya no tiene tarifa vigente para ese material. Obligatoria. Es el ÚLTIMO recurso: primero se busca la combinación del negocio en `defaultPriceListBySalesArea`.
+- `defaultPriceListBySalesArea`: lista por defecto para cada área de ventas, con la clave `"ORG/CANAL"`. Opcional (sin ella todo cae a `defaultPriceListType`). Es por área y no global porque la lista mayoritaria cambia según la combinación: sobre las 16 que existen en Multiquímica, un default global acierta en 5. La clave se normaliza a mayúsculas y se le quitan los espacios, pero el canal NO se re-normaliza — SAP devuelve `"01"`, así que `"1"` no matchea nunca (equipararlos esconde una config mal cargada). Una entrada con la clave mal escrita, o con el valor vacío, se descarta con un warning en el log y esa combinación cae a `defaultPriceListType`; no se cae toda la config por un typo.
+
+  **El área de ventas ya NO se configura acá: la declara el negocio de HubSpot.** Los tenants S/4 necesitan dos propiedades obligatorias en el objeto Negocio, `sales_organization` (→ `SalesOrganization`) y `distribution_channel` (→ `DistributionChannel`), más la nativa `deal_currency_code`. Con esas dos, `A_CustomerSalesArea` devuelve una sola fila del cliente y de ahí sale su lista. Si el negocio no las trae, el evento falla y se deja una nota pidiéndolas, sin tocar los precios. Si el cliente no está registrado en esa área, los precios de las líneas se ponen en 0 y la nota lista las áreas que el cliente sí tiene. La clave `salesArea` de versiones anteriores ya no se lee; puede quedar en el documento sin efecto.
 - `priceListProperty`: propiedad del line item donde se escribe la lista efectivamente usada. Opcional. Se escribe SIEMPRE que esté configurada: cuando el precio salió del default del producto (tablas 501/504, sin lista) se escribe el literal `PRODUCT_DEFAULT`, para no dejar la etiqueta de la corrida anterior al lado de un precio de otra procedencia. Si la propiedad del portal es un desplegable, hay que agregarle la opción `PRODUCT_DEFAULT` además de las listas.
 - `currencyProperty`: propiedad del line item donde se escribe la moneda de la tarifa de SAP. Opcional pero muy recomendada: la tarifa no se convierte, viene en la moneda de la condición. Si falta, cada corrida deja un warning en el log, porque sin ella la moneda no queda registrada en ninguna parte del CRM.
 - `priceSourceProperty`: propiedad del line item donde se escribe el ORIGEN del precio: `customerPriceList` (la lista del área de ventas del cliente), `defaultPriceList` (`defaultPriceListType`) o `productDefault` (tablas 501/504). Opcional. Distingue los tres casos que la etiqueta de lista sola no separa, porque la lista del cliente y la de config pueden ser la misma.
 
 Nota sobre el `amount` del negocio: si las líneas valorizadas quedan con tarifas en más de una moneda, el `amount` del deal NO se escribe (sumar USD con DOP no da un número correcto en ninguna de las dos). Las líneas sí se actualizan, queda un warning con el detalle y la respuesta trae `meta.dealUpdated: false` con el motivo.
 
+Nota sobre la moneda de la línea: el campo `price` del line item no lleva moneda propia, hereda la del negocio. Si la condición de SAP está en otra moneda que `deal_currency_code`, la línea se **saltea** (escribir ahí una tarifa en DOP dentro de un negocio en USD es un precio silenciosamente equivocado) y el motivo queda en la nota. Cuando un material tiene condiciones en varias monedas, gana la que coincide con la del negocio; si ninguna coincide, gana el `ConditionRecord` menor, para que el resultado sea reproducible entre corridas.
+
 ```json
 { "key": "s4PriceList", "value": {
     "conditionType": "ZPR0",
     "defaultPriceListType": "ZC",
-    "salesArea": { "salesOrganization": "FQCR", "distributionChannel": "01", "division": "SC" },
+    "defaultPriceListBySalesArea": {
+      "DPDO/01": "ZC", "DPDO/02": "ZD",
+      "CPDO/01": "ZD", "CPDO/02": "ZD",
+      "GPDO/01": "ZC", "GPDO/02": "ZA",
+      "MQDO/01": "ZD", "MQDO/02": "ZD",
+      "TMDO/01": "ZC", "TMDO/02": "ZB",
+      "MQGT/01": "ZC", "MQGT/02": "ZA",
+      "HFDO/01": "ZD", "MPDO/01": "ZA",
+      "MKDO/01": "ZD", "MKDO/02": "ZD"
+    },
     "priceListProperty": "lista_de_precios_sap",
     "currencyProperty": "moneda_precio_sap",
     "priceSourceProperty": "origen_precio_sap"
 }}
 ```
+
+El mapa de arriba son las listas **mayoritarias** de cada combinación en el S/4 de Multiquímica al 2026-08-24, calculadas de los datos y cargadas para que el desarrollo y las pruebas funcionen. Están pendientes de que el cliente las confirme; el impacto es acotado porque el default sólo aplica a los clientes cuya `PriceListType` viene vacía (391 en todo el sistema).

@@ -272,6 +272,44 @@ describe('SERVICE_LAYER configuration flow', () => {
   });
 
 
+  it('builds ne filters in OData syntax', () => {
+    const url = buildServiceLayerUrl(
+      {
+        integrationModeName: 'SERVICE_LAYER',
+        serviceLayerBaseUrl: 'https://201.7.208.10:23052',
+        serviceLayerPath: '/BusinessPartners',
+        filters: [
+          { property: 'CardType', operator: 'eq', value: 'C' },
+          { property: 'GlobalLocationNumber', operator: 'ne', value: 'PERSONA/NEGOCIO' },
+        ],
+      },
+      [{ sourceField: 'CardCode' }]
+    );
+
+    expect(url).toContain("$filter=CardType%20eq%20'C'%20and%20GlobalLocationNumber%20ne%20'PERSONA%2FNEGOCIO'");
+  });
+
+
+  it('keeps null values with the ne_or_null operator', () => {
+    const url = buildServiceLayerUrl(
+      {
+        integrationModeName: 'SERVICE_LAYER',
+        serviceLayerBaseUrl: 'https://201.7.208.10:23052',
+        serviceLayerPath: '/BusinessPartners',
+        filters: [
+          { property: 'CardType', operator: 'eq', value: 'C' },
+          { property: 'GlobalLocationNumber', operator: 'ne_or_null', value: 'PERSONA/NEGOCIO' },
+        ],
+      },
+      [{ sourceField: 'CardCode' }]
+    );
+
+    expect(url).toContain(
+      "$filter=CardType%20eq%20'C'%20and%20(GlobalLocationNumber%20eq%20null%20or%20GlobalLocationNumber%20ne%20'PERSONA%2FNEGOCIO')"
+    );
+  });
+
+
   it('appends company additional fields from env into $select', () => {
     process.env.COMPANY_ADD_FIELDS_URL_SAP = 'BPAddresses,ContactEmployees';
 
@@ -299,11 +337,13 @@ describe('SERVICE_LAYER configuration flow', () => {
           integrationModeName: 'SERVICE_LAYER',
           serviceLayerBaseUrl: 'https://201.7.208.10:23052',
           serviceLayerPath: '/BusinessPartners',
-          filters: [{ property: 'CardType', operator: 'ne', value: 'C' }],
+          // 'in' es válido solo en el builder de S/4; el de B1 debe rechazarlo
+          // en vez de ignorar el filtro en silencio.
+          filters: [{ property: 'GroupCode', operator: 'in', value: ['100', '101'] }],
         },
         [{ sourceField: 'CardCode' }]
       )
-    ).toThrow('Unsupported SAP filter operator: ne');
+    ).toThrow('Unsupported SAP filter operator: in');
   });
 
 });

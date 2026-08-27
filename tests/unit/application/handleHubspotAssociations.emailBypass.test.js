@@ -20,6 +20,8 @@ function buildUseCase(overrides = {}) {
     },
     contactHandler: {
       find: jest.fn().mockResolvedValue(null),
+      findByEmail: jest.fn().mockResolvedValue(null),
+      findContactEmployee: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue({ id: 'hs-contact-1' }),
       update: jest.fn(),
     },
@@ -36,6 +38,8 @@ describe('HandleHubspotAssociations company contact email bypass', () => {
   it('uses SAP contact E_Mail before company EmailAddress fallback', async () => {
     const contactHandler = {
       find: jest.fn().mockResolvedValue(null),
+      findByEmail: jest.fn().mockResolvedValue(null),
+      findContactEmployee: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue({ id: 'hs-contact-1' }),
       update: jest.fn(),
     };
@@ -85,6 +89,8 @@ describe('HandleHubspotAssociations company contact email bypass', () => {
   it('uses company EmailAddress with sapInternalCode when SAP contact E_Mail is missing', async () => {
     const contactHandler = {
       find: jest.fn().mockResolvedValue(null),
+      findByEmail: jest.fn().mockResolvedValue(null),
+      findContactEmployee: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue({ id: 'hs-contact-4' }),
       update: jest.fn(),
     };
@@ -131,6 +137,8 @@ describe('HandleHubspotAssociations company contact email bypass', () => {
   it('sends an empty email when associated contact email is invalid and bypassEmail is enabled', async () => {
     const contactHandler = {
       find: jest.fn().mockResolvedValue(null),
+      findByEmail: jest.fn().mockResolvedValue(null),
+      findContactEmployee: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue({ id: 'hs-contact-2' }),
       update: jest.fn(),
     };
@@ -190,6 +198,8 @@ describe('HandleHubspotAssociations company contact email bypass', () => {
   it('sends an empty email when generated company fallback email is invalid and bypassEmail is enabled', async () => {
     const contactHandler = {
       find: jest.fn().mockResolvedValue(null),
+      findByEmail: jest.fn().mockResolvedValue(null),
+      findContactEmployee: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue({ id: 'hs-contact-3' }),
       update: jest.fn(),
     };
@@ -239,6 +249,8 @@ describe('HandleHubspotAssociations company contact email bypass', () => {
   it('sends an empty email when SAP contact and company emails are missing and bypassEmail is enabled', async () => {
     const contactHandler = {
       find: jest.fn().mockResolvedValue(null),
+      findByEmail: jest.fn().mockResolvedValue(null),
+      findContactEmployee: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue({ id: 'hs-contact-5' }),
       update: jest.fn(),
     };
@@ -288,6 +300,8 @@ describe('HandleHubspotAssociations company contact email bypass', () => {
   it('does not sync when SAP contact and company emails are missing and bypassEmail is disabled', async () => {
     const contactHandler = {
       find: jest.fn(),
+      findByEmail: jest.fn(),
+      findContactEmployee: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
     };
