@@ -26,6 +26,15 @@ function normalizeNumber(value, fallback = 0) {
   return Number.isFinite(normalized) ? normalized : fallback;
 }
 
+function toNumberOrNull(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const parsed = Number(String(value).trim());
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function normalizeQuantity(value) {
   const normalized = normalizeNumber(value, 0);
   return normalized > 0 ? normalized : 1;
@@ -282,7 +291,17 @@ export class SyncLineItemPrices {
     // impuesto en el campo de descuento y se eliminó junto con este bloque.
     let finalDiscount = 0;
 
-    if (discountConfig?.isRequired && (activeDiscountGroups ?? []).length > 0) {
+    // Un descuento que YA está en la línea de HubSpot gana sobre el de SAP: el asesor lo puso
+    // a mano y SAP no lo conoce, así que resolver contra los grupos devolvería 0 y lo pisaría
+    // en cada webhook. Solo un campo vacío o en 0 cae a la resolución de SAP.
+    const discountReadProperty = discountHsField || 'discount';
+    const existingHubspotDiscount = toNumberOrNull(
+      lineItem?.[discountReadProperty] ?? lineItem?.properties?.[discountReadProperty]
+    );
+
+    if (existingHubspotDiscount !== null && existingHubspotDiscount !== 0) {
+      finalDiscount = existingHubspotDiscount;
+    } else if (discountConfig?.isRequired && (activeDiscountGroups ?? []).length > 0) {
       const sapDiscount = resolveDiscount(activeDiscountGroups, {
         itemCode,
         itemsGroupCode: sapItemStockData?.ItemsGroupCode,
@@ -362,11 +381,14 @@ export class SyncLineItemPrices {
       ?.enableMiscPriceCalculation === true
       ? toNonEmptyString(enrichment.miscPriceCalculationConfig?.miscSourceProperty)
       : null;
+    // La propiedad de descuento se relee por la misma razón que misc: si la ronda 2 no la trae,
+    // el enriquecimiento no ve el descuento manual del asesor y lo pisa con el de SAP.
+    const discountReadProperty = enrichment?.discountHsField || 'discount';
     const { lineItems: freshLines, failures: readFailures } = await this.hubspotPriceClient
       .readLineItems({
         token,
         lineItemIds: freshIds,
-        extraProperties: [miscSourceProperty, 'price'].filter(Boolean),
+        extraProperties: [miscSourceProperty, 'price', discountReadProperty].filter(Boolean),
       });
 
     const trigger = [];

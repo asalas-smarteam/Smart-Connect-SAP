@@ -804,12 +804,14 @@ describe('lineItemPriceWebhook.service', () => {
             id: '54118822955',
             itemCode: 'A01050211',
             quantity: '2',
+            discount: null,
             properties: { hs_sku: 'A01050211', quantity: '2' },
           },
           {
             id: '54118822956',
             itemCode: 'A01050007',
             quantity: '0',
+            discount: null,
             properties: { hs_sku: 'A01050007', quantity: '0' },
           },
         ],
@@ -914,13 +916,14 @@ describe('lineItemPriceWebhook.service', () => {
         itemCode: 'A01050211',
         quantity: '2',
         misc: '15',
+        discount: null,
         properties: { hs_sku: 'A01050211', quantity: '2', misc: '15' },
       },
     ]);
     expect(mockHubspotGet).toHaveBeenCalledWith(
       'hubspot-token',
       '/crm/v3/objects/line_items/54118822955',
-      { properties: 'hs_sku,quantity,misc' }
+      { properties: 'hs_sku,quantity,misc,discount' }
     );
   });
 
@@ -1043,6 +1046,7 @@ describe('lineItemPriceWebhook.service', () => {
             id: '54118822955',
             itemCode: 'A01050211',
             quantity: '0',
+            discount: null,
             properties: { hs_sku: 'A01050211', quantity: '0' },
           },
         ],
