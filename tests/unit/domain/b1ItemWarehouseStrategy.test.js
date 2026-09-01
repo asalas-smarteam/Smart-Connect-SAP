@@ -426,4 +426,10 @@ describe('getWarehouseAvailableStock con formula', () => {
   it('campo ausente en la bodega cuenta como 0', () => {
     expect(getWarehouseAvailableStock({ InStock: 5 }, { add: ['InStock', 'Ordered'], subtract: ['Committed'] })).toBe(5);
   });
+
+  it('con el default reproduce bit por bit (InStock - Committed) + Ordered, tambien con flotantes', () => {
+    const warehouse = { InStock: 0.1, Committed: 0.2, Ordered: 0.3 };
+    expect(getWarehouseAvailableStock(warehouse)).toBe((0.1 - 0.2) + 0.3);
+    expect(getWarehouseAvailableStock(warehouse, { add: ['Ordered', 'InStock'], subtract: ['Committed'] })).toBe((0.1 - 0.2) + 0.3);
+  });
 });

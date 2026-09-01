@@ -125,16 +125,19 @@ export function normalizeB1AvailableFormula(raw, { onInvalid } = {}) {
   return { add: add.fields, subtract: subtract.fields };
 }
 
-function sumWarehouseFields(warehouse, fields) {
-  return (Array.isArray(fields) ? fields : [])
-    .reduce((total, field) => total + Number(warehouse?.[field] ?? 0), 0);
-}
-
-// Con un solo argumento da exactamente InStock - Committed + Ordered, que es lo
-// que todo llamador y test existente espera. El segundo argumento es la
-// formula ya normalizada (nunca la cruda de Mongo).
+// Orden canonico fijo, no el orden de las listas: con el default reproduce
+// bit por bit (InStock - Committed) + Ordered, que es lo historico. Con
+// flotantes el orden de suma cambia el ultimo bit, y "ningun numero cambia".
 export function getWarehouseAvailableStock(warehouse, formula = DEFAULT_B1_AVAILABLE_FORMULA) {
-  return sumWarehouseFields(warehouse, formula?.add) - sumWarehouseFields(warehouse, formula?.subtract);
+  const add = new Set(formula?.add ?? []);
+  const subtract = new Set(formula?.subtract ?? []);
+
+  return B1_WAREHOUSE_STOCK_FIELDS.reduce((total, field) => {
+    const quantity = Number(warehouse?.[field] ?? 0);
+    if (add.has(field)) return total + quantity;
+    if (subtract.has(field)) return total - quantity;
+    return total;
+  }, 0);
 }
 
 // La comparacion es en minusculas para que el cliente pueda escribir la metrica
