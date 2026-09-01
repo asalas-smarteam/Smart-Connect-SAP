@@ -8,6 +8,7 @@ export const WarehouseStockStrategyPort = createPort({
   methods: [
     'normalizeFields',
     'normalizeExclusions',
+    'normalizeAvailableFormula',
     'requiresRemoteFetch',
     'buildQueryTargets',
     'buildIndex',

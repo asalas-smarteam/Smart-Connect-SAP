@@ -267,6 +267,13 @@ export class S4PlantStorageLocationStrategy {
     return normalizeS4ExcludedWarehouses(rawValue);
   }
 
+  // La formula de disponible es un concepto de B1 (InStock/Committed/Ordered).
+  // En S/4 lo que cuenta lo decide stockType por entrada, asi que aca no hay
+  // nada que validar ni avisar. buildProperties ignora el argumento.
+  normalizeAvailableFormula() {
+    return undefined;
+  }
+
   requiresRemoteFetch() {
     return true;
   }

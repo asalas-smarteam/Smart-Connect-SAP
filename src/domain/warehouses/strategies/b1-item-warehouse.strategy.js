@@ -161,7 +161,11 @@ export function normalizeB1StockMetric(raw) {
 // metric (la forma historica, { warehouseCode, propertyName }) tiene que seguir
 // dando el mismo numero que antes. Una metric invalida nunca llega hasta aca --
 // normalizeB1WarehouseFields ya descarto esa entrada.
-export function getWarehouseMetricValue(warehouse, metric = DEFAULT_B1_STOCK_METRIC) {
+export function getWarehouseMetricValue(
+  warehouse,
+  metric = DEFAULT_B1_STOCK_METRIC,
+  formula = DEFAULT_B1_AVAILABLE_FORMULA
+) {
   switch (metric) {
     case B1_STOCK_METRICS.IN_STOCK:
       return Number(warehouse?.InStock ?? 0);
@@ -170,7 +174,7 @@ export function getWarehouseMetricValue(warehouse, metric = DEFAULT_B1_STOCK_MET
     case B1_STOCK_METRICS.ORDERED:
       return Number(warehouse?.Ordered ?? 0);
     default:
-      return getWarehouseAvailableStock(warehouse);
+      return getWarehouseAvailableStock(warehouse, formula);
   }
 }
 
@@ -236,7 +240,8 @@ export function normalizeB1ExcludedWarehouses(value) {
 export function buildB1WarehouseStockProperties(
   warehouseItems,
   warehouseFields = DEFAULT_WAREHOUSE_FIELDS,
-  exclusions = []
+  exclusions = [],
+  { availableFormula = DEFAULT_B1_AVAILABLE_FORMULA } = {}
 ) {
   const excludedSet = new Set(exclusions);
   const warehousesByCode = new Map(
@@ -258,9 +263,21 @@ export function buildB1WarehouseStockProperties(
       return acc;
     }
 
+    // Formula invalida: la entrada `available` se omite en vez de escribir un
+    // numero con la formula equivocada; HubSpot conserva el ultimo valor. Las
+    // metricas crudas no dependen de la formula. El `??` cubre un field armado
+    // a mano sin metric (forma historica), que tambien es `available`.
+    if (
+      availableFormula === null
+      && (field.metric ?? DEFAULT_B1_STOCK_METRIC) === B1_STOCK_METRICS.AVAILABLE
+    ) {
+      return acc;
+    }
+
     acc[propertyName] = getWarehouseMetricValue(
       warehousesByCode.get(warehouseCode),
-      field.metric
+      field.metric,
+      availableFormula
     );
     return acc;
   }, {});
@@ -288,6 +305,10 @@ export class B1ItemWarehouseStrategy {
     return normalizeB1ExcludedWarehouses(rawValue);
   }
 
+  normalizeAvailableFormula(rawValue, options) {
+    return normalizeB1AvailableFormula(rawValue, options);
+  }
+
   requiresRemoteFetch() {
     return false;
   }
@@ -303,11 +324,12 @@ export class B1ItemWarehouseStrategy {
     return new Map();
   }
 
-  buildProperties({ record, fields, exclusions = [] }) {
+  buildProperties({ record, fields, exclusions = [], availableFormula }) {
     return buildB1WarehouseStockProperties(
       record?.rawSapData?.ItemWarehouseInfoCollection,
       fields,
-      exclusions
+      exclusions,
+      { availableFormula }
     );
   }
 }
