@@ -128,6 +128,11 @@ export function normalizeB1AvailableFormula(raw, { onInvalid } = {}) {
 // Orden canonico fijo, no el orden de las listas: con el default reproduce
 // bit por bit (InStock - Committed) + Ordered, que es lo historico. Con
 // flotantes el orden de suma cambia el ultimo bit, y "ningun numero cambia".
+//
+// `formula` siempre es la salida de normalizeB1AvailableFormula, nunca el
+// valor crudo de Mongo: los nombres de campo se comparan en forma canonica
+// (InStock/Committed/Ordered), asi que una formula cruda en minusculas
+// calcularia un numero equivocado en vez de tirar.
 export function getWarehouseAvailableStock(warehouse, formula = DEFAULT_B1_AVAILABLE_FORMULA) {
   const add = new Set(formula?.add ?? []);
   const subtract = new Set(formula?.subtract ?? []);
@@ -283,6 +288,10 @@ export function buildB1WarehouseStockProperties(
   }, {});
 }
 
+// Usa la formula default y ignora warehouseAvailableFormula del tenant: no
+// tiene llamador en produccion hoy (solo tests y un re-export), asi que no se
+// le sumo la formula a proposito. No usar para un llamador nuevo sin antes
+// hacerle llegar la formula normalizada del tenant.
 export function getAvailableStockForB1Warehouse(warehouseItems, warehouseCode) {
   if (!warehouseCode) {
     return 0;

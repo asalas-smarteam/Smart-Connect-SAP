@@ -248,13 +248,30 @@ describe('WarehouseStockEnrichmentAdapter — formula de disponible', () => {
       code: 'warehouse_available_formula_invalid',
       message: 'Warehouse available formula invalid: unknown_field:InStok',
       details: {
-        raw: { add: ['InStok'] },
+        raw: '{"add":["InStok"]}',
         reason: 'unknown_field:InStok',
         validFields: ['InStock', 'Committed', 'Ordered'],
       },
     }));
     expect(strategy.buildProperties).toHaveBeenCalledTimes(3);
     expect(strategy.buildProperties).toHaveBeenCalledWith(expect.objectContaining({ availableFormula: null }));
+  });
+
+  it('serializa details.raw a string para que un typo con $ no tumbe el propio SyncWarning', async () => {
+    const syncWarningRepository = buildSyncWarningRepository();
+    const strategy = buildB1Strategy({ invalidFormula: { raw: { '$add': ['InStock'] }, reason: 'not_an_array' } });
+    const adapter = new WarehouseStockEnrichmentAdapter({
+      strategyFactory: { getStrategy: jest.fn().mockReturnValue(strategy) },
+      configRepository: config({ '$add': ['InStock'] }),
+      syncWarningRepository,
+      logger: silentLogger,
+    });
+
+    await adapter.enrich({ mappedRecords: buildRecords(1), objectType: 'product', tenantModels: buildTenantModels() });
+
+    const [{ details }] = syncWarningRepository.record.mock.calls[0];
+    expect(details.raw).toBe('{"$add":["InStock"]}');
+    expect(Object.keys(details).some((key) => key.startsWith('$'))).toBe(false);
   });
 
   it('registra el warning aunque no haya ninguna bodega configurada', async () => {

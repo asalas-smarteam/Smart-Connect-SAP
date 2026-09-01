@@ -9,6 +9,16 @@ import {
 import { createSapTransport } from '../transport/sapTransportFactory.js';
 import S4StockResolver from './S4StockResolver.js';
 
+// JSON.stringify tira con referencias circulares; un valor que no se puede
+// serializar igual tiene que dejar aviso, asi que cae a String().
+function safeStringifyRaw(raw) {
+  try {
+    return JSON.stringify(raw) ?? String(raw);
+  } catch {
+    return String(raw);
+  }
+}
+
 // Attaches each product's resolved warehouse-stock HubSpot properties to
 // rawSapData, ahead of product.handler.js -- same shape as
 // S4ContactEnrichmentAdapter (enrich a mapped record set in place, fail in
@@ -229,7 +239,10 @@ export class WarehouseStockEnrichmentAdapter {
         code: WAREHOUSE_AVAILABLE_FORMULA_INVALID_WARNING,
         message: `Warehouse available formula invalid: ${invalidFormula.reason}`,
         details: {
-          raw: invalidFormula.raw,
+          // Serializado a string a proposito: el Mongo de produccion (<5.0)
+          // rechaza claves con $ o con puntos, y una config con un typo tipo
+          // { "$add": [...] } haria fallar el propio aviso que la denuncia.
+          raw: safeStringifyRaw(invalidFormula.raw),
           reason: invalidFormula.reason,
           validFields: [...B1_WAREHOUSE_STOCK_FIELDS],
         },

@@ -43,10 +43,12 @@ export async function resolveHubspotWarehouseFields(tenantModels) {
 // log y omite las `available`; el SyncWarning lo escribe el sync de productos
 // (WarehouseStockEnrichmentAdapter) sobre la misma config.
 export async function resolveHubspotAvailableFormula(tenantModels) {
+  // Copia, no la referencia congelada: getValue la manda tal cual a
+  // $setOnInsert, y tenantProvisioning.js ya la copia por la misma razon.
   const value = await tenantConfigurationService.getValue(
     tenantModels,
     WAREHOUSE_AVAILABLE_FORMULA_CONFIG_KEY,
-    DEFAULT_B1_AVAILABLE_FORMULA
+    { add: [...DEFAULT_B1_AVAILABLE_FORMULA.add], subtract: [...DEFAULT_B1_AVAILABLE_FORMULA.subtract] }
   );
 
   return normalizeB1AvailableFormula(value, {
