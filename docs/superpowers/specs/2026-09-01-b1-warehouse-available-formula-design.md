@@ -467,9 +467,12 @@ queda intacto); fórmula Noelito `{ add: ['InStock'], subtract: ['Committed'] }`
 
 ### `warehouseStock.js` (en `tests/unit/warehouseStock.test.js`)
 
-- `getHubspotWarehouseStockPropertiesForTenant` con `tenantModels` cuyo `Configuration.findOne`
-  devuelve la fórmula Noelito → `distelsa_stock` sale con `InStock - Committed`. Los seis tests
-  existentes quedan intactos (leen sin documento de fórmula → default).
+- `getHubspotWarehouseStockPropertiesForTenant` con `tenantModels` cuyo `Configuration` devuelve la
+  fórmula Noelito → `distelsa_stock` sale con `InStock - Committed`. Los seis tests existentes
+  conservan **todas sus aserciones numéricas**; lo único que cambia es el mock de `Configuration`,
+  que respondía el documento de `fieldsWareHouseHS` para cualquier clave y ahora responde por clave
+  (si no, la clave de la fórmula recibiría ese array, sería `not_an_object`, y las `available`
+  desaparecerían).
 - `getValue` se llama con `('warehouseAvailableFormula', DEFAULT_B1_AVAILABLE_FORMULA)`.
 - Fórmula inválida → las `available` no aparecen y `console.error` se llamó; no tira.
 
