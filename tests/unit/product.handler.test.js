@@ -5,11 +5,13 @@ import { BATCH_EXPIRY_KEY } from '../../src/domain/batches/batch-expiry.constant
 const mockGetHubspotWarehouseStockPropertiesForTenant = jest.fn();
 const mockBuildHubspotWarehouseStockProperties = jest.fn();
 const mockResolveHubspotWarehouseFields = jest.fn();
+const mockResolveHubspotAvailableFormula = jest.fn();
 
 jest.unstable_mockModule('../../src/infrastructure/hubspot/warehouseStock.js', () => ({
   getHubspotWarehouseStockPropertiesForTenant: mockGetHubspotWarehouseStockPropertiesForTenant,
   buildHubspotWarehouseStockProperties: mockBuildHubspotWarehouseStockProperties,
   resolveHubspotWarehouseFields: mockResolveHubspotWarehouseFields,
+  resolveHubspotAvailableFormula: mockResolveHubspotAvailableFormula,
 }));
 
 const {
@@ -118,6 +120,8 @@ describe('product.handler preprocess', () => {
   it('buildPreprocessContext resolves warehouse and price fields for the whole run', async () => {
     const warehouseFields = [{ warehouseCode: 'A01', propertyName: 'a01_stock' }];
     mockResolveHubspotWarehouseFields.mockResolvedValue(warehouseFields);
+    const availableFormula = { add: ['InStock'], subtract: ['Committed'] };
+    mockResolveHubspotAvailableFormula.mockResolvedValue(availableFormula);
     const tenantModels = {
       Configuration: {
         findOne: jest.fn().mockReturnValue({
@@ -134,8 +138,10 @@ describe('product.handler preprocess', () => {
     expect(context).toEqual({
       warehouseFields,
       priceFields: ['hs_price_nio'],
+      availableFormula,
     });
     expect(mockResolveHubspotWarehouseFields).toHaveBeenCalledWith(tenantModels);
+    expect(mockResolveHubspotAvailableFormula).toHaveBeenCalledWith(tenantModels);
   });
 
   it('preprocess uses the preprocessContext without touching the database', async () => {
@@ -157,7 +163,7 @@ describe('product.handler preprocess', () => {
     await preprocess({
       item,
       tenantModels,
-      preprocessContext: { warehouseFields, priceFields: ['hs_price_nio'] },
+      preprocessContext: { warehouseFields, priceFields: ['hs_price_nio'], availableFormula: { add: ['InStock'], subtract: ['Committed'] } },
     });
 
     expect(item.properties).toEqual({
@@ -166,11 +172,29 @@ describe('product.handler preprocess', () => {
     });
     expect(mockBuildHubspotWarehouseStockProperties).toHaveBeenCalledWith(
       item.rawSapData.ItemWarehouseInfoCollection,
-      warehouseFields
+      warehouseFields,
+      { availableFormula: { add: ['InStock'], subtract: ['Committed'] } }
     );
     expect(mockGetHubspotWarehouseStockPropertiesForTenant).not.toHaveBeenCalled();
     expect(tenantModels.Configuration.findOne).not.toHaveBeenCalled();
     expect(tenantModels.Configuration.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('un preprocessContext viejo sin availableFormula sigue funcionando (cae al default del builder)', async () => {
+    mockBuildHubspotWarehouseStockProperties.mockReturnValue({ A01_stock: 7 });
+    const item = { properties: {}, rawSapData: { ItemWarehouseInfoCollection: [] } };
+
+    await preprocess({
+      item,
+      tenantModels: { Configuration: { findOne: jest.fn(), findOneAndUpdate: jest.fn() } },
+      preprocessContext: { warehouseFields: [], priceFields: ['hs_price_nio'] },
+    });
+
+    expect(mockBuildHubspotWarehouseStockProperties).toHaveBeenCalledWith(
+      [],
+      [],
+      { availableFormula: undefined }
+    );
   });
 
   it('preserves strategy price fields when product has a selected SAP price', async () => {
