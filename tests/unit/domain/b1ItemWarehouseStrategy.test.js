@@ -5,10 +5,19 @@ import {
   getAvailableStockForB1Warehouse,
   getWarehouseAvailableStock,
   getWarehouseMetricValue,
+  normalizeB1AvailableFormula,
   normalizeB1ExcludedWarehouses,
   normalizeB1StockMetric,
   normalizeB1WarehouseFields,
 } from '../../../src/domain/warehouses/strategies/b1-item-warehouse.strategy.js';
+import {
+  DEFAULT_B1_AVAILABLE_FORMULA,
+  B1_STOCK_METRICS,
+  B1_WAREHOUSE_STOCK_FIELDS,
+  DEFAULT_B1_STOCK_METRIC,
+  WAREHOUSE_AVAILABLE_FORMULA_CONFIG_KEY,
+  WAREHOUSE_AVAILABLE_FORMULA_INVALID_WARNING,
+} from '../../../src/domain/warehouses/warehouse-stock-strategy.constants.js';
 
 describe('getWarehouseAvailableStock', () => {
   it('computes InStock - Committed + Ordered', () => {
@@ -287,7 +296,7 @@ describe('B1ItemWarehouseStrategy', () => {
   it('implements the WarehouseStockStrategyPort contract', () => {
     const strategy = new B1ItemWarehouseStrategy();
 
-    ['normalizeFields', 'normalizeExclusions', 'requiresRemoteFetch', 'buildQueryTargets', 'buildIndex', 'buildProperties']
+    ['normalizeFields', 'normalizeExclusions', 'normalizeAvailableFormula', 'requiresRemoteFetch', 'buildQueryTargets', 'buildIndex', 'buildProperties']
       .forEach((method) => expect(typeof strategy[method]).toBe('function'));
   });
 });
@@ -343,5 +352,174 @@ describe('getWarehouseMetricValue', () => {
     expect(getWarehouseMetricValue({ InStock: 5 }, 'committed')).toBe(0);
     expect(getWarehouseMetricValue({ InStock: 5 }, 'ordered')).toBe(0);
     expect(getWarehouseMetricValue({ InStock: 5 }, 'available')).toBe(5);
+  });
+});
+
+describe('constantes de la formula de disponible', () => {
+  it('expone la clave, los campos validos, el default y el codigo del warning', () => {
+    expect(WAREHOUSE_AVAILABLE_FORMULA_CONFIG_KEY).toBe('warehouseAvailableFormula');
+    expect(B1_WAREHOUSE_STOCK_FIELDS).toEqual(['InStock', 'Committed', 'Ordered']);
+    expect(DEFAULT_B1_AVAILABLE_FORMULA).toEqual({ add: ['InStock', 'Ordered'], subtract: ['Committed'] });
+    expect(Object.isFrozen(DEFAULT_B1_AVAILABLE_FORMULA)).toBe(true);
+    expect(WAREHOUSE_AVAILABLE_FORMULA_INVALID_WARNING).toBe('warehouse_available_formula_invalid');
+  });
+});
+
+describe('normalizeB1AvailableFormula', () => {
+  const NOELITO = { add: ['InStock'], subtract: ['Committed'] };
+
+  it('documento ausente o null = default historico', () => {
+    expect(normalizeB1AvailableFormula(undefined)).toEqual({ add: ['InStock', 'Ordered'], subtract: ['Committed'] });
+    expect(normalizeB1AvailableFormula(null)).toEqual({ add: ['InStock', 'Ordered'], subtract: ['Committed'] });
+  });
+
+  it('canonicaliza nombres sin distinguir mayusculas ni espacios', () => {
+    expect(normalizeB1AvailableFormula({ add: [' instock '], subtract: ['COMMITTED'] })).toEqual(NOELITO);
+  });
+
+  it('lista ausente = vacia, y los duplicados dentro de una lista se colapsan', () => {
+    expect(normalizeB1AvailableFormula({ add: ['InStock', 'InStock'] })).toEqual({ add: ['InStock'], subtract: [] });
+  });
+
+  it.each([
+    ['InStock - Committed', 'not_an_object'],
+    [['InStock'], 'not_an_object'],
+    [42, 'not_an_object'],
+    [{ add: 'InStock' }, 'add_not_an_array'],
+    [{ add: ['InStock'], subtract: 'Committed' }, 'subtract_not_an_array'],
+    [{ add: ['InStok'] }, 'unknown_field:InStok'],
+    [{ add: ['InStock'], subtract: ['MinimalStock'] }, 'unknown_field:MinimalStock'],
+    [{ add: ['InStock'], subtract: ['instock'] }, 'field_in_both_lists:InStock'],
+    [{ add: [], subtract: [] }, 'empty_formula'],
+    [{}, 'empty_formula'],
+  ])('devuelve null y reporta %j como %s', (raw, reason) => {
+    const onInvalid = jest.fn();
+
+    expect(normalizeB1AvailableFormula(raw, { onInvalid })).toBeNull();
+    expect(onInvalid).toHaveBeenCalledTimes(1);
+    expect(onInvalid).toHaveBeenCalledWith({ raw, reason });
+  });
+
+  it('sin onInvalid una formula invalida devuelve null y no tira', () => {
+    expect(() => normalizeB1AvailableFormula({ add: ['InStok'] })).not.toThrow();
+    expect(normalizeB1AvailableFormula({ add: ['InStok'] })).toBeNull();
+  });
+});
+
+describe('getWarehouseAvailableStock con formula', () => {
+  const warehouse = { InStock: 7, Committed: 1, Ordered: 2 };
+
+  it('aplica la formula de Noelito', () => {
+    expect(getWarehouseAvailableStock(warehouse, { add: ['InStock'], subtract: ['Committed'] })).toBe(6);
+  });
+
+  it('acepta una lista vacia', () => {
+    expect(getWarehouseAvailableStock(warehouse, { add: ['InStock'], subtract: [] })).toBe(7);
+  });
+
+  it('puede dar negativo', () => {
+    expect(getWarehouseAvailableStock(warehouse, { add: ['Ordered'], subtract: ['InStock', 'Committed'] })).toBe(-6);
+  });
+
+  it('bodega ausente da 0 con cualquier formula', () => {
+    expect(getWarehouseAvailableStock(undefined, { add: ['InStock'], subtract: ['Committed'] })).toBe(0);
+  });
+
+  it('campo ausente en la bodega cuenta como 0', () => {
+    expect(getWarehouseAvailableStock({ InStock: 5 }, { add: ['InStock', 'Ordered'], subtract: ['Committed'] })).toBe(5);
+  });
+
+  it('con el default reproduce bit por bit (InStock - Committed) + Ordered, tambien con flotantes', () => {
+    const warehouse = { InStock: 0.1, Committed: 0.2, Ordered: 0.3 };
+    expect(getWarehouseAvailableStock(warehouse)).toBe((0.1 - 0.2) + 0.3);
+    expect(getWarehouseAvailableStock(warehouse, { add: ['Ordered', 'InStock'], subtract: ['Committed'] })).toBe((0.1 - 0.2) + 0.3);
+  });
+});
+
+describe('getWarehouseMetricValue con formula', () => {
+  const warehouse = { InStock: 7, Committed: 1, Ordered: 2 };
+  const NOELITO = { add: ['InStock'], subtract: ['Committed'] };
+
+  it('available usa la formula recibida', () => {
+    expect(getWarehouseMetricValue(warehouse, 'available', NOELITO)).toBe(6);
+    expect(getWarehouseMetricValue(warehouse, undefined, NOELITO)).toBe(6);
+  });
+
+  it('las metricas crudas ignoran la formula', () => {
+    expect(getWarehouseMetricValue(warehouse, 'inStock', NOELITO)).toBe(7);
+    expect(getWarehouseMetricValue(warehouse, 'committed', NOELITO)).toBe(1);
+    expect(getWarehouseMetricValue(warehouse, 'ordered', NOELITO)).toBe(2);
+  });
+});
+
+describe('buildB1WarehouseStockProperties con formula', () => {
+  const NOELITO = { add: ['InStock'], subtract: ['Committed'] };
+  const items = [
+    { WarehouseCode: 'A01', InStock: 10, Committed: 4, Ordered: 100 },
+    { WarehouseCode: 'B09', InStock: 66, Committed: 0, Ordered: 0 },
+  ];
+  const fields = [
+    { warehouseCode: 'A01', propertyName: 'a01_stock', metric: 'available' },
+    { warehouseCode: 'A01', propertyName: 'a01_instock', metric: 'inStock' },
+    { warehouseCode: 'B09', propertyName: 'b09_stock', metric: 'available' },
+  ];
+
+  it('aplica la formula a las entradas available y deja las crudas como estan', () => {
+    expect(buildB1WarehouseStockProperties(items, fields, [], { availableFormula: NOELITO })).toEqual({
+      a01_stock: 6,
+      a01_instock: 10,
+      b09_stock: 66,
+    });
+  });
+
+  it('sin cuarto argumento da los numeros historicos', () => {
+    expect(buildB1WarehouseStockProperties(items, fields)).toEqual({
+      a01_stock: 106,
+      a01_instock: 10,
+      b09_stock: 66,
+    });
+  });
+
+  it('con formula invalida (null) omite las available y conserva las crudas', () => {
+    const properties = buildB1WarehouseStockProperties(items, fields, [], { availableFormula: null });
+
+    expect(properties).toEqual({ a01_instock: 10 });
+    expect(Object.prototype.hasOwnProperty.call(properties, 'a01_stock')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(properties, 'b09_stock')).toBe(false);
+  });
+
+  it('con formula invalida, una bodega excluida sigue saliendo en 0', () => {
+    expect(buildB1WarehouseStockProperties(items, fields, ['B09'], { availableFormula: null })).toEqual({
+      a01_instock: 10,
+      b09_stock: 0,
+    });
+  });
+
+  it('con formula invalida, un field a mano sin metric tambien es available y se omite', () => {
+    const legacyFields = [{ warehouseCode: 'A01', propertyName: 'a01_stock' }];
+
+    expect(buildB1WarehouseStockProperties(items, legacyFields, [], { availableFormula: null })).toEqual({});
+  });
+});
+
+describe('B1ItemWarehouseStrategy — formula de disponible', () => {
+  it('normalizeAvailableFormula delega y pasa options', () => {
+    const strategy = new B1ItemWarehouseStrategy();
+    const onInvalid = jest.fn();
+
+    expect(strategy.normalizeAvailableFormula({ add: ['instock'], subtract: ['committed'] }))
+      .toEqual({ add: ['InStock'], subtract: ['Committed'] });
+    expect(strategy.normalizeAvailableFormula({ add: ['InStok'] }, { onInvalid })).toBeNull();
+    expect(onInvalid).toHaveBeenCalledWith({ raw: { add: ['InStok'] }, reason: 'unknown_field:InStok' });
+  });
+
+  it('buildProperties aplica availableFormula y sin ella usa el default', () => {
+    const strategy = new B1ItemWarehouseStrategy();
+    const fields = strategy.normalizeFields([{ value: 'a01_stock', valueSAP: 'A01' }]);
+    const record = { rawSapData: { ItemWarehouseInfoCollection: [{ WarehouseCode: 'A01', InStock: 10, Committed: 4, Ordered: 100 }] } };
+
+    expect(strategy.buildProperties({ record, fields, availableFormula: { add: ['InStock'], subtract: ['Committed'] } }))
+      .toEqual({ a01_stock: 6 });
+    expect(strategy.buildProperties({ record, fields })).toEqual({ a01_stock: 106 });
   });
 });

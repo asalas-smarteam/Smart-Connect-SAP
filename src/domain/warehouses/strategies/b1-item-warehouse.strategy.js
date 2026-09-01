@@ -7,6 +7,8 @@
 
 import {
   B1_STOCK_METRICS,
+  B1_WAREHOUSE_STOCK_FIELDS,
+  DEFAULT_B1_AVAILABLE_FORMULA,
   DEFAULT_B1_STOCK_METRIC,
 } from '../warehouse-stock-strategy.constants.js';
 
@@ -44,12 +46,103 @@ function resolveWarehouseField(field) {
   };
 }
 
-export function getWarehouseAvailableStock(warehouse) {
-  const inStock = Number(warehouse?.InStock ?? 0);
-  const committed = Number(warehouse?.Committed ?? 0);
-  const ordered = Number(warehouse?.Ordered ?? 0);
+const STOCK_FIELD_BY_LOWERCASE = new Map(
+  B1_WAREHOUSE_STOCK_FIELDS.map((field) => [field.toLowerCase(), field])
+);
 
-  return inStock - committed + ordered;
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+// Un lado de la formula (add o subtract). Devuelve { fields } canonicos y sin
+// duplicados, o { reason } con el primer problema encontrado.
+function normalizeFormulaSide(rawList, sideName) {
+  if (rawList === undefined || rawList === null) {
+    return { fields: [] };
+  }
+
+  if (!Array.isArray(rawList)) {
+    return { reason: `${sideName}_not_an_array` };
+  }
+
+  const fields = [];
+
+  for (const entry of rawList) {
+    const trimmed = String(entry ?? '').trim();
+    const canonical = STOCK_FIELD_BY_LOWERCASE.get(trimmed.toLowerCase());
+
+    if (!canonical) {
+      return { reason: `unknown_field:${trimmed}` };
+    }
+
+    if (!fields.includes(canonical)) {
+      fields.push(canonical);
+    }
+  }
+
+  return { fields };
+}
+
+// undefined/null -> default historico. Cualquier otra cosa se valida entera y,
+// si falla, devuelve null tras avisar UNA vez con el primer motivo. No cae al
+// default a proposito: un typo daria un numero plausible pero equivocado.
+export function normalizeB1AvailableFormula(raw, { onInvalid } = {}) {
+  if (raw === undefined || raw === null) {
+    return DEFAULT_B1_AVAILABLE_FORMULA;
+  }
+
+  const invalid = (reason) => {
+    onInvalid?.({ raw, reason });
+    return null;
+  };
+
+  if (!isPlainObject(raw)) {
+    return invalid('not_an_object');
+  }
+
+  const add = normalizeFormulaSide(raw.add, 'add');
+
+  if (add.reason) {
+    return invalid(add.reason);
+  }
+
+  const subtract = normalizeFormulaSide(raw.subtract, 'subtract');
+
+  if (subtract.reason) {
+    return invalid(subtract.reason);
+  }
+
+  const overlap = add.fields.find((field) => subtract.fields.includes(field));
+
+  if (overlap) {
+    return invalid(`field_in_both_lists:${overlap}`);
+  }
+
+  if (add.fields.length === 0 && subtract.fields.length === 0) {
+    return invalid('empty_formula');
+  }
+
+  return { add: add.fields, subtract: subtract.fields };
+}
+
+// Orden canonico fijo, no el orden de las listas: con el default reproduce
+// bit por bit (InStock - Committed) + Ordered, que es lo historico. Con
+// flotantes el orden de suma cambia el ultimo bit, y "ningun numero cambia".
+//
+// `formula` siempre es la salida de normalizeB1AvailableFormula, nunca el
+// valor crudo de Mongo: los nombres de campo se comparan en forma canonica
+// (InStock/Committed/Ordered), asi que una formula cruda en minusculas
+// calcularia un numero equivocado en vez de tirar.
+export function getWarehouseAvailableStock(warehouse, formula = DEFAULT_B1_AVAILABLE_FORMULA) {
+  const add = new Set(formula?.add ?? []);
+  const subtract = new Set(formula?.subtract ?? []);
+
+  return B1_WAREHOUSE_STOCK_FIELDS.reduce((total, field) => {
+    const quantity = Number(warehouse?.[field] ?? 0);
+    if (add.has(field)) return total + quantity;
+    if (subtract.has(field)) return total - quantity;
+    return total;
+  }, 0);
 }
 
 // La comparacion es en minusculas para que el cliente pueda escribir la metrica
@@ -73,7 +166,11 @@ export function normalizeB1StockMetric(raw) {
 // metric (la forma historica, { warehouseCode, propertyName }) tiene que seguir
 // dando el mismo numero que antes. Una metric invalida nunca llega hasta aca --
 // normalizeB1WarehouseFields ya descarto esa entrada.
-export function getWarehouseMetricValue(warehouse, metric = DEFAULT_B1_STOCK_METRIC) {
+export function getWarehouseMetricValue(
+  warehouse,
+  metric = DEFAULT_B1_STOCK_METRIC,
+  formula = DEFAULT_B1_AVAILABLE_FORMULA
+) {
   switch (metric) {
     case B1_STOCK_METRICS.IN_STOCK:
       return Number(warehouse?.InStock ?? 0);
@@ -82,7 +179,7 @@ export function getWarehouseMetricValue(warehouse, metric = DEFAULT_B1_STOCK_MET
     case B1_STOCK_METRICS.ORDERED:
       return Number(warehouse?.Ordered ?? 0);
     default:
-      return getWarehouseAvailableStock(warehouse);
+      return getWarehouseAvailableStock(warehouse, formula);
   }
 }
 
@@ -148,7 +245,8 @@ export function normalizeB1ExcludedWarehouses(value) {
 export function buildB1WarehouseStockProperties(
   warehouseItems,
   warehouseFields = DEFAULT_WAREHOUSE_FIELDS,
-  exclusions = []
+  exclusions = [],
+  { availableFormula = DEFAULT_B1_AVAILABLE_FORMULA } = {}
 ) {
   const excludedSet = new Set(exclusions);
   const warehousesByCode = new Map(
@@ -170,14 +268,30 @@ export function buildB1WarehouseStockProperties(
       return acc;
     }
 
+    // Formula invalida: la entrada `available` se omite en vez de escribir un
+    // numero con la formula equivocada; HubSpot conserva el ultimo valor. Las
+    // metricas crudas no dependen de la formula. El `??` cubre un field armado
+    // a mano sin metric (forma historica), que tambien es `available`.
+    if (
+      availableFormula === null
+      && (field.metric ?? DEFAULT_B1_STOCK_METRIC) === B1_STOCK_METRICS.AVAILABLE
+    ) {
+      return acc;
+    }
+
     acc[propertyName] = getWarehouseMetricValue(
       warehousesByCode.get(warehouseCode),
-      field.metric
+      field.metric,
+      availableFormula
     );
     return acc;
   }, {});
 }
 
+// Usa la formula default y ignora warehouseAvailableFormula del tenant: no
+// tiene llamador en produccion hoy (solo tests y un re-export), asi que no se
+// le sumo la formula a proposito. No usar para un llamador nuevo sin antes
+// hacerle llegar la formula normalizada del tenant.
 export function getAvailableStockForB1Warehouse(warehouseItems, warehouseCode) {
   if (!warehouseCode) {
     return 0;
@@ -200,6 +314,10 @@ export class B1ItemWarehouseStrategy {
     return normalizeB1ExcludedWarehouses(rawValue);
   }
 
+  normalizeAvailableFormula(rawValue, options) {
+    return normalizeB1AvailableFormula(rawValue, options);
+  }
+
   requiresRemoteFetch() {
     return false;
   }
@@ -215,11 +333,12 @@ export class B1ItemWarehouseStrategy {
     return new Map();
   }
 
-  buildProperties({ record, fields, exclusions = [] }) {
+  buildProperties({ record, fields, exclusions = [], availableFormula }) {
     return buildB1WarehouseStockProperties(
       record?.rawSapData?.ItemWarehouseInfoCollection,
       fields,
-      exclusions
+      exclusions,
+      { availableFormula }
     );
   }
 }

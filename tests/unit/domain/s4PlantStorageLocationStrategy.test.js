@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import {
   S4PlantStorageLocationStrategy,
   buildS4StockIndex,
@@ -261,7 +262,15 @@ describe('S4PlantStorageLocationStrategy', () => {
   it('implements the WarehouseStockStrategyPort contract', () => {
     const strategy = new S4PlantStorageLocationStrategy();
 
-    ['normalizeFields', 'normalizeExclusions', 'requiresRemoteFetch', 'buildQueryTargets', 'buildIndex', 'buildProperties']
+    ['normalizeFields', 'normalizeExclusions', 'normalizeAvailableFormula', 'requiresRemoteFetch', 'buildQueryTargets', 'buildIndex', 'buildProperties']
       .forEach((method) => expect(typeof strategy[method]).toBe('function'));
+  });
+
+  it('normalizeAvailableFormula devuelve undefined y nunca avisa: la formula es un concepto de B1', () => {
+    const onInvalid = jest.fn();
+
+    expect(new S4PlantStorageLocationStrategy().normalizeAvailableFormula({ add: ['garbage'] }, { onInvalid }))
+      .toBeUndefined();
+    expect(onInvalid).not.toHaveBeenCalled();
   });
 });

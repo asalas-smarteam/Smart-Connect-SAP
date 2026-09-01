@@ -1,5 +1,6 @@
 import {
   DEFAULT_WAREHOUSE_STOCK_STRATEGY,
+  WAREHOUSE_AVAILABLE_FORMULA_CONFIG_KEY,
   WAREHOUSE_STOCK_CONFIG_KEY,
 } from '#domain/warehouses/warehouse-stock-strategy.constants.js';
 
@@ -30,22 +31,26 @@ export class WarehouseStockConfigRepository {
     const Configuration = tenantModels?.Configuration ?? tenantContext?.tenantModels?.Configuration;
 
     try {
-      const [strategyConfig, rawFields, rawExclusions] = await Promise.all([
+      const [strategyConfig, rawFields, rawExclusions, rawAvailableFormula] = await Promise.all([
         readConfiguration(Configuration, WAREHOUSE_STOCK_CONFIG_KEY),
         readConfiguration(Configuration, WAREHOUSE_FIELDS_CONFIG_KEY),
         readConfiguration(Configuration, EXCLUDED_WAREHOUSES_CONFIG_KEY),
+        // Cruda a proposito: quien sabe validarla es la strategy de B1
+        // (normalizeAvailableFormula), y la de S/4 la ignora.
+        readConfiguration(Configuration, WAREHOUSE_AVAILABLE_FORMULA_CONFIG_KEY),
       ]);
 
       const strategyName = String(strategyConfig?.strategy ?? '').trim()
         || DEFAULT_WAREHOUSE_STOCK_STRATEGY;
 
-      return { strategyName, rawFields, rawExclusions };
+      return { strategyName, rawFields, rawExclusions, rawAvailableFormula };
     } catch (error) {
       console.error('Warehouse stock config read error:', error);
       return {
         strategyName: DEFAULT_WAREHOUSE_STOCK_STRATEGY,
         rawFields: null,
         rawExclusions: null,
+        rawAvailableFormula: null,
       };
     }
   }

@@ -194,13 +194,204 @@ describe('WarehouseStockEnrichmentAdapter', () => {
   });
 });
 
-function buildB1Strategy({ invalidEntries = [], fields = [{ warehouseCode: 'A01', propertyName: 'a01_stock', metric: 'available' }] } = {}) {
+describe('WarehouseStockEnrichmentAdapter — formula de disponible', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  const NOELITO = { add: ['InStock'], subtract: ['Committed'] };
+  const config = (rawAvailableFormula) => buildConfigRepository({
+    strategyName: 'b1_ItemWarehouse', rawFields: [{}], rawExclusions: [], rawAvailableFormula,
+  });
+
+  it('pasa la formula cruda a la strategy y la normalizada a buildProperties', async () => {
+    const strategy = buildB1Strategy({ formula: NOELITO });
+    const adapter = new WarehouseStockEnrichmentAdapter({
+      strategyFactory: { getStrategy: jest.fn().mockReturnValue(strategy) },
+      configRepository: config({ add: ['instock'], subtract: ['committed'] }),
+      logger: silentLogger,
+    });
+    const records = buildRecords(1);
+
+    await adapter.enrich({ mappedRecords: records, objectType: 'product', tenantModels: buildTenantModels() });
+
+    expect(strategy.normalizeAvailableFormula).toHaveBeenCalledWith(
+      { add: ['instock'], subtract: ['committed'] },
+      expect.objectContaining({ onInvalid: expect.any(Function) })
+    );
+    expect(strategy.buildProperties).toHaveBeenCalledWith(expect.objectContaining({ availableFormula: NOELITO }));
+    expect(records[0].rawSapData[WAREHOUSE_STOCK_KEY]).toEqual({ a01_stock: 5 });
+  });
+
+  it('con formula invalida registra UN SyncWarning por corrida y pasa null a buildProperties', async () => {
+    const syncWarningRepository = buildSyncWarningRepository();
+    const strategy = buildB1Strategy({ invalidFormula: { raw: { add: ['InStok'] }, reason: 'unknown_field:InStok' } });
+    const adapter = new WarehouseStockEnrichmentAdapter({
+      strategyFactory: { getStrategy: jest.fn().mockReturnValue(strategy) },
+      configRepository: config({ add: ['InStok'] }),
+      syncWarningRepository,
+      logger: silentLogger,
+    });
+
+    await adapter.enrich({
+      mappedRecords: buildRecords(3),
+      objectType: 'product',
+      tenantModels: buildTenantModels(),
+      clientConfigId: 'cfg-1',
+      syncLogId: 'log-1',
+    });
+
+    expect(syncWarningRepository.record).toHaveBeenCalledTimes(1);
+    expect(syncWarningRepository.record).toHaveBeenCalledWith(expect.objectContaining({
+      clientConfigId: 'cfg-1',
+      syncLogId: 'log-1',
+      objectType: 'product',
+      sapId: null,
+      code: 'warehouse_available_formula_invalid',
+      message: 'Warehouse available formula invalid: unknown_field:InStok',
+      details: {
+        raw: '{"add":["InStok"]}',
+        reason: 'unknown_field:InStok',
+        validFields: ['InStock', 'Committed', 'Ordered'],
+      },
+    }));
+    expect(strategy.buildProperties).toHaveBeenCalledTimes(3);
+    expect(strategy.buildProperties).toHaveBeenCalledWith(expect.objectContaining({ availableFormula: null }));
+  });
+
+  it('serializa details.raw a string para que un typo con $ no tumbe el propio SyncWarning', async () => {
+    const syncWarningRepository = buildSyncWarningRepository();
+    const strategy = buildB1Strategy({ invalidFormula: { raw: { '$add': ['InStock'] }, reason: 'not_an_array' } });
+    const adapter = new WarehouseStockEnrichmentAdapter({
+      strategyFactory: { getStrategy: jest.fn().mockReturnValue(strategy) },
+      configRepository: config({ '$add': ['InStock'] }),
+      syncWarningRepository,
+      logger: silentLogger,
+    });
+
+    await adapter.enrich({ mappedRecords: buildRecords(1), objectType: 'product', tenantModels: buildTenantModels() });
+
+    const [{ details }] = syncWarningRepository.record.mock.calls[0];
+    expect(details.raw).toBe('{"$add":["InStock"]}');
+    expect(Object.keys(details).some((key) => key.startsWith('$'))).toBe(false);
+  });
+
+  it('registra el warning aunque no haya ninguna bodega configurada', async () => {
+    const syncWarningRepository = buildSyncWarningRepository();
+    const strategy = buildB1Strategy({ fields: [], invalidFormula: { raw: {}, reason: 'empty_formula' } });
+    const adapter = new WarehouseStockEnrichmentAdapter({
+      strategyFactory: { getStrategy: jest.fn().mockReturnValue(strategy) },
+      configRepository: config({}),
+      syncWarningRepository,
+      logger: silentLogger,
+    });
+    const records = buildRecords(1);
+
+    await adapter.enrich({ mappedRecords: records, objectType: 'product', tenantModels: buildTenantModels() });
+
+    expect(syncWarningRepository.record).toHaveBeenCalledTimes(1);
+    expect(records[0].rawSapData[WAREHOUSE_STOCK_KEY]).toEqual({});
+  });
+
+  it('formula invalida y metric invalida a la vez dan dos warnings con codigos distintos', async () => {
+    const syncWarningRepository = buildSyncWarningRepository();
+    const strategy = buildB1Strategy({
+      invalidEntries: [{ propertyName: 'a01_instock', warehouseCode: 'A01', metric: 'inStok' }],
+      invalidFormula: { raw: 'x', reason: 'not_an_object' },
+    });
+    const adapter = new WarehouseStockEnrichmentAdapter({
+      strategyFactory: { getStrategy: jest.fn().mockReturnValue(strategy) },
+      configRepository: config('x'),
+      syncWarningRepository,
+      logger: silentLogger,
+    });
+
+    await adapter.enrich({ mappedRecords: buildRecords(1), objectType: 'product', tenantModels: buildTenantModels() });
+
+    const codes = syncWarningRepository.record.mock.calls.map(([call]) => call.code).sort();
+    expect(codes).toEqual(['warehouse_available_formula_invalid', 'warehouse_metric_invalid']);
+  });
+
+  it('con la formula valida no registra nada', async () => {
+    const syncWarningRepository = buildSyncWarningRepository();
+    const adapter = new WarehouseStockEnrichmentAdapter({
+      strategyFactory: { getStrategy: jest.fn().mockReturnValue(buildB1Strategy()) },
+      configRepository: config(null),
+      syncWarningRepository,
+      logger: silentLogger,
+    });
+
+    await adapter.enrich({ mappedRecords: buildRecords(1), objectType: 'product', tenantModels: buildTenantModels() });
+
+    expect(syncWarningRepository.record).not.toHaveBeenCalled();
+  });
+
+  it('sin syncWarningRepository no tira, y si record rechaza las propiedades se escriben igual', async () => {
+    const strategy = buildB1Strategy({ invalidFormula: { raw: {}, reason: 'empty_formula' } });
+    const sinRepo = new WarehouseStockEnrichmentAdapter({
+      strategyFactory: { getStrategy: jest.fn().mockReturnValue(strategy) },
+      configRepository: config({}),
+      logger: silentLogger,
+    });
+    const records = buildRecords(1);
+
+    await expect(sinRepo.enrich({ mappedRecords: records, objectType: 'product', tenantModels: buildTenantModels() }))
+      .resolves.toBeUndefined();
+    expect(records[0].rawSapData[WAREHOUSE_STOCK_KEY]).toEqual({ a01_stock: 5 });
+
+    const conRepoRoto = new WarehouseStockEnrichmentAdapter({
+      strategyFactory: { getStrategy: jest.fn().mockReturnValue(strategy) },
+      configRepository: config({}),
+      syncWarningRepository: { record: jest.fn().mockRejectedValue(new Error('mongo down')) },
+      logger: silentLogger,
+    });
+    const records2 = buildRecords(1);
+
+    await conRepoRoto.enrich({ mappedRecords: records2, objectType: 'product', tenantModels: buildTenantModels() });
+
+    expect(records2[0].rawSapData[WAREHOUSE_STOCK_KEY]).toEqual({ a01_stock: 5 });
+  });
+
+  it('una strategy que devuelve undefined (S/4) con un documento basura no registra nada', async () => {
+    const syncWarningRepository = buildSyncWarningRepository();
+    const s4 = {
+      normalizeFields: jest.fn().mockReturnValue([]),
+      normalizeExclusions: jest.fn().mockReturnValue([]),
+      normalizeAvailableFormula: jest.fn().mockReturnValue(undefined),
+      requiresRemoteFetch: jest.fn().mockReturnValue(true),
+    };
+    const adapter = new WarehouseStockEnrichmentAdapter({
+      strategyFactory: { getStrategy: jest.fn().mockReturnValue(s4) },
+      configRepository: buildConfigRepository({
+        strategyName: 's4_PlantStorageLocation', rawFields: null, rawExclusions: null, rawAvailableFormula: 'basura',
+      }),
+      syncWarningRepository,
+      logger: silentLogger,
+    });
+
+    await adapter.enrich({ mappedRecords: buildRecords(1), objectType: 'product', tenantModels: buildTenantModels() });
+
+    expect(syncWarningRepository.record).not.toHaveBeenCalled();
+  });
+});
+
+function buildB1Strategy({
+  invalidEntries = [],
+  fields = [{ warehouseCode: 'A01', propertyName: 'a01_stock', metric: 'available' }],
+  formula = { add: ['InStock', 'Ordered'], subtract: ['Committed'] },
+  invalidFormula = null,
+} = {}) {
   return {
     normalizeFields: jest.fn((rawValue, { onInvalidMetric } = {}) => {
       invalidEntries.forEach((entry) => onInvalidMetric?.(entry));
       return fields;
     }),
     normalizeExclusions: jest.fn().mockReturnValue([]),
+    normalizeAvailableFormula: jest.fn((rawValue, { onInvalid } = {}) => {
+      if (invalidFormula) {
+        onInvalid?.(invalidFormula);
+        return null;
+      }
+      return formula;
+    }),
     requiresRemoteFetch: jest.fn().mockReturnValue(false),
     buildProperties: jest.fn().mockReturnValue({ a01_stock: 5 }),
   };

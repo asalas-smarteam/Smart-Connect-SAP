@@ -10,6 +10,7 @@ import { buildExclusiveDiscountProperties } from '#domain/products/discount-prop
 import {
   buildHubspotWarehouseStockProperties,
   getHubspotWarehouseStockPropertiesForTenant,
+  resolveHubspotAvailableFormula,
   resolveHubspotWarehouseFields,
 } from '../warehouseStock.js';
 
@@ -44,12 +45,13 @@ export async function resolveHubspotPriceFields(tenantModels) {
 // items should call this once per run and pass the result as `preprocessContext` to
 // every preprocess() call — otherwise each item pays two Configuration reads.
 export async function buildPreprocessContext({ tenantModels }) {
-  const [warehouseFields, priceFields] = await Promise.all([
+  const [warehouseFields, priceFields, availableFormula] = await Promise.all([
     resolveHubspotWarehouseFields(tenantModels),
     resolveHubspotPriceFields(tenantModels),
+    resolveHubspotAvailableFormula(tenantModels),
   ]);
 
-  return { warehouseFields, priceFields };
+  return { warehouseFields, priceFields, availableFormula };
 }
 
 export async function preprocess({ item, tenantModels, preprocessContext }) {
@@ -71,7 +73,8 @@ export async function preprocess({ item, tenantModels, preprocessContext }) {
     : preprocessContext?.warehouseFields
       ? buildHubspotWarehouseStockProperties(
         rawSapData.ItemWarehouseInfoCollection,
-        preprocessContext.warehouseFields
+        preprocessContext.warehouseFields,
+        { availableFormula: preprocessContext.availableFormula }
       )
       : await getHubspotWarehouseStockPropertiesForTenant(
         tenantModels,
