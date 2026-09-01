@@ -7,6 +7,8 @@
 
 import {
   B1_STOCK_METRICS,
+  B1_WAREHOUSE_STOCK_FIELDS,
+  DEFAULT_B1_AVAILABLE_FORMULA,
   DEFAULT_B1_STOCK_METRIC,
 } from '../warehouse-stock-strategy.constants.js';
 
@@ -44,12 +46,95 @@ function resolveWarehouseField(field) {
   };
 }
 
-export function getWarehouseAvailableStock(warehouse) {
-  const inStock = Number(warehouse?.InStock ?? 0);
-  const committed = Number(warehouse?.Committed ?? 0);
-  const ordered = Number(warehouse?.Ordered ?? 0);
+const STOCK_FIELD_BY_LOWERCASE = new Map(
+  B1_WAREHOUSE_STOCK_FIELDS.map((field) => [field.toLowerCase(), field])
+);
 
-  return inStock - committed + ordered;
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+// Un lado de la formula (add o subtract). Devuelve { fields } canonicos y sin
+// duplicados, o { reason } con el primer problema encontrado.
+function normalizeFormulaSide(rawList, sideName) {
+  if (rawList === undefined || rawList === null) {
+    return { fields: [] };
+  }
+
+  if (!Array.isArray(rawList)) {
+    return { reason: `${sideName}_not_an_array` };
+  }
+
+  const fields = [];
+
+  for (const entry of rawList) {
+    const trimmed = String(entry ?? '').trim();
+    const canonical = STOCK_FIELD_BY_LOWERCASE.get(trimmed.toLowerCase());
+
+    if (!canonical) {
+      return { reason: `unknown_field:${trimmed}` };
+    }
+
+    if (!fields.includes(canonical)) {
+      fields.push(canonical);
+    }
+  }
+
+  return { fields };
+}
+
+// undefined/null -> default historico. Cualquier otra cosa se valida entera y,
+// si falla, devuelve null tras avisar UNA vez con el primer motivo. No cae al
+// default a proposito: un typo daria un numero plausible pero equivocado.
+export function normalizeB1AvailableFormula(raw, { onInvalid } = {}) {
+  if (raw === undefined || raw === null) {
+    return DEFAULT_B1_AVAILABLE_FORMULA;
+  }
+
+  const invalid = (reason) => {
+    onInvalid?.({ raw, reason });
+    return null;
+  };
+
+  if (!isPlainObject(raw)) {
+    return invalid('not_an_object');
+  }
+
+  const add = normalizeFormulaSide(raw.add, 'add');
+
+  if (add.reason) {
+    return invalid(add.reason);
+  }
+
+  const subtract = normalizeFormulaSide(raw.subtract, 'subtract');
+
+  if (subtract.reason) {
+    return invalid(subtract.reason);
+  }
+
+  const overlap = add.fields.find((field) => subtract.fields.includes(field));
+
+  if (overlap) {
+    return invalid(`field_in_both_lists:${overlap}`);
+  }
+
+  if (add.fields.length === 0 && subtract.fields.length === 0) {
+    return invalid('empty_formula');
+  }
+
+  return { add: add.fields, subtract: subtract.fields };
+}
+
+function sumWarehouseFields(warehouse, fields) {
+  return (Array.isArray(fields) ? fields : [])
+    .reduce((total, field) => total + Number(warehouse?.[field] ?? 0), 0);
+}
+
+// Con un solo argumento da exactamente InStock - Committed + Ordered, que es lo
+// que todo llamador y test existente espera. El segundo argumento es la
+// formula ya normalizada (nunca la cruda de Mongo).
+export function getWarehouseAvailableStock(warehouse, formula = DEFAULT_B1_AVAILABLE_FORMULA) {
+  return sumWarehouseFields(warehouse, formula?.add) - sumWarehouseFields(warehouse, formula?.subtract);
 }
 
 // La comparacion es en minusculas para que el cliente pueda escribir la metrica

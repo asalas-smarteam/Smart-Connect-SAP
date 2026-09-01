@@ -45,6 +45,29 @@ export const DEFAULT_B1_STOCK_METRIC = B1_STOCK_METRICS.AVAILABLE;
 // una columna de inventario, y eso nadie lo detecta mirando.
 export const WAREHOUSE_METRIC_INVALID_WARNING = 'warehouse_metric_invalid';
 
+// Documento por tenant ({ key: 'warehouseAvailableFormula', value: { add: [...],
+// subtract: [...] } }) que define que significa la metrica `available` en B1:
+// suma de los campos de add menos suma de los de subtract.
+export const WAREHOUSE_AVAILABLE_FORMULA_CONFIG_KEY = 'warehouseAvailableFormula';
+
+// Los unicos campos de ItemWarehouseInfoCollection que pueden entrar en la
+// formula. Los demas numeros del payload (MinimalStock, Counted...) no son
+// stock disponible, y abrir la lista solo agranda el espacio de configs
+// plausibles-pero-equivocadas.
+export const B1_WAREHOUSE_STOCK_FIELDS = Object.freeze(['InStock', 'Committed', 'Ordered']);
+
+// InStock - Committed + Ordered: el comportamiento historico. Documento ausente
+// = esta formula, asi que ningun tenant existente cambia hasta que la edite.
+export const DEFAULT_B1_AVAILABLE_FORMULA = Object.freeze({
+  add: Object.freeze(['InStock', 'Ordered']),
+  subtract: Object.freeze(['Committed']),
+});
+
+// code del SyncWarning cuando warehouseAvailableFormula no pasa la validacion.
+// Las entradas `available` de esa corrida no se escriben: caer al default
+// escribiria un numero plausible pero distinto del que el tenant pidio.
+export const WAREHOUSE_AVAILABLE_FORMULA_INVALID_WARNING = 'warehouse_available_formula_invalid';
+
 // Quantities are summed from string values coming off SAP; rounding avoids
 // floating-point noise (12.000000000000002) that would make every product
 // look "changed" on every sync even when nothing moved.
@@ -59,5 +82,9 @@ export default {
   B1_STOCK_METRICS,
   DEFAULT_B1_STOCK_METRIC,
   WAREHOUSE_METRIC_INVALID_WARNING,
+  WAREHOUSE_AVAILABLE_FORMULA_CONFIG_KEY,
+  B1_WAREHOUSE_STOCK_FIELDS,
+  DEFAULT_B1_AVAILABLE_FORMULA,
+  WAREHOUSE_AVAILABLE_FORMULA_INVALID_WARNING,
   QUANTITY_DECIMALS,
 };
