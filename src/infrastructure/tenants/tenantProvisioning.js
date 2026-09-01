@@ -33,6 +33,10 @@ import {
   PROPERTIES_FLAGS_CONFIG_KEY,
 } from '#domain/business-partners/business-partner-creation.constants.js';
 import { REQUIRE_ADDRESS_CONFIG_KEY } from '#infrastructure/config/AddressSyncConfigRepository.js';
+import {
+  DEFAULT_B1_AVAILABLE_FORMULA,
+  WAREHOUSE_AVAILABLE_FORMULA_CONFIG_KEY,
+} from '#domain/warehouses/warehouse-stock-strategy.constants.js';
 
 function slugifyCompanyName(companyName) {
   return sanitizeMongoCollectionName(companyName);
@@ -205,6 +209,25 @@ export async function ensureTenantConfigurations({ Configuration }, { sapFlavor 
         key: REQUIRE_ADDRESS_CONFIG_KEY,
         userUpdated: 'admin',
         value: { required: false },
+      },
+    },
+    { upsert: true }
+  );
+  // Sembrada con el calculo historico de disponible por bodega en B1
+  // (InStock - Committed + Ordered). Se cambia editando el documento; nunca hay
+  // que crear la clave a mano. Se copian los arrays porque la constante esta
+  // congelada y un Object.freeze dentro de un $setOnInsert es un bug dificil
+  // de ver si Mongoose intenta mutarlo.
+  await Configuration.updateOne(
+    { key: WAREHOUSE_AVAILABLE_FORMULA_CONFIG_KEY },
+    {
+      $setOnInsert: {
+        key: WAREHOUSE_AVAILABLE_FORMULA_CONFIG_KEY,
+        userUpdated: 'admin',
+        value: {
+          add: [...DEFAULT_B1_AVAILABLE_FORMULA.add],
+          subtract: [...DEFAULT_B1_AVAILABLE_FORMULA.subtract],
+        },
       },
     },
     { upsert: true }
