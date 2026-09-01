@@ -1,6 +1,8 @@
 import { SAP_FLAVORS } from '#domain/sap/sap-flavor.constants.js';
 import {
   B1_STOCK_METRICS,
+  B1_WAREHOUSE_STOCK_FIELDS,
+  WAREHOUSE_AVAILABLE_FORMULA_INVALID_WARNING,
   WAREHOUSE_METRIC_INVALID_WARNING,
   WAREHOUSE_STOCK_KEY,
 } from '#domain/warehouses/warehouse-stock-strategy.constants.js';
@@ -52,8 +54,12 @@ export class WarehouseStockEnrichmentAdapter {
     const records = Array.isArray(mappedRecords) ? mappedRecords : [];
 
     try {
-      const { strategyName, rawFields, rawExclusions } = await this.configRepository
-        .getWarehouseStockConfig({ tenantModels });
+      const {
+        strategyName,
+        rawFields,
+        rawExclusions,
+        rawAvailableFormula,
+      } = await this.configRepository.getWarehouseStockConfig({ tenantModels });
       const strategy = this.strategyFactory.getStrategy(strategyName);
 
       // Se juntan acá y se reportan ANTES del return temprano de
@@ -66,8 +72,24 @@ export class WarehouseStockEnrichmentAdapter {
       });
       const exclusions = strategy.normalizeExclusions(rawExclusions);
 
+      // undefined = default historico; null = invalida (la strategy ya aviso
+      // por onInvalid). El guard de typeof tolera strategies mockeadas a mano
+      // en tests; las dos reales lo implementan y el port lo exige.
+      let invalidFormula = null;
+      const availableFormula = typeof strategy.normalizeAvailableFormula === 'function'
+        ? strategy.normalizeAvailableFormula(rawAvailableFormula, {
+          onInvalid: (entry) => { invalidFormula = entry; },
+        })
+        : undefined;
+
       await this.recordInvalidMetricWarnings({
         invalidMetricFields,
+        tenantModels,
+        clientConfigId,
+        syncLogId,
+      });
+      await this.recordInvalidFormulaWarning({
+        invalidFormula,
         tenantModels,
         clientConfigId,
         syncLogId,
@@ -112,6 +134,7 @@ export class WarehouseStockEnrichmentAdapter {
           index,
           fields,
           exclusions,
+          availableFormula,
         });
       }
     } catch (error) {
@@ -173,6 +196,48 @@ export class WarehouseStockEnrichmentAdapter {
           error: error?.message,
         });
       }
+    }
+  }
+
+  // Un solo documento por corrida: la formula es del tenant, no de una entrada
+  // ni de un producto. Mismo contrato que recordInvalidMetricWarnings: el log
+  // siempre, el SyncWarning solo si hay repositorio, y un fallo al avisar no
+  // se lleva puesto el enriquecimiento.
+  async recordInvalidFormulaWarning({
+    invalidFormula,
+    tenantModels,
+    clientConfigId,
+    syncLogId,
+  }) {
+    if (!invalidFormula) {
+      return;
+    }
+
+    this.logger.error?.('Warehouse available formula invalid', invalidFormula);
+
+    if (typeof this.syncWarningRepository?.record !== 'function') {
+      return;
+    }
+
+    try {
+      await this.syncWarningRepository.record({
+        tenantModels,
+        clientConfigId,
+        syncLogId,
+        objectType: 'product',
+        sapId: null,
+        code: WAREHOUSE_AVAILABLE_FORMULA_INVALID_WARNING,
+        message: `Warehouse available formula invalid: ${invalidFormula.reason}`,
+        details: {
+          raw: invalidFormula.raw,
+          reason: invalidFormula.reason,
+          validFields: [...B1_WAREHOUSE_STOCK_FIELDS],
+        },
+      });
+    } catch (error) {
+      this.logger.error?.('Warehouse available formula warning not recorded', {
+        error: error?.message,
+      });
     }
   }
 
