@@ -3,12 +3,14 @@ import FieldMappingService from '#application/services/field-mapping.service.js'
 import TenantFieldMappingRepository from '#infrastructure/database/repositories/TenantFieldMappingRepository.js';
 import TenantMappingManagementRepository from '#infrastructure/database/repositories/TenantMappingManagementRepository.js';
 import DynamicDescriptionConfigRepository from '#infrastructure/config/DynamicDescriptionConfigRepository.js';
+import PhoneNormalizationConfigRepository from '#infrastructure/config/PhoneNormalizationConfigRepository.js';
 
 export function buildManageFieldMappings() {
   const fieldMappingRepository = new TenantFieldMappingRepository();
   const fieldMappingService = new FieldMappingService({
     fieldMappingRepository,
     dynamicDescriptionConfigRepository: new DynamicDescriptionConfigRepository(),
+    phoneNormalizationConfigRepository: new PhoneNormalizationConfigRepository(),
   });
   const mappingManagementRepository = new TenantMappingManagementRepository();
 

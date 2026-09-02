@@ -400,3 +400,152 @@ describe('buildMappedProperties — teléfonos de HubSpot', () => {
     expect(properties.phone).toBe('+50631923094');
   });
 });
+
+// Guatemala: 8 dígitos locales. Costa Rica usa el mismo largo con otro código,
+// que es exactamente la ambigüedad que hace falta declarar por tenant.
+const GT_PHONE_CONFIG = Object.freeze({
+  enabled: true,
+  defaultCountryCode: '+502',
+  nationalNumberLengths: [8],
+  targetFields: ['phone', 'mobilephone'],
+});
+
+const CR_PHONE_CONFIG = Object.freeze({
+  enabled: true,
+  defaultCountryCode: '+506',
+  nationalNumberLengths: [8],
+  targetFields: ['phone'],
+});
+
+describe('normalizeHubspotPhone — con phoneNormalization del tenant', () => {
+  it('completa el número local con el código de país declarado', () => {
+    // El mismo '3192 3094' que hoy se va en null: ya no se adivina, el tenant
+    // declaró que es Guatemala y que sus números locales tienen 8 dígitos.
+    expect(normalizeHubspotPhone('3192 3094', GT_PHONE_CONFIG)).toBe('+50231923094');
+    expect(normalizeHubspotPhone('5987-7130', GT_PHONE_CONFIG)).toBe('+50259877130');
+  });
+
+  it('el mismo número da otro resultado en otro tenant', () => {
+    expect(normalizeHubspotPhone('3192 3094', CR_PHONE_CONFIG)).toBe('+50631923094');
+  });
+
+  it('solo agrega el "+" cuando el número ya traía el país pegado', () => {
+    expect(normalizeHubspotPhone('50259877130', GT_PHONE_CONFIG)).toBe('+50259877130');
+  });
+
+  it('un local que empieza con los dígitos del país sigue siendo local', () => {
+    // '50212345' son 8 dígitos = el largo local declarado. Leerlo como
+    // país + 5 dígitos daría un número que no existe.
+    expect(normalizeHubspotPhone('50212345', GT_PHONE_CONFIG)).toBe('+50250212345');
+  });
+
+  it('no toca el E.164 que ya venía bien', () => {
+    expect(normalizeHubspotPhone('+18884827768', GT_PHONE_CONFIG)).toBe('+18884827768');
+    expect(normalizeHubspotPhone('+506 3192 3094', GT_PHONE_CONFIG)).toBe('+50631923094');
+  });
+
+  it('conserva la extensión al completar el país', () => {
+    expect(normalizeHubspotPhone('3192 3094 ext 12', GT_PHONE_CONFIG)).toBe('+50231923094 ext 12');
+  });
+
+  it('nulifica lo que no calza con el largo declarado', () => {
+    expect(normalizeHubspotPhone('12345', GT_PHONE_CONFIG)).toBeNull();
+    expect(normalizeHubspotPhone('123456789', GT_PHONE_CONFIG)).toBeNull();
+  });
+
+  it('nulifica basura aunque la config esté activa', () => {
+    expect(normalizeHubspotPhone('8888 9999 / 2222 1111', GT_PHONE_CONFIG)).toBeNull();
+    expect(normalizeHubspotPhone('no tiene', GT_PHONE_CONFIG)).toBeNull();
+    expect(normalizeHubspotPhone('+0123456789', GT_PHONE_CONFIG)).toBeNull();
+    expect(normalizeHubspotPhone('+', GT_PHONE_CONFIG)).toBeNull();
+  });
+
+  it('sigue sin tocar los huecos', () => {
+    expect(normalizeHubspotPhone('', GT_PHONE_CONFIG)).toBe('');
+    expect(normalizeHubspotPhone(null, GT_PHONE_CONFIG)).toBeNull();
+    expect(normalizeHubspotPhone(undefined, GT_PHONE_CONFIG)).toBeUndefined();
+  });
+
+  it('una config a medio llenar no prefija ni revienta', () => {
+    // Un TypeError acá tumbaría el sync completo por una config mal escrita.
+    expect(normalizeHubspotPhone('31923094', { enabled: true })).toBeNull();
+    expect(normalizeHubspotPhone('31923094', { enabled: true, defaultCountryCode: '+502' })).toBeNull();
+    expect(normalizeHubspotPhone('31923094', { ...GT_PHONE_CONFIG, enabled: false })).toBeNull();
+  });
+});
+
+describe('buildMappedProperties — phoneNormalization del tenant', () => {
+  it('completa el país en todas las propiedades declaradas como teléfono', () => {
+    const properties = buildMappedProperties({
+      input: { CardCode: 'C001', Phone1: '3192 3094', Cellular: '5987 7130' },
+      mappings: [
+        { _id: 1, sourceField: 'Phone1', targetField: 'phone', isActive: true },
+        { _id: 2, sourceField: 'Cellular', targetField: 'mobilephone', isActive: true },
+      ],
+      phoneConfig: GT_PHONE_CONFIG,
+    });
+
+    expect(properties).toEqual({ phone: '+50231923094', mobilephone: '+50259877130' });
+  });
+
+  it('deja intacto lo que la config NO declara como teléfono', () => {
+    // El fieldMapping no distingue un teléfono de cualquier otro texto: si la
+    // lista no lo nombra, no se toca. Tocarlo sería pérdida de dato silenciosa.
+    const properties = buildMappedProperties({
+      input: { Phone1: '3192 3094', Fax: '2222 3333' },
+      mappings: [
+        { _id: 1, sourceField: 'Phone1', targetField: 'phone', isActive: true },
+        { _id: 2, sourceField: 'Fax', targetField: 'fax', isActive: true },
+      ],
+      phoneConfig: GT_PHONE_CONFIG,
+    });
+
+    expect(properties.phone).toBe('+50231923094');
+    expect(properties.fax).toBe('2222 3333');
+  });
+
+  it('acepta una propiedad custom del portal y compara sin distinguir mayúsculas', () => {
+    const properties = buildMappedProperties({
+      input: { U_Tel: '3192 3094' },
+      mappings: [{ _id: 1, sourceField: 'U_Tel', targetField: 'Telefono_Movil', isActive: true }],
+      phoneConfig: { ...GT_PHONE_CONFIG, targetFields: ['telefono_movil'] },
+    });
+
+    expect(properties.Telefono_Movil).toBe('+50231923094');
+  });
+
+  it('una config sin targetFields protege igual la propiedad `phone`', () => {
+    const properties = buildMappedProperties({
+      input: { Phone1: '3192 3094' },
+      mappings: [{ _id: 1, sourceField: 'Phone1', targetField: 'phone', isActive: true }],
+      phoneConfig: { enabled: false },
+    });
+
+    expect(properties.phone).toBeNull();
+  });
+
+  it('un enabled sin país se ignora: vuelve la conducta histórica', () => {
+    // La validación corre acá dentro, así que el documento a medio llenar no
+    // llega crudo al normalizador ni prefija nada inventado.
+    const properties = buildMappedProperties({
+      input: { Phone1: '3192 3094' },
+      mappings: [{ _id: 1, sourceField: 'Phone1', targetField: 'phone', isActive: true }],
+      phoneConfig: { enabled: true, targetFields: ['phone'] },
+    });
+
+    expect(properties.phone).toBeNull();
+  });
+
+  it('sin phoneConfig la conducta es la de antes de esta config', () => {
+    const properties = buildMappedProperties({
+      input: { Phone1: '3192 3094', Phone2: '+506 3192 3094' },
+      mappings: [
+        { _id: 1, sourceField: 'Phone1', targetField: 'phone', isActive: true },
+        { _id: 2, sourceField: 'Phone2', targetField: 'mobilephone', isActive: true },
+      ],
+    });
+
+    expect(properties.phone).toBeNull();
+    expect(properties.mobilephone).toBe('+506 3192 3094');
+  });
+});

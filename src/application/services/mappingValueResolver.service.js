@@ -7,7 +7,10 @@ import {
   SAP_BOOLEAN_SOURCE_FIELDS,
   SAP_BOOLEAN_TRUE,
 } from '#domain/sap/sap-boolean-fields.constants.js';
-import { HUBSPOT_PHONE_TARGET_FIELDS } from '#domain/sap/hubspot-phone-fields.constants.js';
+import {
+  DEFAULT_PHONE_NORMALIZATION_CONFIG,
+  normalizePhoneNormalizationConfig,
+} from '#domain/sap/hubspot-phone-fields.constants.js';
 
 const SAP_BOOLEAN_FIELD_SET = new Set(
   SAP_BOOLEAN_SOURCE_FIELDS.map((field) => field.toLowerCase())
@@ -47,13 +50,11 @@ function isSapBooleanField(sourceField) {
   return SAP_BOOLEAN_FIELD_SET.has(lastSegment);
 }
 
-const HUBSPOT_PHONE_FIELD_SET = new Set(
-  HUBSPOT_PHONE_TARGET_FIELDS.map((field) => field.toLowerCase())
-);
-
 // E.164: '+', un primer dígito 1-9 y hasta 15 dígitos en total. Es lo que pide
 // HubSpot cuando el portal tiene la validación de teléfono activada.
 const E164_PATTERN = /^\+[1-9]\d{1,14}$/;
+
+const DIGITS_ONLY_PATTERN = /^\d+$/;
 
 // 'ext 123', 'ext. 123' o 'x123' al final. HubSpot acepta la extensión separada
 // del número, así que se preserva en vez de tirar el teléfono completo.
@@ -62,17 +63,71 @@ const EXTENSION_PATTERN = /\s*(?:ext|extension|x)\.?\s*(\d{1,6})\s*$/i;
 // Separadores que la gente escribe en SAP y que no cambian el número.
 const COSMETIC_PATTERN = /[\s()\-.]/g;
 
+// Completa un número LOCAL con el código de país que el tenant declaró en
+// `phoneNormalization`. Devuelve null cuando no hay nada seguro que hacer.
+//
+// El orden de las dos reglas no es casual. Con defaultCountryCode '+502' y
+// nationalNumberLengths [8]:
+//   '31923094'    -> 8 dígitos = largo local  -> '+50231923094'
+//   '50231923094' -> 11 dígitos; 11 - 3 = 8   -> '+50231923094' (ya traía país)
+// Se prueba primero el largo local porque un número local que POR CASUALIDAD
+// empieza con los dígitos del país ('50212345' en Guatemala) sigue siendo local.
+// Al revés, esos 8 dígitos se leerían como país + 5 y saldría un número que no
+// existe.
+function applyDefaultCountryCode(compact, phoneConfig) {
+  if (phoneConfig?.enabled !== true) {
+    return null;
+  }
+
+  // Lo que trae '+' y no pasó E.164 ya es basura ('+', '+0123456789', dos
+  // números pegados): prefijarlo solo produce basura más larga.
+  if (!DIGITS_ONLY_PATTERN.test(compact)) {
+    return null;
+  }
+
+  const { defaultCountryCode, nationalNumberLengths } = phoneConfig;
+
+  // `normalizeHubspotPhone` es público y puede recibir una config cruda que no
+  // pasó por normalizePhoneNormalizationConfig. Sin país o sin largo no hay nada
+  // que hacer, y leerlos igual sería un TypeError en medio de un sync.
+  if (typeof defaultCountryCode !== 'string' || !Array.isArray(nationalNumberLengths)) {
+    return null;
+  }
+
+  const countryDigits = defaultCountryCode.slice(1);
+
+  let candidate = null;
+
+  if (nationalNumberLengths.includes(compact.length)) {
+    candidate = `${defaultCountryCode}${compact}`;
+  } else if (
+    compact.startsWith(countryDigits)
+    && nationalNumberLengths.includes(compact.length - countryDigits.length)
+  ) {
+    candidate = `+${compact}`;
+  }
+
+  // Se revalida en vez de confiar en la aritmética: es la única garantía de que
+  // a HubSpot no le llega algo que su validación rechaza.
+  return candidate && E164_PATTERN.test(candidate) ? candidate : null;
+}
+
 // Un teléfono que no se puede volver E.164 se va como null A PROPÓSITO.
 //
-// No se le pega un código de país deducido: '3192 3094' son 8 dígitos y eso es
-// ambiguo entre +506 (Costa Rica) y +502 (Guatemala), así que adivinar produce
-// un número válido pero equivocado, que nadie detecta nunca. Y no se deja pasar
-// intacto porque HubSpot responde 400 INVALID_PHONE_NUMBER y ahí se pierde el
-// registro COMPLETO -- nombre, email, cédula --, no solo el teléfono.
+// Sin config de tenant NO se le pega un código de país: '3192 3094' son 8
+// dígitos y eso es ambiguo entre +506 (Costa Rica) y +502 (Guatemala), así que
+// adivinar produce un número válido pero equivocado, que nadie detecta nunca. Y
+// no se deja pasar intacto porque HubSpot responde 400 INVALID_PHONE_NUMBER y
+// ahí se pierde el registro COMPLETO -- nombre, email, cédula --, no solo el
+// teléfono.
 //
-// Lo único que se arregla es lo cosmético sobre un número que YA trae su país:
-// '+506 3192 3094' -> '+50631923094'. Ahí no se inventa nada.
-export function normalizeHubspotPhone(value) {
+// Con `phoneNormalization` activa ya no se adivina: el tenant DECLARÓ su país y
+// el largo de sus números locales, así que '31923094' -> '+50231923094' es lo
+// que pidió. Lo que no calza con lo declarado sigue yéndose en null.
+//
+// Sin eso, lo único que se arregla es lo cosmético sobre un número que YA trae
+// su país: '+506 3192 3094' -> '+50631923094'.
+export function normalizeHubspotPhone(value, phoneConfig = DEFAULT_PHONE_NORMALIZATION_CONFIG) {
   if (value === null || typeof value === 'undefined') {
     return value;
   }
@@ -92,33 +147,41 @@ export function normalizeHubspotPhone(value) {
 
   const compact = numberPart.replace(COSMETIC_PATTERN, '');
 
-  if (!E164_PATTERN.test(compact)) {
+  const normalized = E164_PATTERN.test(compact)
+    ? compact
+    : applyDefaultCountryCode(compact, phoneConfig);
+
+  if (!normalized) {
     return null;
   }
 
-  return extension ? `${compact} ext ${extension}` : compact;
+  return extension ? `${normalized} ext ${extension}` : normalized;
 }
 
 // Por targetField y no por sourceField: la validación que falla es la de la
-// propiedad de HubSpot, así que da igual de qué campo de SAP venga el dato.
-function isHubspotPhoneField(targetField) {
+// propiedad de HubSpot, así que da igual de qué campo de SAP venga el dato. La
+// lista es del tenant (`phoneNormalization.targetFields`) porque el fieldMapping
+// no distingue un teléfono de cualquier otro texto y pueden ser varios.
+function isHubspotPhoneField(targetField, phoneConfig) {
   if (!targetField) {
     return false;
   }
 
-  return HUBSPOT_PHONE_FIELD_SET.has(String(targetField).trim().toLowerCase());
+  const fields = phoneConfig?.targetFields ?? DEFAULT_PHONE_NORMALIZATION_CONFIG.targetFields;
+
+  return fields.includes(String(targetField).trim().toLowerCase());
 }
 
 // Único lugar donde se decide qué normalización aplica a un valor mapeado. Las
 // dos reglas son excluyentes: los booleanos van por el campo de SAP, los
 // teléfonos por la propiedad de HubSpot.
-function normalizeMappedValue({ value, sourceField, targetField }) {
+function normalizeMappedValue({ value, sourceField, targetField, phoneConfig }) {
   if (isSapBooleanField(sourceField)) {
     return normalizeSapBoolean(value);
   }
 
-  if (isHubspotPhoneField(targetField)) {
-    return normalizeHubspotPhone(value);
+  if (isHubspotPhoneField(targetField, phoneConfig)) {
+    return normalizeHubspotPhone(value, phoneConfig);
   }
 
   return value;
@@ -213,9 +276,16 @@ export function resolveValueByPath(inputData, sourceField, options = {}) {
 // yields a value wins and no later row can blank it out. Disabled, the last row
 // wins unconditionally -- including when it resolves to null, which is how a
 // second `cedula` row wiped the field for every company.
-export function buildMappedProperties({ input, mappings, fallbackConfig = null }) {
+//
+// `phoneConfig` ausente = conducta histórica: solo se normaliza `phone` y solo
+// lo cosmético. Se normaliza la forma acá y no en cada llamador para que un
+// documento a medio llenar no llegue crudo al normalizador.
+export function buildMappedProperties({ input, mappings, fallbackConfig = null, phoneConfig = null }) {
   const properties = {};
   const chainEnabled = fallbackConfig?.enabled === true;
+  const resolvedPhoneConfig = phoneConfig
+    ? normalizePhoneNormalizationConfig(phoneConfig)
+    : DEFAULT_PHONE_NORMALIZATION_CONFIG;
   const options = {
     scanCollections: chainEnabled,
     collectionPriority: fallbackConfig?.collectionPriority ?? null,
@@ -243,6 +313,7 @@ export function buildMappedProperties({ input, mappings, fallbackConfig = null }
       value,
       sourceField: mapping.sourceField,
       targetField,
+      phoneConfig: resolvedPhoneConfig,
     });
   }
 

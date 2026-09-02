@@ -155,3 +155,215 @@ describe('company.handler buildBatchUpdateEntry', () => {
     })).toEqual({ id: 'hs-1', properties: { idsap: 'C001' } });
   });
 });
+
+// La forma exacta que el tenant escribe en Configurations.
+const UPDATE_FIELDS_CONFIG = {
+  company: ['u_subgrupo', 'mobile_phone', 'cardcurrency', 'phone'],
+  contact: ['firstname'],
+};
+
+function tenantModelsWith(value) {
+  return {
+    Configuration: {
+      findOne: jest.fn(() => ({
+        lean: async () => (value ? { key: 'hubspotUpdateFields', value } : null),
+      })),
+    },
+  };
+}
+
+// El registro real de un tenant: name, phone e idsap IGUALES a los de HubSpot,
+// y lo que cambió es un campo de negocio que el gate viejo no miraba.
+const EXISTING = {
+  id: 'hs-company-1',
+  properties: {
+    name: 'Alejandro Salas Smarteam',
+    phone: '+50259877130',
+    idsap: 'CLO061771',
+    u_subgrupo: 'COMERCIAL',
+    cardcurrency: 'USD',
+  },
+};
+
+const INCOMING = {
+  properties: {
+    name: 'Alejandro Salas Smarteam',
+    phone: '+50259877130',
+    idsap: 'CLO061771',
+    email: 'mgomez@grupoprinter.com',
+    u_subgrupo: 'LEGAL',
+    mobile_phone: '30291217',
+    cardcurrency: 'USD',
+    nit: '0011391703-1',
+  },
+};
+
+describe('company.handler — hubspotUpdateFields', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('manda las propiedades configuradas además del idsap', async () => {
+    await update({
+      token: 'token-1',
+      id: 'hs-company-1',
+      existing: EXISTING,
+      item: INCOMING,
+      tenantModels: tenantModelsWith(UPDATE_FIELDS_CONFIG),
+    });
+
+    expect(mockUpdateCompany).toHaveBeenCalledWith('token-1', 'hs-company-1', {
+      properties: {
+        idsap: 'CLO061771',
+        u_subgrupo: 'LEGAL',
+        mobile_phone: '30291217',
+        cardcurrency: 'USD',
+        phone: '+50259877130',
+      },
+    });
+  });
+
+  it('no manda lo que NO está en la lista', async () => {
+    await update({
+      token: 'token-1',
+      id: 'hs-company-1',
+      existing: EXISTING,
+      item: INCOMING,
+      tenantModels: tenantModelsWith(UPDATE_FIELDS_CONFIG),
+    });
+
+    const [, , payload] = mockUpdateCompany.mock.calls[0];
+    // `nit` y `email` están mapeados y llegaron en properties, pero el tenant no
+    // los autorizó: pisarlos borraría lo que el asesor escribió en HubSpot.
+    expect(payload.properties).not.toHaveProperty('nit');
+    expect(payload.properties).not.toHaveProperty('email');
+    expect(payload.properties).not.toHaveProperty('name');
+  });
+
+  it('actualiza aunque name, phone e idsap sean idénticos', async () => {
+    // Este es el caso reportado: sin la config el gate devolvía false porque solo
+    // miraba esos tres campos, y el cambio de u_subgrupo no salía nunca.
+    const result = await update({
+      token: 'token-1',
+      id: 'hs-company-1',
+      existing: EXISTING,
+      item: INCOMING,
+      tenantModels: tenantModelsWith(UPDATE_FIELDS_CONFIG),
+    });
+
+    expect(mockUpdateCompany).toHaveBeenCalled();
+    expect(result).not.toBe(EXISTING);
+  });
+
+  it('sigue salteando cuando tampoco cambió ningún campo configurado', async () => {
+    const existing = { id: 'hs-company-1', properties: { ...INCOMING.properties } };
+
+    const result = await update({
+      token: 'token-1',
+      id: 'hs-company-1',
+      existing,
+      item: INCOMING,
+      tenantModels: tenantModelsWith(UPDATE_FIELDS_CONFIG),
+    });
+
+    expect(result).toBe(existing);
+    expect(mockUpdateCompany).not.toHaveBeenCalled();
+  });
+
+  it('omite un campo configurado que viene vacío de SAP', async () => {
+    // Blanquear en HubSpot un dato que el asesor cargó a mano, porque en SAP
+    // nadie lo llenó, es pérdida de dato que nadie detecta.
+    await update({
+      token: 'token-1',
+      id: 'hs-company-1',
+      existing: EXISTING,
+      item: {
+        properties: {
+          ...INCOMING.properties,
+          mobile_phone: '',
+          cardcurrency: null,
+        },
+      },
+      tenantModels: tenantModelsWith(UPDATE_FIELDS_CONFIG),
+    });
+
+    const [, , payload] = mockUpdateCompany.mock.calls[0];
+    expect(payload.properties).not.toHaveProperty('mobile_phone');
+    expect(payload.properties).not.toHaveProperty('cardcurrency');
+    expect(payload.properties.u_subgrupo).toBe('LEGAL');
+  });
+
+  it('sin documento de config se comporta como antes', async () => {
+    const result = await update({
+      token: 'token-1',
+      id: 'hs-company-1',
+      existing: EXISTING,
+      item: INCOMING,
+      tenantModels: tenantModelsWith(null),
+    });
+
+    expect(result).toBe(EXISTING);
+    expect(mockUpdateCompany).not.toHaveBeenCalled();
+  });
+
+  it('no toma la lista del contact', async () => {
+    await update({
+      token: 'token-1',
+      id: 'hs-company-1',
+      existing: EXISTING,
+      item: INCOMING,
+      tenantModels: tenantModelsWith({ contact: ['u_subgrupo'] }),
+    });
+
+    expect(mockUpdateCompany).not.toHaveBeenCalled();
+  });
+
+  it('updateFields explícito gana y no lee la config', async () => {
+    // Es lo que hacen los caminos batch: una lectura por corrida, no por item.
+    const tenantModels = tenantModelsWith(UPDATE_FIELDS_CONFIG);
+
+    await update({
+      token: 'token-1',
+      id: 'hs-company-1',
+      existing: EXISTING,
+      item: INCOMING,
+      tenantModels,
+      updateFields: ['u_subgrupo'],
+    });
+
+    expect(tenantModels.Configuration.findOne).not.toHaveBeenCalled();
+    expect(mockUpdateCompany).toHaveBeenCalledWith('token-1', 'hs-company-1', {
+      properties: { idsap: 'CLO061771', u_subgrupo: 'LEGAL' },
+    });
+  });
+
+  it('buildBatchUpdateEntry aplica la misma lista', async () => {
+    expect(buildBatchUpdateEntry({
+      existing: EXISTING,
+      item: INCOMING,
+      updateFields: ['u_subgrupo', 'mobile_phone'],
+    })).toEqual({
+      id: 'hs-company-1',
+      properties: { idsap: 'CLO061771', u_subgrupo: 'LEGAL', mobile_phone: '30291217' },
+    });
+
+    // Sin lista, el batch sigue siendo identifier-only y este caso se saltea.
+    expect(buildBatchUpdateEntry({ existing: EXISTING, item: INCOMING })).toBeNull();
+  });
+
+  it('actualiza un registro sin idsap si trae un campo configurado', async () => {
+    // Sin esto la config no serviría para los registros que todavía no tienen
+    // el identificador escrito en HubSpot.
+    await update({
+      token: 'token-1',
+      id: 'hs-company-1',
+      existing: { id: 'hs-company-1', properties: { u_subgrupo: 'COMERCIAL' } },
+      item: { properties: { u_subgrupo: 'LEGAL' } },
+      updateFields: ['u_subgrupo'],
+    });
+
+    expect(mockUpdateCompany).toHaveBeenCalledWith('token-1', 'hs-company-1', {
+      properties: { u_subgrupo: 'LEGAL' },
+    });
+  });
+});

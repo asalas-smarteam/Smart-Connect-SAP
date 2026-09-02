@@ -140,6 +140,7 @@ export class SendMappedItemsToHubspot {
     ) {
       const mainDataInUpdate = await this.getMainDataInUpdate(tenantModels);
       const bypassEmail = await this.getBypassEmail({ objectType, tenantModels });
+      const updateFields = await this.getUpdateFields({ handler, tenantModels });
       const preprocessContext = handler?.buildPreprocessContext
         ? await handler.buildPreprocessContext({ clientConfig, tenantModels })
         : null;
@@ -153,6 +154,7 @@ export class SendMappedItemsToHubspot {
         getToken,
         mainDataInUpdate,
         bypassEmail,
+        updateFields,
         preprocessContext,
         syncLogId,
         sequentialFallback: (items) => this.processItemsSequentially(items, {
@@ -163,6 +165,7 @@ export class SendMappedItemsToHubspot {
           getToken,
           mainDataInUpdate,
           bypassEmail,
+          updateFields,
           syncLogId,
           preprocessContext,
         }),
@@ -171,6 +174,7 @@ export class SendMappedItemsToHubspot {
 
     const mainDataInUpdate = await this.getMainDataInUpdate(tenantModels);
     const bypassEmail = await this.getBypassEmail({ objectType, tenantModels });
+    const updateFields = await this.getUpdateFields({ handler, tenantModels });
     const result = await this.processItemsSequentially(mappedItems, {
       objectType,
       clientConfig,
@@ -179,10 +183,27 @@ export class SendMappedItemsToHubspot {
       getToken,
       mainDataInUpdate,
       bypassEmail,
+      updateFields,
       syncLogId,
     });
 
     return { ok: true, ...result };
+  }
+
+  // Las propiedades que el tenant autorizó a sobreescribir en HubSpot, leídas
+  // UNA vez por corrida. Sin el método en el handler (product, deal, invoice) la
+  // lista es vacía y el update se comporta como antes de la config.
+  async getUpdateFields({ handler, tenantModels }) {
+    if (typeof handler?.getUpdateFields !== 'function') {
+      return [];
+    }
+
+    try {
+      return await handler.getUpdateFields({ tenantModels });
+    } catch (error) {
+      console.error('hubspotUpdateFields read error:', error);
+      return [];
+    }
   }
 
   async getBypassEmail({ objectType, tenantModels }) {
@@ -272,6 +293,7 @@ export class SendMappedItemsToHubspot {
     handler,
     mainDataInUpdate = DEFAULT_MAIN_DATA_IN_UPDATE,
     bypassEmail = false,
+    updateFields = [],
     preprocessContext = null,
     syncLogId = null,
   }) {
@@ -341,6 +363,7 @@ export class SendMappedItemsToHubspot {
             item,
             clientConfig,
             tenantModels,
+            updateFields,
           });
           resultMetrics = { created: 0, updated: 1 };
         } else {

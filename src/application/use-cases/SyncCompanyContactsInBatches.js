@@ -299,6 +299,10 @@ export class SyncCompanyContactsInBatches {
     const createEntries = [];
     const updateEntries = [];
     const hubspotIdByKey = new Map();
+    // Una lectura por lote, no por contacto.
+    const updateFields = typeof this.contactHandler?.getUpdateFields === 'function'
+      ? await this.contactHandler.getUpdateFields({ tenantModels })
+      : [];
 
     for (const entry of uniqueEntries) {
       const existing = entry.key ? existingByKey.get(entry.key) : null;
@@ -309,7 +313,11 @@ export class SyncCompanyContactsInBatches {
       }
 
       hubspotIdByKey.set(entry.key, existing.id);
-      const updateInput = this.contactHandler.buildBatchUpdateEntry({ existing, item: entry.contactPayload });
+      const updateInput = this.contactHandler.buildBatchUpdateEntry({
+        existing,
+        item: entry.contactPayload,
+        updateFields,
+      });
 
       if (updateInput) {
         updateEntries.push({ entry, updateInput });

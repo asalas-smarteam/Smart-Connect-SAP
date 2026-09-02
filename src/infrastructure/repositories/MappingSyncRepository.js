@@ -1,6 +1,7 @@
 import TenantFieldMappingRepository from '#infrastructure/database/repositories/TenantFieldMappingRepository.js';
 import DynamicDescriptionConfigRepository from '#infrastructure/config/DynamicDescriptionConfigRepository.js';
 import MappingFallbackConfigRepository from '#infrastructure/config/MappingFallbackConfigRepository.js';
+import PhoneNormalizationConfigRepository from '#infrastructure/config/PhoneNormalizationConfigRepository.js';
 import SapFlavorConfigRepository from '#infrastructure/config/SapFlavorConfigRepository.js';
 import { SAP_FLAVORS } from '#domain/sap/sap-flavor.constants.js';
 import { applyDynamicDescription } from '#domain/sync/dynamic-description.service.js';
@@ -73,12 +74,14 @@ function mapFields(
   objectType,
   dynamicDescriptionConfig = null,
   sourceContext = null,
-  fallbackConfig = null
+  fallbackConfig = null,
+  phoneConfig = null
 ) {
   const properties = buildMappedProperties({
     input: inputData ?? {},
     mappings,
     fallbackConfig,
+    phoneConfig,
   });
 
   // Runs after the 1:1 pass so a composed value deliberately overwrites the
@@ -110,11 +113,13 @@ export class MappingSyncRepository {
     fieldMappingRepository = new TenantFieldMappingRepository(),
     dynamicDescriptionConfigRepository = new DynamicDescriptionConfigRepository(),
     mappingFallbackConfigRepository = new MappingFallbackConfigRepository(),
+    phoneNormalizationConfigRepository = new PhoneNormalizationConfigRepository(),
     sapFlavorConfigRepository = new SapFlavorConfigRepository(),
   } = {}) {
     this.fieldMappingRepository = fieldMappingRepository;
     this.dynamicDescriptionConfigRepository = dynamicDescriptionConfigRepository;
     this.mappingFallbackConfigRepository = mappingFallbackConfigRepository;
+    this.phoneNormalizationConfigRepository = phoneNormalizationConfigRepository;
     this.sapFlavorConfigRepository = sapFlavorConfigRepository;
   }
 
@@ -136,9 +141,10 @@ export class MappingSyncRepository {
     }
 
     // Read once per run, not per record.
-    const [dynamicDescriptionConfig, fallbackConfig] = await Promise.all([
+    const [dynamicDescriptionConfig, fallbackConfig, phoneConfig] = await Promise.all([
       this.getDynamicDescriptionConfig({ tenantContext }),
       this.getMappingFallbackConfig({ tenantContext }),
+      this.getPhoneNormalizationConfig({ tenantContext }),
     ]);
 
     return sapRecords.map(
@@ -148,9 +154,18 @@ export class MappingSyncRepository {
         objectType,
         dynamicDescriptionConfig,
         resolvedSourceContext,
-        fallbackConfig
+        fallbackConfig,
+        phoneConfig
       )
     );
+  }
+
+  async getPhoneNormalizationConfig({ tenantContext }) {
+    if (typeof this.phoneNormalizationConfigRepository?.getPhoneNormalizationConfig !== 'function') {
+      return null;
+    }
+
+    return this.phoneNormalizationConfigRepository.getPhoneNormalizationConfig({ tenantContext });
   }
 
   async getMappingFallbackConfig({ tenantContext }) {

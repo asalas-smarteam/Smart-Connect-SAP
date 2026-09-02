@@ -90,6 +90,7 @@ export class ProcessCrmObjectBatches {
     getToken,
     mainDataInUpdate,
     bypassEmail,
+    updateFields = [],
     preprocessContext = null,
     syncLogId = null,
     sequentialFallback,
@@ -269,7 +270,7 @@ export class ProcessCrmObjectBatches {
       if (shouldUpdateSapFromHubspot({ mainDataInUpdate, objectType })) {
         sapModeEntries.push({ item, existing });
       } else if (normalizeMainDataInUpdate(mainDataInUpdate) === MAIN_DATA_IN_UPDATE.HUBSPOT) {
-        const updateInput = handler.buildBatchUpdateEntry({ existing, item });
+        const updateInput = handler.buildBatchUpdateEntry({ existing, item, updateFields });
 
         if (updateInput) {
           updateEntries.push({ item, updateInput });

@@ -26,13 +26,15 @@ function mapFields(
   objectType,
   dynamicDescriptionConfig = null,
   sourceContext = null,
-  fallbackConfig = null
+  fallbackConfig = null,
+  phoneConfig = null
 ) {
   const resolvedInput = inputData ?? {};
   const result = buildMappedProperties({
     input: resolvedInput,
     mappings,
     fallbackConfig,
+    phoneConfig,
   });
 
   // Runs after the 1:1 pass so a composed value deliberately overwrites the
@@ -64,12 +66,31 @@ export class FieldMappingService {
     fieldMappingRepository,
     dynamicDescriptionConfigRepository = null,
     mappingFallbackConfigRepository = null,
+    phoneNormalizationConfigRepository = null,
     logger = console,
   }) {
     this.fieldMappingRepository = fieldMappingRepository;
     this.dynamicDescriptionConfigRepository = dynamicDescriptionConfigRepository;
     this.mappingFallbackConfigRepository = mappingFallbackConfigRepository;
+    this.phoneNormalizationConfigRepository = phoneNormalizationConfigRepository;
     this.logger = logger;
+  }
+
+  // Returns null (conducta histórica: solo se limpia lo cosmético de `phone`)
+  // when no repository was injected.
+  async getPhoneNormalizationConfig(tenantModels) {
+    if (typeof this.phoneNormalizationConfigRepository?.getPhoneNormalizationConfig !== 'function') {
+      return null;
+    }
+
+    try {
+      return await this.phoneNormalizationConfigRepository.getPhoneNormalizationConfig({
+        tenantModels,
+      });
+    } catch (error) {
+      this.logger.error?.('Failed to fetch phone normalization config:', error);
+      return null;
+    }
   }
 
   // Returns the legacy behaviour (chain off) when no repository was injected.
@@ -156,9 +177,10 @@ export class FieldMappingService {
       }
 
       // Read once per batch, not per record.
-      const [dynamicDescriptionConfig, fallbackConfig] = await Promise.all([
+      const [dynamicDescriptionConfig, fallbackConfig, phoneConfig] = await Promise.all([
         this.getDynamicDescriptionConfig(tenantModels),
         this.getMappingFallbackConfig(tenantModels),
+        this.getPhoneNormalizationConfig(tenantModels),
       ]);
 
       return records.map(
@@ -168,7 +190,8 @@ export class FieldMappingService {
           objectType,
           dynamicDescriptionConfig,
           resolvedSourceContext,
-          fallbackConfig
+          fallbackConfig,
+          phoneConfig
         )
       );
     } catch (error) {
@@ -231,9 +254,13 @@ export class FieldMappingService {
 
   async applyMapping(inputData, hubspotCredentialId, objectType, tenantModels, sourceContext) {
     try {
-      const [mappings, dynamicDescriptionConfig] = await Promise.all([
+      // La config de teléfono también acá: este es el endpoint con el que se
+      // prueba un mapeo, y una prueba que no normaliza igual que el sync real
+      // hace perder la tarde buscando una diferencia que no existe.
+      const [mappings, dynamicDescriptionConfig, phoneConfig] = await Promise.all([
         this.getMappings(hubspotCredentialId, objectType, tenantModels, sourceContext),
         this.getDynamicDescriptionConfig(tenantModels),
+        this.getPhoneNormalizationConfig(tenantModels),
       ]);
 
       return mapFields(
@@ -241,7 +268,9 @@ export class FieldMappingService {
         mappings,
         objectType,
         dynamicDescriptionConfig,
-        resolveSourceContext(objectType, sourceContext)
+        resolveSourceContext(objectType, sourceContext),
+        null,
+        phoneConfig
       );
     } catch (error) {
       this.logger.error?.('Failed to apply mappings:', error);

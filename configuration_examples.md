@@ -133,3 +133,50 @@ Nota sobre la moneda de la línea: el campo `price` del line item no lleva moned
 ```
 
 El mapa de arriba son las listas **mayoritarias** de cada combinación en el S/4 de Multiquímica al 2026-08-24, calculadas de los datos y cargadas para que el desarrollo y las pruebas funcionen. Están pendientes de que el cliente las confirme; el impacto es acotado porque el default sólo aplica a los clientes cuya `PriceListType` viene vacía (391 en todo el sistema).
+Detalle: phoneNormalization
+Qué propiedades de HubSpot son teléfonos y con qué código de país completarlos. Existe porque **el fieldMapping no sabe cuál de sus `targetField` es un teléfono** —solo conoce nombres de propiedad, no tipos— y porque el código de país correcto es del **tenant**, no del connector: el mismo `3192 3094` es `+50231923094` en Guatemala y `+50631923094` en Costa Rica. Aplica en sentido **SAP → HubSpot**, en el único punto por donde pasan tanto el sync programado como los webhooks (`buildMappedProperties`), así que cubre contactos, compañías, productos y asociaciones sin tocar cada flujo.
+
+- `targetFields`: nombres internos de las propiedades de HubSpot (el `targetField` del mapeo, no el campo de SAP) que se tratan como teléfono. Pueden ser varias (`phone`, `mobilephone`, una propiedad custom del portal). Se comparan **sin distinguir mayúsculas**. Ausente, vacía o toda inválida = `['phone']`, que es la lista histórica: una lista vacía **no apaga** la limpieza, porque dejaría pasar texto libre a HubSpot y volvería el 400 que esto evita. Una propiedad que no esté en la lista **no se toca nunca**: tocarla sería pérdida de dato silenciosa.
+- `enabled`: prende el agregado del código de país. `false`, ausente o cualquier valor que no sea exactamente `true` deja la conducta histórica: se limpia lo cosmético de un número que **ya trae su país** (`'+506 3192 3094'` → `'+50631923094'`) y todo lo demás se va en `null`.
+- `defaultCountryCode`: `'+502'`, `'+506'`. Se acepta sin el `+` (`'502'`) y se guarda con él.
+- `nationalNumberLengths`: largos válidos del número **local**, sin código de país (Guatemala y Costa Rica: `8`). Se acepta un número suelto además del array. Se descarta el largo que sumado al país pase de los 15 dígitos de E.164.
+
+**`enabled: true` exige los otros dos**: sin el largo no se puede distinguir un número local de uno que ya trae el país pegado sin `+` (`'50231923094'`), y prefijar a ciegas produce un número que HubSpot acepta pero está equivocado, y eso no lo detecta nadie mirando una ficha. Si falta alguno, el `enabled` se **ignora**, queda la conducta histórica y se escribe un warning en el log diciendo qué falta.
+
+Cómo decide, con `'+502'` y `[8]`: `'3192 3094'` (8 dígitos = largo local) → `'+50231923094'`; `'50259877130'` (11 dígitos, 11 − 3 = 8) → `'+50259877130'`, o sea que solo se le agrega el `+`. **Se prueba primero el largo local**, así que un local que por casualidad empieza con los dígitos del país (`'50212345'`) sigue siendo local → `'+50250212345'`. Los separadores (espacios, `()`, `-`, `.`) no cuentan y la extensión se conserva (`'3192 3094 ext 12'` → `'+50231923094 ext 12'`).
+
+Lo que **no** calza con lo declarado sigue yéndose en `null` a propósito: `'8888 9999 / 2222 1111'`, `'no tiene'`, un largo que no está en la lista. Es lo que evita el `400 INVALID_PHONE_NUMBER` con el que se pierde el registro **completo** —nombre, email, cédula—, no solo el teléfono. El `null` además libera el siguiente eslabón de la cadena de `mappingFallback`, si hay varias filas apuntando a la misma propiedad. Un campo vacío en SAP (`''`) viaja tal cual: es un hueco, no un teléfono inválido.
+
+Todo tenant nuevo nace con el documento **apagado y sin código de país** (`ensureTenantConfigurations` lo siembra) para que se vea en el admin y solo haya que editarlo; sembrar un `+502` le escribiría a los demás tenants un prefijo que no es el suyo. Editarlo es un **update** del documento existente, no un insert: un `insertOne` chocaría con el índice único sobre `key`.
+
+{ "key": "phoneNormalization", "value": {
+    "enabled": true,
+    "defaultCountryCode": "+502",
+    "nationalNumberLengths": [8],
+    "targetFields": ["phone", "mobilephone"]
+}}
+{ "key": "phoneNormalization", "value": {
+    "enabled": true,
+    "defaultCountryCode": "+506",
+    "nationalNumberLengths": [8],
+    "targetFields": ["phone"]
+}}
+
+Detalle: hubspotUpdateFields
+Qué propiedades de HubSpot se **sobreescriben** cuando el registro ya existe. Sin esta clave, el update de company y de contact manda **únicamente `idsap` e `internalcode`** (`buildIdentifierOnlyPayload`): todo lo demás que traiga el mapeo se descarta antes de salir, así que un cambio de teléfono, de moneda o de subgrupo en SAP no llegaba nunca a HubSpot aunque el mapeo existiera. Eso no era un bug suelto sino una postura —el asesor edita la ficha en HubSpot y pisarla en cada corrida le borra el trabajo—, y esta config invierte quién decide: el tenant **nombra** las propiedades que sí son del lado SAP y acepta que se pisen. Lo que no está en la lista se sigue sin tocar.
+
+- Las listas son por `objectType` (`company`, `contact`) porque las propiedades no se llaman igual en los dos lados (`name` vs `firstname`/`lastname`) y casi nunca se quiere pisar lo mismo en ambos. Configurar `company` **no** prende nada en `contact`. También se acepta un array suelto, que aplica a los dos.
+- Los nombres son los de **HubSpot** (el `targetField` del mapeo), no los campos de SAP. Se comparan sin distinguir mayúsculas, pero se conserva la forma escrita porque tiene que coincidir con el `targetField`. Un nombre que no esté en las propiedades mapeadas simplemente no aparece en el PATCH.
+- `idsap` e `internalcode` **viajan siempre**, estén o no en la lista: son la llave con la que el connector reencuentra el registro, no dato editable del asesor.
+- Un campo configurado que viene **vacío de SAP** (`''`, `null`) se **omite** en vez de mandarse en blanco: borrar en HubSpot un dato que el asesor cargó a mano, porque en SAP nadie lo llenó, es pérdida de dato que no se detecta hasta que alguien busca el teléfono y no está. La consecuencia es que esta config **no sirve para vaciar** una propiedad.
+- La lista también alimenta la **decisión de actualizar**. Antes, `shouldUpdateByKeyFields` sólo miraba `name`/`firstname`, `phone` y el id de SAP: si esos tres coincidían, el registro se salteaba y ningún otro cambio salía. Ahora un cambio en cualquier campo configurado también dispara el PATCH. Si no cambió nada de lo que se va a escribir, se sigue salteando, que es lo que evita gastar la cuota de la API en updates vacíos.
+- Con la lista configurada, un registro **sin `idsap`** igual se actualiza. Antes se salteaba entero, con lo que la config no habría servido para los registros que todavía no tienen el identificador escrito.
+
+Ausente o con las listas vacías = la conducta histórica, y así nace todo tenant nuevo (`ensureTenantConfigurations` la siembra vacía). Aplica en los tres caminos: el sync secuencial (`SendMappedItemsToHubspot`), el batch de company/contact (`ProcessCrmObjectBatches`) y el de contactos hijos de compañía (`SyncCompanyContactsInBatches`); en los dos batch se lee **una vez por corrida**, no por registro. Sólo tiene efecto cuando `mainDataInUpdate` deja que HubSpot se actualice: con la clave en `SAP`, company y contact escriben hacia SAP y este payload no se arma.
+
+Dos condiciones del portal: la propiedad tiene que **existir y ser escribible** en HubSpot. En el camino batch, las que no estén en el catálogo de propiedades escribibles se filtran silenciosamente antes de enviar; en el secuencial, una propiedad inexistente hace que HubSpot responda 400 para ese registro.
+
+{ "key": "hubspotUpdateFields", "value": {
+    "company": ["u_subgrupo", "mobile_phone", "cardcurrency", "phone"],
+    "contact": ["firstname", "lastname", "phone"]
+}}

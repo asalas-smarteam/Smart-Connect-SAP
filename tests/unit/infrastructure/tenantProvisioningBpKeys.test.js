@@ -4,6 +4,10 @@ import { BUSINESS_PARTNER_CREATION_CONFIG_KEY, PROPERTIES_FLAGS_CONFIG_KEY }
   from '../../../src/domain/business-partners/business-partner-creation.constants.js';
 import { WAREHOUSE_AVAILABLE_FORMULA_CONFIG_KEY }
   from '../../../src/domain/warehouses/warehouse-stock-strategy.constants.js';
+import { PHONE_NORMALIZATION_CONFIG_KEY }
+  from '../../../src/domain/sap/hubspot-phone-fields.constants.js';
+import { HUBSPOT_UPDATE_FIELDS_CONFIG_KEY }
+  from '../../../src/domain/sync/hubspot-update-fields.constants.js';
 
 describe('ensureTenantConfigurations — claves del BusinessPartner', () => {
   it('siembra businessPartnerCreation apagada, con upsert e idempotente', async () => {
@@ -58,6 +62,44 @@ describe('ensureTenantConfigurations — claves del BusinessPartner', () => {
     expect(call[1].$setOnInsert.value).toEqual({ add: ['InStock', 'Ordered'], subtract: ['Committed'] });
     expect(Object.isFrozen(call[1].$setOnInsert.value)).toBe(false);
     expect(Object.isFrozen(call[1].$setOnInsert.value.add)).toBe(false);
+    expect(call[1].$setOnInsert.userUpdated).toBe('admin');
+    expect(call[2]).toEqual({ upsert: true });
+  });
+  it('siembra phoneNormalization apagada y sin codigo de pais, con arrays mutables', async () => {
+    const updateOne = jest.fn().mockResolvedValue({});
+
+    await ensureTenantConfigurations({ Configuration: { updateOne } });
+
+    const call = updateOne.mock.calls.find(
+      ([filter]) => filter.key === PHONE_NORMALIZATION_CONFIG_KEY
+    );
+
+    expect(call).toBeDefined();
+    // Sin codigo de pais a proposito: +502 sirve a Guatemala y le escribiria un
+    // prefijo equivocado a todos los demas tenants.
+    expect(call[1].$setOnInsert.value).toEqual({
+      enabled: false,
+      defaultCountryCode: null,
+      nationalNumberLengths: [],
+      targetFields: ['phone'],
+    });
+    expect(Object.isFrozen(call[1].$setOnInsert.value.targetFields)).toBe(false);
+    expect(call[1].$setOnInsert.userUpdated).toBe('admin');
+    expect(call[2]).toEqual({ upsert: true });
+  });
+  it('siembra hubspotUpdateFields con las listas vacias, con arrays mutables', async () => {
+    const updateOne = jest.fn().mockResolvedValue({});
+
+    await ensureTenantConfigurations({ Configuration: { updateOne } });
+
+    const call = updateOne.mock.calls.find(
+      ([filter]) => filter.key === HUBSPOT_UPDATE_FIELDS_CONFIG_KEY
+    );
+
+    expect(call).toBeDefined();
+    // Vacias = el update sigue mandando solo identificadores, como antes.
+    expect(call[1].$setOnInsert.value).toEqual({ company: [], contact: [] });
+    expect(Object.isFrozen(call[1].$setOnInsert.value.company)).toBe(false);
     expect(call[1].$setOnInsert.userUpdated).toBe('admin');
     expect(call[2]).toEqual({ upsert: true });
   });

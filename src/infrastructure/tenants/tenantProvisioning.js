@@ -37,6 +37,14 @@ import {
   DEFAULT_B1_AVAILABLE_FORMULA,
   WAREHOUSE_AVAILABLE_FORMULA_CONFIG_KEY,
 } from '#domain/warehouses/warehouse-stock-strategy.constants.js';
+import {
+  DEFAULT_PHONE_NORMALIZATION_CONFIG,
+  PHONE_NORMALIZATION_CONFIG_KEY,
+} from '#domain/sap/hubspot-phone-fields.constants.js';
+import {
+  DEFAULT_HUBSPOT_UPDATE_FIELDS,
+  HUBSPOT_UPDATE_FIELDS_CONFIG_KEY,
+} from '#domain/sync/hubspot-update-fields.constants.js';
 
 function slugifyCompanyName(companyName) {
   return sanitizeMongoCollectionName(companyName);
@@ -227,6 +235,46 @@ export async function ensureTenantConfigurations({ Configuration }, { sapFlavor 
         value: {
           add: [...DEFAULT_B1_AVAILABLE_FORMULA.add],
           subtract: [...DEFAULT_B1_AVAILABLE_FORMULA.subtract],
+        },
+      },
+    },
+    { upsert: true }
+  );
+  // Sembrada APAGADA: el codigo de pais es del tenant (+502 Guatemala, +506
+  // Costa Rica) y sembrar uno seria escribirle a medio mundo un prefijo que no
+  // es el suyo. El documento existe para que se vea en el admin y solo haya que
+  // editarlo: enabled + defaultCountryCode + nationalNumberLengths. Se copian
+  // los arrays porque la constante esta congelada y un Object.freeze dentro de
+  // un $setOnInsert es un bug dificil de ver si Mongoose intenta mutarlo.
+  // Sembrada con las listas VACIAS: mientras nadie las llene, el update de
+  // company/contact sigue mandando solo idsap/internalcode, que es como se
+  // comportaba antes de esta clave. El documento existe para que se vea en el
+  // admin y solo haya que nombrar las propiedades que si son del lado SAP.
+  await Configuration.updateOne(
+    { key: HUBSPOT_UPDATE_FIELDS_CONFIG_KEY },
+    {
+      $setOnInsert: {
+        key: HUBSPOT_UPDATE_FIELDS_CONFIG_KEY,
+        userUpdated: 'admin',
+        value: {
+          company: [...DEFAULT_HUBSPOT_UPDATE_FIELDS.company],
+          contact: [...DEFAULT_HUBSPOT_UPDATE_FIELDS.contact],
+        },
+      },
+    },
+    { upsert: true }
+  );
+  await Configuration.updateOne(
+    { key: PHONE_NORMALIZATION_CONFIG_KEY },
+    {
+      $setOnInsert: {
+        key: PHONE_NORMALIZATION_CONFIG_KEY,
+        userUpdated: 'admin',
+        value: {
+          enabled: DEFAULT_PHONE_NORMALIZATION_CONFIG.enabled,
+          defaultCountryCode: DEFAULT_PHONE_NORMALIZATION_CONFIG.defaultCountryCode,
+          nationalNumberLengths: [...DEFAULT_PHONE_NORMALIZATION_CONFIG.nationalNumberLengths],
+          targetFields: [...DEFAULT_PHONE_NORMALIZATION_CONFIG.targetFields],
         },
       },
     },
