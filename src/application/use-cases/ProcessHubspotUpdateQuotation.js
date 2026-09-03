@@ -96,6 +96,9 @@ export class ProcessHubspotUpdateQuotation {
       const lineUpdates = buildQuotationLineUpdates({
         lineItems,
         productMappings: mappings.productMappings,
+        // Mismo contexto que usa mapDocumentLines al crear la oferta, para que un campo de linea
+        // editable en HubSpot (ItemDescription, U_TEXTO_LIBRE, ...) tambien se actualice en SAP.
+        lineMappings: mappings.productOrdersQuotationsMappings,
         linkLines: link.lines,
         taxCodes,
         miscPriceCalculationConfig,

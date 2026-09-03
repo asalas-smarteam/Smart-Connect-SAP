@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import {
   QUOTATION_BASE_TYPE,
   buildOrderFromQuotationPayload,
@@ -445,6 +446,118 @@ describe('order-builder.service buildQuotationLineUpdates', () => {
         lineItems: [{ hubspot_id: 'unknown', hs_sku: 'A99', price: '1' }],
       })
     ).toThrow(/No matching quotation lines/);
+  });
+
+  // El caso del tenant: ItemDescription se edita en el line item de HubSpot y tiene que
+  // aterrizar en la linea de la oferta ya creada, no solo al crearla.
+  it('derrama los campos de lineMappings en la linea del PATCH', () => {
+    const updates = buildQuotationLineUpdates({
+      productMappings,
+      lineMappings: [
+        { sourceField: 'ItemDescription', targetField: 'item_description' },
+        { sourceField: 'U_TEXTO_LIBRE', targetField: 'u_texto_libre' },
+      ],
+      linkLines,
+      lineItems: [
+        {
+          hubspot_id: 'li-1',
+          hs_sku: 'A01',
+          quantity: '2',
+          price: '17.5',
+          item_description: 'Laptop HP 15in - Config especial Distelsa',
+          u_texto_libre: 'Entrega en bodega 2',
+        },
+      ],
+    });
+
+    expect(updates).toEqual([
+      {
+        ItemDescription: 'Laptop HP 15in - Config especial Distelsa',
+        U_TEXTO_LIBRE: 'Entrega en bodega 2',
+        LineNum: 0,
+        UnitPrice: 17.5,
+        Quantity: 2,
+      },
+    ]);
+  });
+
+  // Si el workflow no manda la propiedad (o la manda vacia) la clave no viaja, para no pisar en
+  // SAP una descripcion que alguien haya corregido a mano ahi.
+  it('omite el campo de linea cuando el line item no trae valor', () => {
+    const updates = buildQuotationLineUpdates({
+      productMappings,
+      lineMappings: [{ sourceField: 'ItemDescription', targetField: 'item_description' }],
+      linkLines,
+      lineItems: [
+        { hubspot_id: 'li-1', hs_sku: 'A01', quantity: '1', price: '5' },
+        { hubspot_id: 'li-2', hs_sku: 'A02', quantity: '1', price: '5', item_description: '   ' },
+      ],
+    });
+
+    expect(updates[0]).not.toHaveProperty('ItemDescription');
+    expect(updates[1]).not.toHaveProperty('ItemDescription');
+  });
+
+  it('descarta el campo de linea que llega como el texto "null" y avisa', () => {
+    const logger = { warn: jest.fn() };
+
+    const updates = buildQuotationLineUpdates({
+      productMappings,
+      lineMappings: [{ sourceField: 'ItemDescription', targetField: 'item_description' }],
+      linkLines,
+      logger,
+      lineItems: [
+        { hubspot_id: 'li-1', hs_sku: 'A01', quantity: '1', price: '5', item_description: 'null' },
+      ],
+    });
+
+    expect(updates[0]).not.toHaveProperty('ItemDescription');
+    expect(logger.warn).toHaveBeenCalledWith({
+      msg: 'Propiedad de HubSpot descartada por llegar como el texto "null"/"undefined"',
+      sapField: 'ItemDescription',
+      hubspotProperty: 'item_description',
+      value: 'null',
+    });
+  });
+
+  // RESERVED_LINE_FIELDS protege el PATCH igual que la creacion: LineNum identifica la linea a
+  // actualizar y los importes los resuelve este builder con su propia coercion.
+  it('no deja que lineMappings pise LineNum ni los campos que el builder posee', () => {
+    const updates = buildQuotationLineUpdates({
+      productMappings,
+      lineMappings: [
+        { sourceField: 'LineNum', targetField: 'wrong_line_num' },
+        { sourceField: 'ItemCode', targetField: 'wrong_item_code' },
+        { sourceField: 'Quantity', targetField: 'wrong_quantity' },
+        { sourceField: 'UnitPrice', targetField: 'wrong_unit_price' },
+        { sourceField: 'WarehouseCode', targetField: 'wrong_warehouse' },
+        { sourceField: 'TaxCode', targetField: 'wrong_tax_code' },
+        { sourceField: 'BaseEntry', targetField: 'wrong_base_entry' },
+      ],
+      linkLines,
+      taxCodes: [{ Rate: 15, Code: 'IVA' }],
+      lineItems: [
+        {
+          hubspot_id: 'li-1',
+          hs_sku: 'A01',
+          quantity: '2',
+          price: '17.5',
+          warehouseCode: '02',
+          hs_tax_rate: '15.0000',
+          wrong_line_num: '99',
+          wrong_item_code: 'ZZZ',
+          wrong_quantity: '999',
+          wrong_unit_price: '999',
+          wrong_warehouse: 'ZZZ',
+          wrong_tax_code: 'ZZZ',
+          wrong_base_entry: '999',
+        },
+      ],
+    });
+
+    expect(updates).toEqual([
+      { LineNum: 0, UnitPrice: 17.5, Quantity: 2, WarehouseCode: '02', TaxCode: 'IVA' },
+    ]);
   });
 });
 

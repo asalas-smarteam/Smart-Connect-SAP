@@ -176,7 +176,10 @@ const RESERVED_LINE_FIELDS = new Set([
   'BaseLine',
 ]);
 
-function pickMappedLineFields(mappedLineFields) {
+// Exportada porque el PATCH de buildQuotationLineUpdates la necesita: sin ella, un mapeo de
+// linea podria pisar el LineNum que identifica la linea a actualizar, o el ItemCode/Quantity/
+// UnitPrice que este builder resuelve con su propia coercion.
+export function pickMappedLineFields(mappedLineFields) {
   const fields = {};
 
   for (const [field, value] of Object.entries(mappedLineFields || {})) {
@@ -572,8 +575,25 @@ function resolveQuotationLinkLine(lineItem, linkLines, usedLineNums) {
 }
 
 // Builds the PATCH /Quotations(DocEntry) DocumentLines updating only existing lines
-// (price / quantity / discount) matched by their SAP LineNum.
-export function buildQuotationLineUpdates({ lineItems, productMappings, linkLines, taxCodes = [], miscPriceCalculationConfig = null, discountConfig = null, logger = null }) {
+// (price / quantity / discount / mapped line fields) matched by their SAP LineNum.
+//
+// `lineMappings` es el mismo contexto product/orders-quotations que derrama mapDocumentLines
+// en la creacion. Se derrama aca tambien para que un campo de linea editable (ItemDescription,
+// U_TEXTO_LIBRE, ...) siga al documento cuando el usuario lo corrige en HubSpot: sin esto el
+// campo solo viajaba al crear y la edicion posterior nunca aterrizaba en SAP, sin error.
+//
+// El derrame respeta la misma semantica de omision que en la creacion: mapHubspotToSapFields no
+// produce clave para una propiedad ausente, vacia o con el texto "null"/"undefined", asi que un
+// campo que el workflow no manda en ESTE evento no se pisa en SAP.
+//
+// OJO al habilitar updateQuotation en un tenant nuevo: igual que con IMMUTABLE_ON_PATCH_FIELDS
+// en la cabecera, Service Layer rechaza el PATCH COMPLETO si una linea trae un campo que no
+// admite cambio en un documento ya creado, y el sintoma se ve como sincronizacion de lineas
+// rota, no como problema de mapeo. RESERVED_LINE_FIELDS cubre lo que este builder posee
+// (ItemCode, LineNum, BaseType/BaseEntry/BaseLine y los importes), pero NO es la lista completa
+// de campos que SAP prohibe cambiar: audita los mapeos product/orders-quotations del tenant
+// antes de prender este flujo.
+export function buildQuotationLineUpdates({ lineItems, productMappings, lineMappings = [], linkLines, taxCodes = [], miscPriceCalculationConfig = null, discountConfig = null, logger = null }) {
   const updates = [];
   const usedLineNums = new Set();
 
@@ -600,7 +620,10 @@ export function buildQuotationLineUpdates({ lineItems, productMappings, linkLine
       logger?.warn?.({ msg: warning, sapLineNum: matchedLink.sapLineNum });
     }
 
-    const line = { LineNum: matchedLink.sapLineNum };
+    const mappedLine = pickMappedLineFields(
+      mapHubspotToSapFields(lineItem, lineMappings, { logger })
+    );
+    const line = { ...mappedLine, LineNum: matchedLink.sapLineNum };
 
     if (Number.isFinite(unitPrice)) {
       line.UnitPrice = unitPrice;

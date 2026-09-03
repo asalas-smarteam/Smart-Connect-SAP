@@ -162,6 +162,62 @@ describe('ProcessHubspotCreateQuotation', () => {
     });
   });
 
+  // ItemDescription editable desde el line item de HubSpot. Va SOLO en DocumentLines: el
+  // contexto product/orders-quotations nunca derrama en la cabecera del documento.
+  it('manda ItemDescription en DocumentLines desde el mapeo product/orders-quotations', async () => {
+    const context = buildContext();
+    context.mappings.productOrdersQuotationsMappings = [
+      { sourceField: 'ItemDescription', targetField: 'item_description' },
+    ];
+    const deps = buildDeps();
+    deps.runtimeRepository = buildRuntimeRepository(context);
+    const useCase = new ProcessHubspotCreateQuotation(deps);
+
+    const event = {
+      ...baseEvent,
+      payload: {
+        ...baseEvent.payload,
+        line_items: [
+          {
+            hubspot_id: 'li-1',
+            hs_sku: 'A01',
+            quantity: '2',
+            price: '850',
+            warehouses: '01',
+            item_description: 'Laptop HP 15in - Config especial Distelsa',
+          },
+        ],
+      },
+    };
+
+    await useCase.execute({ event, tenantModels });
+
+    const { quotationPayload } = deps.sapQuotationAdapter.createQuotation.mock.calls[0][0];
+    expect(quotationPayload.DocumentLines[0]).toEqual({
+      ItemDescription: 'Laptop HP 15in - Config especial Distelsa',
+      ItemCode: 'A01',
+      Quantity: 2,
+      UnitPrice: 850,
+      WarehouseCode: '01',
+    });
+    expect(quotationPayload).not.toHaveProperty('ItemDescription');
+  });
+
+  it('omite ItemDescription cuando el line item no trae la propiedad', async () => {
+    const context = buildContext();
+    context.mappings.productOrdersQuotationsMappings = [
+      { sourceField: 'ItemDescription', targetField: 'item_description' },
+    ];
+    const deps = buildDeps();
+    deps.runtimeRepository = buildRuntimeRepository(context);
+    const useCase = new ProcessHubspotCreateQuotation(deps);
+
+    await useCase.execute({ event: baseEvent, tenantModels });
+
+    const { quotationPayload } = deps.sapQuotationAdapter.createQuotation.mock.calls[0][0];
+    expect(quotationPayload.DocumentLines[0]).not.toHaveProperty('ItemDescription');
+  });
+
   it('sends PaymentGroupCode from the orders-quotations deal mapping', async () => {
     const context = buildContext();
     context.mappings.dealOrdersQuotationsMappings = [
@@ -591,6 +647,62 @@ describe('ProcessHubspotUpdateQuotation', () => {
     expect(patch.SalesPersonCode).toBe(61);
     expect(deps.sapDocumentLinkRepository.updateLines).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({ docEntry: 12345, docNum: 8001, dealId: '59680314911' });
+  });
+
+  // El campo de linea editable tiene que seguir al documento YA creado, no solo aterrizar al
+  // crearlo: es el punto que faltaba para que la edicion en HubSpot llegue a SAP.
+  it('manda ItemDescription en las lineas del PATCH', async () => {
+    const context = buildContext();
+    context.mappings.productOrdersQuotationsMappings = [
+      { sourceField: 'ItemDescription', targetField: 'item_description' },
+    ];
+    const deps = buildDeps();
+    deps.runtimeRepository.resolveRuntimeContext.mockResolvedValue(context);
+    const useCase = new ProcessHubspotUpdateQuotation(deps);
+
+    const event = {
+      ...updateEvent,
+      payload: {
+        ...updateEvent.payload,
+        line_items: [
+          {
+            hubspot_id: 'li-1',
+            hs_sku: 'A01',
+            quantity: '2',
+            price: '17.5',
+            item_description: 'Descripcion corregida en HubSpot',
+          },
+        ],
+      },
+    };
+
+    await useCase.execute({ event, tenantModels });
+
+    const patch = deps.sapQuotationAdapter.updateQuotation.mock.calls[0][0].patchPayload;
+    expect(patch.DocumentLines).toEqual([
+      {
+        ItemDescription: 'Descripcion corregida en HubSpot',
+        LineNum: 0,
+        UnitPrice: 17.5,
+        Quantity: 2,
+      },
+    ]);
+    expect(patch).not.toHaveProperty('ItemDescription');
+  });
+
+  it('no manda ItemDescription en el PATCH cuando el evento no trae la propiedad', async () => {
+    const context = buildContext();
+    context.mappings.productOrdersQuotationsMappings = [
+      { sourceField: 'ItemDescription', targetField: 'item_description' },
+    ];
+    const deps = buildDeps();
+    deps.runtimeRepository.resolveRuntimeContext.mockResolvedValue(context);
+    const useCase = new ProcessHubspotUpdateQuotation(deps);
+
+    await useCase.execute({ event: updateEvent, tenantModels });
+
+    const patch = deps.sapQuotationAdapter.updateQuotation.mock.calls[0][0].patchPayload;
+    expect(patch.DocumentLines[0]).not.toHaveProperty('ItemDescription');
   });
 
   // El PATCH solo lleva lo que el workflow mando en ESTE evento. Editar lineas en HubSpot no
