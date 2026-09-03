@@ -421,6 +421,12 @@
       "value": "ep09_onhand",
       "valueSAP": "EP09",
       "metric": "inStock"
+    },
+    {
+      "label": "Total todas las bodegas",
+      "value": "total_onhand",
+      "valueSAP": "*",
+      "metric": "inStock"
     }
   ]
 }

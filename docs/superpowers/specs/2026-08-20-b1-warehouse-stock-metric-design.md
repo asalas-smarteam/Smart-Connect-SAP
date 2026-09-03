@@ -100,7 +100,7 @@ sin que el port cambie.
 
 | Decisión | Por qué |
 |---|---|
-| **La cuarta columna acumulativa de AMC no la calcula el código** | Decisión del dueño del proyecto: se resuelve con una propiedad calculada en HubSpot. Riesgo asumido, del lado del portal: es una fórmula que suma ~18 propiedades y se rompe en silencio si alguien renombra una |
+| **La cuarta columna acumulativa de AMC no la calcula el código** | Decisión del dueño del proyecto: se resuelve con una propiedad calculada en HubSpot. Riesgo asumido, del lado del portal: es una fórmula que suma ~18 propiedades y se rompe en silencio si alguien renombra una. **REVERTIDO el 2026-09-02**: HubSpot no permite propiedades calculadas ni workflows sobre productos, así que el total sí lo calcula el código, como una entrada `valueSAP: "*"` de `fieldsWareHouseHS` — ver `docs/superpowers/specs/2026-09-02-b1-warehouse-total-property-design.md` |
 | **La fórmula `available` sigue sumando `Ordered`** | O sea que cuenta stock entrante (órdenes de compra) como disponible. Es lo que Distelsa y Noelito tienen hoy en producción; cambiar la semántica sin que el cliente lo pida sería cambiarle los números sin aviso |
 | **Distelsa y Noelito no cambian ni un documento en Mongo** | Sin `metric`, el comportamiento es el actual bit por bit. Ninguna config existente se migra |
 | **No se agrega redondeo** | Las métricas crudas no hacen aritmética, así que no generan el ruido de punto flotante que sí motivó `QUANTITY_DECIMALS` en S/4 (`warehouse-stock-strategy.constants.js:31`). Y `available` sigue sin redondear, como hoy, para no mover valores existentes |
@@ -293,7 +293,11 @@ existen como line item porque ese camino ya venía corriendo; los nombres nuevos
 `a0002_committed`, `a0002_ordered`, etc.) no, y hay que crearlos ahí también antes de aplicar esta config.
 
 La cuarta columna acumulativa de AMC es una propiedad calculada del portal que suma las 20
-`*_instock`. No sale de este código.
+`*_instock`. No sale de este código. **REVERTIDO el 2026-09-02**: HubSpot no permite propiedades
+calculadas sobre productos. El total ahora sale de este código, como una entrada más de
+`fieldsWareHouseHS` con `valueSAP: "*"`, y por lo tanto también hay que crear esa propiedad en el
+portal — de producto y de line item, como todas las demás. Ver
+`docs/superpowers/specs/2026-09-02-b1-warehouse-total-property-design.md`.
 
 ### Rollout: renombrar deja las columnas viejas congeladas
 

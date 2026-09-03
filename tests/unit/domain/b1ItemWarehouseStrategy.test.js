@@ -15,8 +15,10 @@ import {
   B1_STOCK_METRICS,
   B1_WAREHOUSE_STOCK_FIELDS,
   DEFAULT_B1_STOCK_METRIC,
+  STOCK_TYPE_ALL,
   WAREHOUSE_AVAILABLE_FORMULA_CONFIG_KEY,
   WAREHOUSE_AVAILABLE_FORMULA_INVALID_WARNING,
+  WAREHOUSE_CODE_ALL,
 } from '../../../src/domain/warehouses/warehouse-stock-strategy.constants.js';
 
 describe('getWarehouseAvailableStock', () => {
@@ -521,5 +523,158 @@ describe('B1ItemWarehouseStrategy — formula de disponible', () => {
     expect(strategy.buildProperties({ record, fields, availableFormula: { add: ['InStock'], subtract: ['Committed'] } }))
       .toEqual({ a01_stock: 6 });
     expect(strategy.buildProperties({ record, fields })).toEqual({ a01_stock: 106 });
+  });
+});
+
+describe('total de todas las bodegas (valueSAP "*")', () => {
+  // El perfil de Printer: una columna inStock por bodega mas una columna total.
+  const PRINTER_FIELDS = [
+    { warehouseCode: 'A01', propertyName: 'a01_onhand', metric: 'inStock' },
+    { warehouseCode: 'A02', propertyName: 'a02_onhand', metric: 'inStock' },
+    { warehouseCode: 'B09', propertyName: 'b09_onhand', metric: 'inStock' },
+    { warehouseCode: WAREHOUSE_CODE_ALL, propertyName: 'total_onhand', metric: 'inStock' },
+  ];
+
+  it('expone el comodin y es el mismo que ya entiende el lado S/4', () => {
+    expect(WAREHOUSE_CODE_ALL).toBe('*');
+    expect(WAREHOUSE_CODE_ALL).toBe(STOCK_TYPE_ALL);
+  });
+
+  it('normalizeB1WarehouseFields conserva el comodin y no lo toma por bodega', () => {
+    expect(normalizeB1WarehouseFields([
+      { label: 'Total', value: 'total_onhand', valueSAP: '*', metric: 'inStock' },
+      { label: 'Total disponible', value: 'total_disponible', valueSAP: '*', metric: 'available' },
+    ])).toEqual([
+      { warehouseCode: '*', propertyName: 'total_onhand', metric: 'inStock' },
+      { warehouseCode: '*', propertyName: 'total_disponible', metric: 'available' },
+    ]);
+  });
+
+  it('descarta una entrada total sin valueSAP: total_onhand no termina en _stock', () => {
+    expect(normalizeB1WarehouseFields([{ label: 'Total', value: 'total_onhand' }])).toEqual([]);
+  });
+
+  it('suma solo las bodegas declaradas, no las que SAP reporta sin configurar', () => {
+    const properties = buildB1WarehouseStockProperties(P27020056_WAREHOUSES, PRINTER_FIELDS);
+
+    // Del payload real solo A02 (1) y B09 (66) tienen InStock; B12.Ordered=1400
+    // no entra porque la metrica es inStock, y B12 ni siquiera esta declarada.
+    expect(properties).toEqual({
+      a01_onhand: 0,
+      a02_onhand: 1,
+      b09_onhand: 66,
+      total_onhand: 67,
+    });
+  });
+
+  it('el total siempre cuadra con la suma de las columnas que se emiten', () => {
+    const properties = buildB1WarehouseStockProperties(P27020056_WAREHOUSES, PRINTER_FIELDS);
+    const { total_onhand: total, ...columns } = properties;
+
+    expect(total).toBe(Object.values(columns).reduce((sum, value) => sum + value, 0));
+  });
+
+  it('una bodega con tres columnas aporta al total una sola vez', () => {
+    const properties = buildB1WarehouseStockProperties(P27020056_WAREHOUSES, [
+      { warehouseCode: 'B09', propertyName: 'b09_instock', metric: 'inStock' },
+      { warehouseCode: 'B09', propertyName: 'b09_committed', metric: 'committed' },
+      { warehouseCode: 'B09', propertyName: 'b09_ordered', metric: 'ordered' },
+      { warehouseCode: WAREHOUSE_CODE_ALL, propertyName: 'total_onhand', metric: 'inStock' },
+    ]);
+
+    expect(properties.total_onhand).toBe(66);
+  });
+
+  it('una bodega excluida sale en 0 en su columna y tampoco entra al total', () => {
+    const properties = buildB1WarehouseStockProperties(
+      P27020056_WAREHOUSES,
+      PRINTER_FIELDS,
+      ['B09']
+    );
+
+    expect(properties).toEqual({
+      a01_onhand: 0,
+      a02_onhand: 1,
+      b09_onhand: 0,
+      total_onhand: 1,
+    });
+  });
+
+  it('con metric available el total aplica la formula del tenant bodega por bodega', () => {
+    const fields = [
+      { warehouseCode: 'A02', propertyName: 'a02_stock', metric: 'available' },
+      { warehouseCode: 'B12', propertyName: 'b12_stock', metric: 'available' },
+      { warehouseCode: WAREHOUSE_CODE_ALL, propertyName: 'total_disponible', metric: 'available' },
+    ];
+
+    // Default (cuenta Ordered): 1 + 1400. Formula de Noelito (solo InStock -
+    // Committed): 1 + 0, porque el 1400 de B12 es Ordered.
+    expect(buildB1WarehouseStockProperties(P27020056_WAREHOUSES, fields).total_disponible).toBe(1401);
+    expect(buildB1WarehouseStockProperties(
+      P27020056_WAREHOUSES,
+      fields,
+      [],
+      { availableFormula: { add: ['InStock'], subtract: ['Committed'] } }
+    ).total_disponible).toBe(1);
+  });
+
+  it('con formula invalida omite el total available y conserva el total crudo', () => {
+    const properties = buildB1WarehouseStockProperties(
+      P27020056_WAREHOUSES,
+      [
+        { warehouseCode: 'B09', propertyName: 'b09_onhand', metric: 'inStock' },
+        { warehouseCode: WAREHOUSE_CODE_ALL, propertyName: 'total_onhand', metric: 'inStock' },
+        { warehouseCode: WAREHOUSE_CODE_ALL, propertyName: 'total_disponible', metric: 'available' },
+      ],
+      [],
+      { availableFormula: null }
+    );
+
+    expect(properties).toEqual({ b09_onhand: 66, total_onhand: 66 });
+    expect(Object.prototype.hasOwnProperty.call(properties, 'total_disponible')).toBe(false);
+  });
+
+  it('redondea el total a tres decimales para no arrastrar ruido de flotantes', () => {
+    const items = [
+      { WarehouseCode: 'A01', InStock: 10.1 },
+      { WarehouseCode: 'A02', InStock: 0.2 },
+      { WarehouseCode: 'B09', InStock: 7 },
+    ];
+
+    const properties = buildB1WarehouseStockProperties(items, PRINTER_FIELDS);
+
+    expect(properties.total_onhand).toBe(17.3);
+    expect(10.1 + 0.2 + 7).not.toBe(17.3);
+  });
+
+  it('un total sin ninguna bodega declarada da 0, no el inventario entero de SAP', () => {
+    expect(buildB1WarehouseStockProperties(
+      P27020056_WAREHOUSES,
+      [{ warehouseCode: WAREHOUSE_CODE_ALL, propertyName: 'total_onhand', metric: 'inStock' }]
+    )).toEqual({ total_onhand: 0 });
+  });
+
+  it('el comodin en excludedWarehouses apaga el total dejandolo en 0', () => {
+    expect(buildB1WarehouseStockProperties(
+      P27020056_WAREHOUSES,
+      PRINTER_FIELDS,
+      ['*']
+    ).total_onhand).toBe(0);
+  });
+
+  it('la strategy lo resuelve de punta a punta desde la config cruda', () => {
+    const strategy = new B1ItemWarehouseStrategy();
+    const fields = strategy.normalizeFields([
+      { label: 'Principal', value: 'a02_onhand', valueSAP: 'A02', metric: 'inStock' },
+      { label: 'Show Room', value: 'b09_onhand', valueSAP: 'B09', metric: 'inStock' },
+      { label: 'Total', value: 'total_onhand', valueSAP: '*', metric: 'inStock' },
+    ]);
+    const record = { rawSapData: { ItemWarehouseInfoCollection: P27020056_WAREHOUSES } };
+
+    expect(strategy.buildProperties({ record, fields })).toEqual({
+      a02_onhand: 1,
+      b09_onhand: 66,
+      total_onhand: 67,
+    });
   });
 });

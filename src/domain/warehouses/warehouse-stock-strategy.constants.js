@@ -25,6 +25,13 @@ export const WAREHOUSE_STOCK_KEY = '_warehouseStock';
 // meaning "sum every stock type present for this warehouse".
 export const STOCK_TYPE_ALL = '*';
 
+// El mismo '*', en otro eje: en el `valueSAP` de una entrada de
+// fieldsWareHouseHS quiere decir "esta entrada no es una bodega, es el total de
+// las bodegas declaradas en esta misma config". Derivado de STOCK_TYPE_ALL a
+// proposito -- es el mismo comodin que ya entiende el lado S/4, y dos literales
+// separados podrian divergir. Solo lo lee la strategy de B1.
+export const WAREHOUSE_CODE_ALL = STOCK_TYPE_ALL;
+
 // Que numero de una bodega de B1 va a la propiedad de HubSpot. Es el eje
 // equivalente a stockType del lado S/4: uno por field, no por tenant, para que
 // un tenant pueda pedir tres columnas de una bodega y una sola de otra.
@@ -79,6 +86,7 @@ export default {
   DEFAULT_WAREHOUSE_STOCK_STRATEGY,
   WAREHOUSE_STOCK_KEY,
   STOCK_TYPE_ALL,
+  WAREHOUSE_CODE_ALL,
   B1_STOCK_METRICS,
   DEFAULT_B1_STOCK_METRIC,
   WAREHOUSE_METRIC_INVALID_WARNING,

@@ -10,6 +10,8 @@ import {
   B1_WAREHOUSE_STOCK_FIELDS,
   DEFAULT_B1_AVAILABLE_FORMULA,
   DEFAULT_B1_STOCK_METRIC,
+  QUANTITY_DECIMALS,
+  WAREHOUSE_CODE_ALL,
 } from '../warehouse-stock-strategy.constants.js';
 
 const DEFAULT_WAREHOUSE_FIELDS = [];
@@ -237,6 +239,42 @@ export function normalizeB1ExcludedWarehouses(value) {
   )];
 }
 
+// Mismo redondeo que la strategy de S/4 (`roundQuantity` en
+// s4-plant-storage-location.strategy.js): sumar 70 cantidades que salen de SAP
+// como texto produce ruido de punto flotante (12.000000000000002), y una
+// propiedad que cambia sola en cada corrida hace ver movido un inventario
+// quieto. Solo se aplica al total: las columnas por bodega siguen sin redondear,
+// para no mover ni un valor existente.
+function roundQuantity(value) {
+  const factor = 10 ** QUANTITY_DECIMALS;
+  return Math.round((Number(value) || 0) * factor) / factor;
+}
+
+// Las bodegas que el tenant declaro en fieldsWareHouseHS, sin las excluidas y
+// sin repetir: una bodega con tres columnas (una por metrica) aporta al total
+// una sola vez.
+//
+// El total suma este conjunto y no todo lo que traiga
+// ItemWarehouseInfoCollection, a proposito: asi cuadra exactamente con la suma
+// de las columnas que el vendedor ve en HubSpot y puede verificarlo a mano.
+// Una bodega que SAP reporta pero que nadie configuro no entra, y una bodega
+// excluida sale en 0 en su columna y tampoco entra al total.
+function collectDeclaredWarehouseCodes(warehouseFields, excludedSet) {
+  const codes = new Set();
+
+  for (const field of Array.isArray(warehouseFields) ? warehouseFields : []) {
+    const warehouseCode = field?.warehouseCode ? String(field.warehouseCode).toUpperCase() : null;
+
+    if (!warehouseCode || warehouseCode === WAREHOUSE_CODE_ALL || excludedSet.has(warehouseCode)) {
+      continue;
+    }
+
+    codes.add(warehouseCode);
+  }
+
+  return codes;
+}
+
 // Bug fix vs. the original inline version: both sides of the WarehouseCode
 // comparison are now uppercased (the SAP side used to be compared raw, so a
 // lowercase WarehouseCode from SAP silently never matched), and the missing
@@ -254,6 +292,8 @@ export function buildB1WarehouseStockProperties(
       .map((warehouse) => [String(warehouse?.WarehouseCode ?? '').toUpperCase(), warehouse])
       .filter(([warehouseCode]) => warehouseCode)
   );
+  // Se arma una sola vez y solo si hay alguna entrada total, no una por entrada.
+  let declaredCodes = null;
 
   return (Array.isArray(warehouseFields) ? warehouseFields : []).reduce((acc, field) => {
     const propertyName = field?.propertyName;
@@ -276,6 +316,29 @@ export function buildB1WarehouseStockProperties(
       availableFormula === null
       && (field.metric ?? DEFAULT_B1_STOCK_METRIC) === B1_STOCK_METRICS.AVAILABLE
     ) {
+      return acc;
+    }
+
+    // valueSAP '*': la entrada no es una bodega, es el total de las declaradas.
+    // Cae despues de los dos guards de arriba a proposito: un '*' en
+    // excludedWarehouses apaga el total dejandolo en 0, y una formula invalida
+    // omite un total `available` igual que omite las columnas `available`.
+    if (warehouseCode === WAREHOUSE_CODE_ALL) {
+      if (declaredCodes === null) {
+        declaredCodes = collectDeclaredWarehouseCodes(warehouseFields, excludedSet);
+      }
+
+      let total = 0;
+
+      for (const code of declaredCodes) {
+        total += getWarehouseMetricValue(
+          warehousesByCode.get(code),
+          field.metric,
+          availableFormula
+        );
+      }
+
+      acc[propertyName] = roundQuantity(total);
       return acc;
     }
 
