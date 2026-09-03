@@ -2,6 +2,7 @@ import {
   buildProcessHubspotConvertQuotationToOrderUseCase,
   buildProcessHubspotCreateQuotationUseCase,
   buildProcessHubspotInventoryTransferRequestUseCase,
+  buildProcessHubspotPurchaseQuotationUseCase,
   buildProcessHubspotUpdateQuotationUseCase,
   buildProcessHubspotWebhookEventUseCase,
 } from '../../../src/composition/webhook-processing.composition.js';
@@ -49,6 +50,7 @@ describe('cableado del grabador de trafico SAP', () => {
     ['updateQuotation', buildProcessHubspotUpdateQuotationUseCase],
     ['convertQuotationToOrder', buildProcessHubspotConvertQuotationToOrderUseCase],
     ['inventoryTransferRequest', buildProcessHubspotInventoryTransferRequestUseCase],
+    ['purchaseQuotation', buildProcessHubspotPurchaseQuotationUseCase],
   ];
 
   it.each(useCases)('%s recibe un grabador que si graba', async (_name, build) => {

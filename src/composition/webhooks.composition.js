@@ -47,4 +47,8 @@ export function buildInventoryTransferRequestController() {
   return buildWebhookController('inventoryTransferRequest');
 }
 
+export function buildPurchaseQuotationController() {
+  return buildWebhookController('purchaseQuotation');
+}
+
 export default buildWebhookController;

@@ -52,6 +52,8 @@ export class TenantWebhookRuntimeRepository {
       dealOrdersQuotationsMappings,
       dealInventoryTransferRequestMappings,
       productInventoryTransferRequestMappings,
+      dealPurchaseQuotationsMappings,
+      productPurchaseQuotationsMappings,
       taxCodes,
       miscPriceCalculationConfig,
       requireDiscounts,
@@ -105,6 +107,24 @@ export class TenantWebhookRuntimeRepository {
         tenantModels,
         { allowBusinessPartnerFallback: false }
       ),
+      // Purchase Quotation: every header/line field comes from this context, CardCode (the
+      // SUPPLIER) included -- this flow resolves no Business Partner. Same reason the fallback
+      // stays off as on the two contexts above: a tenant without it must get [] instead of
+      // leaking businessPartner fields into an OPQT header through the generic spread.
+      mappingService.getMappingsByObjectType(
+        hubspotCredentialId,
+        'deal',
+        'purchase-quotations',
+        tenantModels,
+        { allowBusinessPartnerFallback: false }
+      ),
+      mappingService.getMappingsByObjectType(
+        hubspotCredentialId,
+        'product',
+        'purchase-quotations',
+        tenantModels,
+        { allowBusinessPartnerFallback: false }
+      ),
       tenantConfigurationService.getValue(tenantModels, 'taxCodes', []),
       this.resolveMiscPriceCalculationConfig(tenantModels),
       tenantConfigurationService.getValue(
@@ -132,6 +152,8 @@ export class TenantWebhookRuntimeRepository {
         dealOrdersQuotationsMappings,
         dealInventoryTransferRequestMappings,
         productInventoryTransferRequestMappings,
+        dealPurchaseQuotationsMappings,
+        productPurchaseQuotationsMappings,
       },
       taxCodes,
       miscPriceCalculationConfig,

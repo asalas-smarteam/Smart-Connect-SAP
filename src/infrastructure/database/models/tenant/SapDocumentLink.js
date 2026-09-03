@@ -43,7 +43,7 @@ export const sapDocumentLinkSchema = new Schema(
     cardCode: { type: String, default: null },
     documentType: {
       type: String,
-      enum: ['quotation', 'order', 'inventoryTransferRequest'],
+      enum: ['quotation', 'order', 'inventoryTransferRequest', 'purchaseQuotation'],
       required: true,
     },
     sapObject: { type: String, default: null },

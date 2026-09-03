@@ -67,7 +67,7 @@ describe('TenantWebhookRuntimeRepository.resolveRuntimeContext — Promise.all/d
       portalId: '12345',
     });
 
-    // One assertion per mapping-service-backed destructured name (10 of the 13 entries;
+    // One assertion per mapping-service-backed destructured name (12 of the 15 entries;
     // taxCodes/miscPriceCalculationConfig/requireDiscounts come from different calls and
     // are intentionally not asserted here). If a future edit shifts any one of these out of
     // position relative to its Promise.all call, the corresponding assertion fails because it
@@ -82,10 +82,12 @@ describe('TenantWebhookRuntimeRepository.resolveRuntimeContext — Promise.all/d
     expect(context.mappings.dealOrdersQuotationsMappings).toBe('deal/orders-quotations');
     expect(context.mappings.dealInventoryTransferRequestMappings).toBe('deal/inventory-transfer-request');
     expect(context.mappings.productInventoryTransferRequestMappings).toBe('product/inventory-transfer-request');
+    expect(context.mappings.dealPurchaseQuotationsMappings).toBe('deal/purchase-quotations');
+    expect(context.mappings.productPurchaseQuotationsMappings).toBe('product/purchase-quotations');
 
     // getMappingsByObjectType is called exactly once per mapping-service-backed name above —
     // if this count drifts, the Promise.all array and the destructuring list no longer have
     // the same length and every assertion past the drift point is suspect.
-    expect(mockGetMappingsByObjectType).toHaveBeenCalledTimes(10);
+    expect(mockGetMappingsByObjectType).toHaveBeenCalledTimes(12);
   });
 });

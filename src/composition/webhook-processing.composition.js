@@ -1,6 +1,7 @@
 import ProcessHubspotConvertQuotationToOrder from '#application/use-cases/ProcessHubspotConvertQuotationToOrder.js';
 import ProcessHubspotCreateQuotation from '#application/use-cases/ProcessHubspotCreateQuotation.js';
 import ProcessHubspotInventoryTransferRequest from '#application/use-cases/ProcessHubspotInventoryTransferRequest.js';
+import ProcessHubspotPurchaseQuotation from '#application/use-cases/ProcessHubspotPurchaseQuotation.js';
 import ProcessHubspotUpdateQuotation from '#application/use-cases/ProcessHubspotUpdateQuotation.js';
 import ProcessHubspotWebhookEvent from '#application/use-cases/ProcessHubspotWebhookEvent.js';
 import ProcessWebhookDealEventBatch from '#application/use-cases/ProcessWebhookDealEventBatch.js';
@@ -23,6 +24,7 @@ import logger from '#infrastructure/logger/logger.adapter.js';
 import MongooseWebhookEventRepository from '#infrastructure/repositories/MongooseWebhookEventRepository.js';
 import SapWebhookInventoryTransferRequestAdapter from '#infrastructure/sap/SapWebhookInventoryTransferRequestAdapter.js';
 import SapWebhookOrderAdapter from '#infrastructure/sap/SapWebhookOrderAdapter.js';
+import SapWebhookPurchaseQuotationAdapter from '#infrastructure/sap/SapWebhookPurchaseQuotationAdapter.js';
 import { createSapCallRecorder } from '#infrastructure/sap/sapCallRecorder.js';
 import SapWebhookQuotationAdapter from '#infrastructure/sap/SapWebhookQuotationAdapter.js';
 import { PermanentWebhookError } from '#shared/errors/index.js';
@@ -129,6 +131,24 @@ export function buildProcessHubspotInventoryTransferRequestUseCase() {
   });
 }
 
+// Deliberately thinner than the factories above: this flow has no Business Partner step, so it
+// needs no sapOrderAdapter, no webhookReferenceRepository and no payload strategy factory. Its
+// CardCode is a SUPPLIER that comes from a FieldMapping — see
+// purchase-quotation-builder.service.js for why reusing the BP path would be wrong here.
+export function buildProcessHubspotPurchaseQuotationUseCase() {
+  return new ProcessHubspotPurchaseQuotation({
+    runtimeRepository: new TenantWebhookRuntimeRepository(),
+    sapPurchaseQuotationAdapter: new SapWebhookPurchaseQuotationAdapter(),
+    hubspotWebhookAdapter: new HubspotWebhookAdapter(),
+    sapDocumentLinkRepository: new MongooseSapDocumentLinkRepository(),
+    buildWebhookSyncErrorEntry,
+    buildErrorResponseSnapshot,
+    buildWebhookSapAudit,
+    createSapCallRecorder,
+    logger,
+  });
+}
+
 // Routes each claimed webhook event to the right use case by its eventType. An eventType
 // that is absent (legacy events queued before the field existed) falls back to the
 // createDeal flow. An eventType that is present but unrecognized fails loudly instead of
@@ -141,6 +161,7 @@ export function buildWebhookEventDispatcher({
   processHubspotUpdateQuotation = buildProcessHubspotUpdateQuotationUseCase(),
   processHubspotConvertQuotationToOrder = buildProcessHubspotConvertQuotationToOrderUseCase(),
   processHubspotInventoryTransferRequest = buildProcessHubspotInventoryTransferRequestUseCase(),
+  processHubspotPurchaseQuotation = buildProcessHubspotPurchaseQuotationUseCase(),
 } = {}) {
   const handlers = {
     createDeal: processHubspotWebhookEvent,
@@ -148,6 +169,7 @@ export function buildWebhookEventDispatcher({
     updateQuotation: processHubspotUpdateQuotation,
     convertQuotationToOrder: processHubspotConvertQuotationToOrder,
     inventoryTransferRequest: processHubspotInventoryTransferRequest,
+    purchaseQuotation: processHubspotPurchaseQuotation,
   };
 
   return async (input) => {

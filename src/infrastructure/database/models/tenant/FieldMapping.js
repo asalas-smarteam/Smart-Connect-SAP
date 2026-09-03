@@ -26,6 +26,10 @@ export const fieldMappingSchema = new Schema(
         'ItemWarehouseInfoCollection',
         'orders-quotations',
         'inventory-transfer-request',
+        // Purchase Quotation (OPQT). Contexto propio y no reutiliza orders-quotations a
+        // proposito: es un documento de COMPRA, su CardCode es un proveedor y sus campos de
+        // cabecera/linea no son los mismos que los de venta.
+        'purchase-quotations',
       ],
       default: '',
     },

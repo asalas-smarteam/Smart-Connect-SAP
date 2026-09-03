@@ -1,4 +1,9 @@
-const ALLOWED_OPERATORS = ['eq', 'ne', 'ne_or_null', 'ge', 'startswith', 'not_startswith'];
+import { SAP_FILTER_OPERATORS } from '#domain/sap/sap-filter.constants.js';
+
+// Se reusa la lista del dominio en vez de duplicarla: una copia local se desincroniza
+// del enum de los modelos y de los builders, y el sintoma es un filtro que la API
+// acepta y Mongo guarda pero que revienta recien al armar la URL, en plena corrida.
+const ALLOWED_OPERATORS = SAP_FILTER_OPERATORS;
 const FILTER_CONTROLLED_FIELDS = ['isDefault', 'isDynamic', 'editable'];
 
 export function normalizeFilterKey(filter) {
@@ -33,6 +38,13 @@ export function sanitizeIncomingCustomFilters(filters) {
     const property = String(filter.property || '').trim();
     if (!property) {
       throw new Error(`filters[${index}].property is required`);
+    }
+
+    // 'in' es el unico operador que lleva arreglo. Sin este guard un value escalar o
+    // una lista vacia se guardan igual y solo fallan al construir el $filter, ya
+    // corriendo la tarea; aca el error sale en el request que lo configura.
+    if (operator === 'in' && (!Array.isArray(filter.value) || filter.value.length === 0)) {
+      throw new Error(`filters[${index}].value must be a non-empty array when operator is 'in'`);
     }
 
     return {

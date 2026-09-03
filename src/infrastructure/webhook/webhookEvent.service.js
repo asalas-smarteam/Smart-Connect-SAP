@@ -18,6 +18,7 @@ export const DEDUPLICATED_EVENT_TYPES = new Set([
   'createQuotation',
   'convertQuotationToOrder',
   'inventoryTransferRequest',
+  'purchaseQuotation',
 ]);
 
 function normalizeDealId(payload) {

@@ -330,6 +330,24 @@ describe('SERVICE_LAYER configuration flow', () => {
     delete process.env.COMPANY_ADD_FIELDS_URL_SAP;
   });
 
+  // 'in' pasó de ser S/4-only a estar soportado en B1: OData v2 no lo tiene, así que
+  // se emite como grupo OR entre paréntesis. Ver serviceLayerUrlBuilderItemGroups.test.js
+  // para la cobertura completa del operador.
+  it('renders an in filter as an OR group', () => {
+    const url = buildServiceLayerUrl(
+      {
+        integrationModeName: 'SERVICE_LAYER',
+        serviceLayerBaseUrl: 'https://201.7.208.10:23052',
+        serviceLayerPath: '/BusinessPartners',
+        filters: [{ property: 'GroupCode', operator: 'in', value: ['100', '101'] }],
+      },
+      [{ sourceField: 'CardCode' }]
+    );
+
+    expect(decodeURIComponent(url.split('$filter=')[1].split('&')[0]))
+      .toBe("(GroupCode eq '100' or GroupCode eq '101')");
+  });
+
   it('throws when filter has invalid operator', () => {
     expect(() =>
       buildServiceLayerUrl(
@@ -337,13 +355,11 @@ describe('SERVICE_LAYER configuration flow', () => {
           integrationModeName: 'SERVICE_LAYER',
           serviceLayerBaseUrl: 'https://201.7.208.10:23052',
           serviceLayerPath: '/BusinessPartners',
-          // 'in' es válido solo en el builder de S/4; el de B1 debe rechazarlo
-          // en vez de ignorar el filtro en silencio.
-          filters: [{ property: 'GroupCode', operator: 'in', value: ['100', '101'] }],
+          filters: [{ property: 'GroupCode', operator: 'like', value: '100' }],
         },
         [{ sourceField: 'CardCode' }]
       )
-    ).toThrow('Unsupported SAP filter operator: in');
+    ).toThrow('Unsupported SAP filter operator: like');
   });
 
 });

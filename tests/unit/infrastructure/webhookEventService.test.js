@@ -33,12 +33,13 @@ describe('DEDUPLICATED_EVENT_TYPES', () => {
   // updateQuotation NO está a propósito: una cotización se actualiza muchas veces y cada
   // envío es legítimo. Agregarlo bloquearía la segunda actualización de una cotización que ya
   // sincronizó bien, porque su evento anterior quedó `completed`.
-  it('cubre los cuatro tipos deduplicados y deja updateQuotation afuera', () => {
+  it('cubre los cinco tipos deduplicados y deja updateQuotation afuera', () => {
     expect([...DEDUPLICATED_EVENT_TYPES].sort()).toEqual([
       'convertQuotationToOrder',
       'createDeal',
       'createQuotation',
       'inventoryTransferRequest',
+      'purchaseQuotation',
     ]);
     expect(DEDUPLICATED_EVENT_TYPES.has('updateQuotation')).toBe(false);
   });

@@ -241,6 +241,34 @@ export function buildServiceLayerUrl(clientConfig, mappings, options = {}) {
           conditions.push(`(${property} eq null or ${property} ne ${normalizedValue})`);
           return;
         }
+        case 'in': {
+          // OData v2 no tiene `in`: se renderiza como grupo OR, igual que en el builder
+          // de S/4. El parentesis es obligatorio — sin el, el `and` que une los demas
+          // filtros se aplicaria solo al ultimo miembro del OR y la consulta traeria
+          // registros fuera del conjunto pedido.
+          const values = Array.isArray(value) ? value : [value];
+          const members = values
+            .filter((entry) => entry !== null
+              && typeof entry !== 'undefined'
+              && String(entry).trim() !== '')
+            .map((entry) => {
+              // Los codigos numericos (ItemsGroupCode es Edm.Int32) viajan sin comillas:
+              // B1 rechaza el request si se los compara contra un literal string. Ojo que
+              // no se puede usar cleanValue() para descartar vacios, porque `0` y `false`
+              // caen en su `value || ''` y se perderian miembros validos del OR.
+              const literal = typeof entry === 'number' || typeof entry === 'boolean'
+                ? String(entry)
+                : `'${String(entry).replace(/'/g, "''")}'`;
+              return `${property} eq ${literal}`;
+            });
+
+          if (members.length === 0) {
+            throw new Error(`Filter at index ${index} requires at least one value for 'in'`);
+          }
+
+          conditions.push(members.length === 1 ? members[0] : `(${members.join(' or ')})`);
+          return;
+        }
         case 'ge': {
           // Time values (SAP UpdateTime Edm.String 'HH:mm:ss') are compared as quoted strings.
           const geValue = dynamicType === 'time'
