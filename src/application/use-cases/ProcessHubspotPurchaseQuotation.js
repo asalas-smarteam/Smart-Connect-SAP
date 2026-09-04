@@ -115,8 +115,12 @@ export class ProcessHubspotPurchaseQuotation {
         logger: this.logger,
       });
 
+      const documentDefaults = await this.runtimeRepository
+        .resolvePurchaseQuotationDefaults(tenantModels);
+
       const purchaseQuotationPayload = buildPurchaseQuotationPayload({
         mappedDealFields: mappedDeal,
+        documentDefaults,
         documentLines,
         slpCode,
       });

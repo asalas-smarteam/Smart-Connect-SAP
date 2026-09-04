@@ -11,6 +11,10 @@ import {
   DEFAULT_PHONE_NORMALIZATION_CONFIG,
   normalizePhoneNormalizationConfig,
 } from '#domain/sap/hubspot-phone-fields.constants.js';
+import {
+  isOwnerFieldMapping,
+  translateSapOwnerValue,
+} from '#domain/owners/owner-directory.service.js';
 
 const SAP_BOOLEAN_FIELD_SET = new Set(
   SAP_BOOLEAN_SOURCE_FIELDS.map((field) => field.toLowerCase())
@@ -280,7 +284,17 @@ export function resolveValueByPath(inputData, sourceField, options = {}) {
 // `phoneConfig` ausente = conducta histórica: solo se normaliza `phone` y solo
 // lo cosmético. Se normaliza la forma acá y no en cada llamador para que un
 // documento a medio llenar no llegue crudo al normalizador.
-export function buildMappedProperties({ input, mappings, fallbackConfig = null, phoneConfig = null }) {
+// `ownerDirectory` ausente = sin traducción de usuarios, que es la conducta que
+// tenía todo tenant antes de que existiera `userField` (y la que sigue teniendo
+// S/4: el directorio solo se carga para B1).
+export function buildMappedProperties({
+  input,
+  mappings,
+  fallbackConfig = null,
+  phoneConfig = null,
+  ownerDirectory = null,
+  onUnresolvedOwner = null,
+}) {
   const properties = {};
   const chainEnabled = fallbackConfig?.enabled === true;
   const resolvedPhoneConfig = phoneConfig
@@ -305,6 +319,28 @@ export function buildMappedProperties({ input, mappings, fallbackConfig = null, 
     }
 
     const value = resolveValueByPath(input, mapping.sourceField, options);
+
+    // Los campos de usuario se resuelven acá y no en el normalizador de abajo
+    // porque no son una normalización de formato: el valor se REEMPLAZA por
+    // otro que sale de OwnerMappings, y cuando no hay equivalencia la clave no
+    // se emite. Un `null` en su lugar borraría en HubSpot el propietario que
+    // alguien puso a mano, y mandar el código de SAP tal cual (600) hace que
+    // HubSpot rechace el registro completo con 400.
+    if (ownerDirectory && isOwnerFieldMapping(mapping)) {
+      const translation = translateSapOwnerValue({ value, directory: ownerDirectory });
+
+      if (translation.status === 'unresolved') {
+        onUnresolvedOwner?.({
+          sourceField: mapping.sourceField,
+          targetField,
+          value,
+        });
+        continue;
+      }
+
+      properties[targetField] = translation.value;
+      continue;
+    }
 
     // Se normaliza ANTES de asignar, no después: así un teléfono inválido queda
     // en null, hasMappedValue(null) es false y el siguiente eslabón de la cadena

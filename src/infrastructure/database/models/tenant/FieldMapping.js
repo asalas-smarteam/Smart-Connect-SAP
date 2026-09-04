@@ -54,6 +54,25 @@ export const fieldMappingSchema = new Schema(
       type: Boolean,
       default: true,
     },
+    // El valor de este mapeo es un USUARIO, no un dato: en SAP viaja el código
+    // del empleado de ventas (SalesPersonCode = 600) y en HubSpot el ownerId
+    // del portal (123123123). Con el flag en true la integración traduce el
+    // valor contra la colección OwnerMappings.
+    //
+    // Solo aplica de SAP -> HubSpot (tareas programadas) y solo en tenants B1.
+    // La dirección inversa (webhooks que crean BusinessPartners o documentos)
+    // queda fuera por decisión explícita, así que marcar un mapeo de esos
+    // contextos no tiene efecto.
+    //
+    // Es una marca POR MAPEO y no una lista de campos por tenant a propósito:
+    // el mismo `SalesPersonCode` alimenta `propietario_del_contacto_resma_tmk`
+    // (propiedad de tipo OWNER, necesita el ownerId) y `slpcode` (un número
+    // suelto que debe llegar sin tocar), así que la decisión no se puede tomar
+    // por nombre de campo. Ver src/domain/owners/owner-directory.service.js.
+    userField: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: false,

@@ -4,6 +4,7 @@ import TenantFieldMappingRepository from '#infrastructure/database/repositories/
 import TenantMappingManagementRepository from '#infrastructure/database/repositories/TenantMappingManagementRepository.js';
 import DynamicDescriptionConfigRepository from '#infrastructure/config/DynamicDescriptionConfigRepository.js';
 import PhoneNormalizationConfigRepository from '#infrastructure/config/PhoneNormalizationConfigRepository.js';
+import OwnerDirectoryRepository from '#infrastructure/database/repositories/OwnerDirectoryRepository.js';
 
 export function buildManageFieldMappings() {
   const fieldMappingRepository = new TenantFieldMappingRepository();
@@ -11,6 +12,7 @@ export function buildManageFieldMappings() {
     fieldMappingRepository,
     dynamicDescriptionConfigRepository: new DynamicDescriptionConfigRepository(),
     phoneNormalizationConfigRepository: new PhoneNormalizationConfigRepository(),
+    ownerDirectoryRepository: new OwnerDirectoryRepository(),
   });
   const mappingManagementRepository = new TenantMappingManagementRepository();
 

@@ -24,6 +24,7 @@ export class ManageFieldMappings {
       clientConfigId,
       sourceContext,
       includeInServiceLayerSelect,
+      userField,
     } = payload;
     const resolvedSourceContext = resolveSourceContext(objectType, sourceContext);
     const config = await this.mappingManagementRepository.findActiveClientConfig({
@@ -65,6 +66,10 @@ export class ManageFieldMappings {
         hubspotCredentialId: config.hubspotCredentialId,
         sourceContext: resolvedSourceContext,
         includeInServiceLayerSelect,
+        // El valor de este mapeo es un usuario y hay que homologarlo contra
+        // OwnerMappings. Se normaliza a booleano para que un 'true' de un form
+        // no quede guardado como string y `userField === true` lo ignore.
+        userField: userField === true || userField === 'true',
       },
     });
 
@@ -80,6 +85,7 @@ export class ManageFieldMappings {
       clientConfigId,
       hubspotCredentialId,
       includeInServiceLayerSelect,
+      userField,
     } = payload;
 
     if (!sourceContext) {
@@ -101,6 +107,7 @@ export class ManageFieldMappings {
           clientConfigId,
           hubspotCredentialId,
           includeInServiceLayerSelect,
+          userField: userField === true || userField === 'true',
         },
       });
 

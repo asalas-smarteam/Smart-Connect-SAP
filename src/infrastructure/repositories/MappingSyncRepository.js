@@ -3,6 +3,7 @@ import DynamicDescriptionConfigRepository from '#infrastructure/config/DynamicDe
 import MappingFallbackConfigRepository from '#infrastructure/config/MappingFallbackConfigRepository.js';
 import PhoneNormalizationConfigRepository from '#infrastructure/config/PhoneNormalizationConfigRepository.js';
 import SapFlavorConfigRepository from '#infrastructure/config/SapFlavorConfigRepository.js';
+import OwnerDirectoryRepository from '#infrastructure/database/repositories/OwnerDirectoryRepository.js';
 import { SAP_FLAVORS } from '#domain/sap/sap-flavor.constants.js';
 import { applyDynamicDescription } from '#domain/sync/dynamic-description.service.js';
 import { DEFAULT_INVOICE_MAPPINGS } from '#application/services/defaultClientConfigMappings.service.js';
@@ -65,6 +66,9 @@ function toMappingDto(mapping) {
     sourceContext: mapping?.sourceContext ?? null,
     includeInServiceLayerSelect: mapping?.includeInServiceLayerSelect,
     isActive: mapping?.isActive ?? true,
+    // Sin esto el DTO borraría la marca y buildMappedProperties nunca vería un
+    // solo campo de usuario: este repositorio no le pasa los documentos crudos.
+    userField: mapping?.userField === true,
   };
 }
 
@@ -75,13 +79,17 @@ function mapFields(
   dynamicDescriptionConfig = null,
   sourceContext = null,
   fallbackConfig = null,
-  phoneConfig = null
+  phoneConfig = null,
+  ownerDirectory = null,
+  onUnresolvedOwner = null
 ) {
   const properties = buildMappedProperties({
     input: inputData ?? {},
     mappings,
     fallbackConfig,
     phoneConfig,
+    ownerDirectory,
+    onUnresolvedOwner,
   });
 
   // Runs after the 1:1 pass so a composed value deliberately overwrites the
@@ -115,12 +123,16 @@ export class MappingSyncRepository {
     mappingFallbackConfigRepository = new MappingFallbackConfigRepository(),
     phoneNormalizationConfigRepository = new PhoneNormalizationConfigRepository(),
     sapFlavorConfigRepository = new SapFlavorConfigRepository(),
+    ownerDirectoryRepository = new OwnerDirectoryRepository(),
+    logger = console,
   } = {}) {
     this.fieldMappingRepository = fieldMappingRepository;
     this.dynamicDescriptionConfigRepository = dynamicDescriptionConfigRepository;
     this.mappingFallbackConfigRepository = mappingFallbackConfigRepository;
     this.phoneNormalizationConfigRepository = phoneNormalizationConfigRepository;
     this.sapFlavorConfigRepository = sapFlavorConfigRepository;
+    this.ownerDirectoryRepository = ownerDirectoryRepository;
+    this.logger = logger;
   }
 
   async mapRecords({ sapRecords, hubspotCredentialId, objectType, tenantContext, sourceContext }) {
@@ -141,11 +153,33 @@ export class MappingSyncRepository {
     }
 
     // Read once per run, not per record.
-    const [dynamicDescriptionConfig, fallbackConfig, phoneConfig] = await Promise.all([
+    const [dynamicDescriptionConfig, fallbackConfig, phoneConfig, ownerDirectory] = await Promise.all([
       this.getDynamicDescriptionConfig({ tenantContext }),
       this.getMappingFallbackConfig({ tenantContext }),
       this.getPhoneNormalizationConfig({ tenantContext }),
+      this.getOwnerDirectory({ tenantContext, hubspotCredentialId }),
     ]);
+
+    // Se avisa una sola vez por código de SAP y por corrida: sin el dedupe, un
+    // vendedor sin homologar deja una línea de log por cada registro que le
+    // pertenece y el aviso se vuelve invisible entre miles de repeticiones.
+    const reportedOwners = new Set();
+    const onUnresolvedOwner = ({ sourceField, targetField, value }) => {
+      const key = `${targetField}:${value}`;
+
+      if (reportedOwners.has(key)) {
+        return;
+      }
+
+      reportedOwners.add(key);
+      this.logger?.warn?.({
+        msg: 'Campo de usuario omitido: el código de SAP no está homologado en OwnerMappings',
+        objectType,
+        sapField: sourceField,
+        hubspotProperty: targetField,
+        sapOwnerId: value,
+      });
+    };
 
     return sapRecords.map(
       (record) => mapFields(
@@ -155,9 +189,22 @@ export class MappingSyncRepository {
         dynamicDescriptionConfig,
         resolvedSourceContext,
         fallbackConfig,
-        phoneConfig
+        phoneConfig,
+        ownerDirectory,
+        onUnresolvedOwner
       )
     );
+  }
+
+  async getOwnerDirectory({ tenantContext, hubspotCredentialId }) {
+    if (typeof this.ownerDirectoryRepository?.loadOwnerDirectory !== 'function') {
+      return null;
+    }
+
+    return this.ownerDirectoryRepository.loadOwnerDirectory({
+      tenantModels: tenantContext?.tenantModels,
+      hubspotCredentialId,
+    });
   }
 
   async getPhoneNormalizationConfig({ tenantContext }) {

@@ -39,6 +39,7 @@ function buildRuntimeRepository(context = buildContext()) {
   return {
     resolveRuntimeContext: jest.fn().mockResolvedValue(context),
     findOwnerMappingByHubspotOwner: jest.fn().mockResolvedValue(null),
+    resolvePurchaseQuotationDefaults: jest.fn().mockResolvedValue({}),
   };
 }
 
@@ -170,6 +171,38 @@ describe('buildPurchaseQuotationPayload', () => {
     expect(payload.DocumentLines).toBe(documentLines);
   });
 
+  // Los defaults son constantes del documento (U_TIPOOFECOMPRA = 3), no datos del deal:
+  // ganan sobre el valor mapeado, igual que los defaults de BusinessPartner/ContactEmployee.
+  it('aplica documentDefaults y les da precedencia sobre lo mapeado', () => {
+    const payload = buildPurchaseQuotationPayload({
+      mappedDealFields: { CardCode: 'PR000123', U_TIPOOFECOMPRA: '9' },
+      documentDefaults: { U_TIPOOFECOMPRA: 3 },
+      documentLines,
+    });
+
+    expect(payload.U_TIPOOFECOMPRA).toBe(3);
+  });
+
+  it('sin documentDefaults el payload queda igual que antes', () => {
+    expect(buildPurchaseQuotationPayload({
+      mappedDealFields: { CardCode: 'PR000123' },
+      documentLines,
+    })).toEqual({ CardCode: 'PR000123', DocumentLines: documentLines });
+  });
+
+  // DocumentLines se asigna DESPUES del spread de defaults, asi que una configuracion
+  // mal escrita no puede reemplazar las lineas reales del deal.
+  it('un default no puede pisar DocumentLines ni inyectar StockTransferLines', () => {
+    const payload = buildPurchaseQuotationPayload({
+      mappedDealFields: { CardCode: 'PR000123' },
+      documentDefaults: { DocumentLines: [{ ItemCode: 'FAKE' }], StockTransferLines: [{ ItemCode: 'X' }] },
+      documentLines,
+    });
+
+    expect(payload.DocumentLines).toBe(documentLines);
+    expect(payload).not.toHaveProperty('StockTransferLines');
+  });
+
   it('aplica SalesPersonCode solo cuando el OwnerMapping resolvió un entero', () => {
     expect(buildPurchaseQuotationPayload({
       mappedDealFields: { CardCode: 'PR000123' },
@@ -249,6 +282,20 @@ describe('ProcessHubspotPurchaseQuotation', () => {
     expect(error.message).toMatch(/CardCode/);
     expect(deps.sapPurchaseQuotationAdapter.createPurchaseQuotation).not.toHaveBeenCalled();
     expect(deps.sapDocumentLinkRepository.create).not.toHaveBeenCalled();
+  });
+
+  it('inyecta en la cabecera los defaults configurados del tenant', async () => {
+    const deps = buildDeps();
+    deps.runtimeRepository.resolvePurchaseQuotationDefaults
+      .mockResolvedValue({ U_TIPOOFECOMPRA: 3 });
+    const useCase = new ProcessHubspotPurchaseQuotation(deps);
+
+    await useCase.execute({ event: baseEvent, tenantModels });
+
+    const { purchaseQuotationPayload } = deps.sapPurchaseQuotationAdapter
+      .createPurchaseQuotation.mock.calls[0][0];
+
+    expect(purchaseQuotationPayload.U_TIPOOFECOMPRA).toBe(3);
   });
 
   it('guarda el link con el ObjectType de OPQT', async () => {

@@ -6,6 +6,11 @@ import {
   normalizeSapErrorBypassConfig,
 } from '#infrastructure/config/sapErrorBypass.config.js';
 import { getUpsertDataSapConfig } from '#infrastructure/config/upsertDataSap.config.js';
+import {
+  DEFAULT_PURCHASE_QUOTATION_DEFAULTS,
+  PURCHASE_QUOTATION_DEFAULTS_CONFIG_KEY,
+  normalizePurchaseQuotationDefaults,
+} from '#infrastructure/config/purchaseQuotationDefaults.config.js';
 import { resolvePriceListFromConfigValue } from '#domain/prices/price-list-config.service.js';
 import { PermanentWebhookError } from '#shared/errors/index.js';
 import { normalizePositiveInteger, toNonEmptyString } from '#shared/utils/string.utils.js';
@@ -204,6 +209,19 @@ export class TenantWebhookRuntimeRepository {
     );
 
     return normalizeSapErrorBypassConfig(value);
+  }
+
+  // Constantes de cabecera de la Purchase Quotation que no salen de ninguna propiedad de
+  // HubSpot (U_TIPOOFECOMPRA = 3). Por default vacío: un tenant que no configuró la key manda
+  // el documento exactamente como lo mapeó, sin campos agregados.
+  async resolvePurchaseQuotationDefaults(tenantModels) {
+    const value = await tenantConfigurationService.getValue(
+      tenantModels,
+      PURCHASE_QUOTATION_DEFAULTS_CONFIG_KEY,
+      { ...DEFAULT_PURCHASE_QUOTATION_DEFAULTS }
+    );
+
+    return normalizePurchaseQuotationDefaults(value);
   }
 
   async resolveGroupCodeDefaults(tenantModels) {

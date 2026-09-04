@@ -61,8 +61,14 @@ export function mapPurchaseQuotationLines({ lineItems, lineMappings }) {
 // document with an opaque error. SalesPersonCode is applied last, as the single exception to
 // the mapping-only rule, and only when the OwnerMapping resolved one — otherwise a mapped
 // SalesPersonCode is left untouched.
+// `documentDefaults` cubre los campos que son una CONSTANTE del negocio y no un dato del deal
+// (U_TIPOOFECOMPRA = 3 para el printer): la capa de mapeo solo sabe leer valores del payload de
+// HubSpot, así que una constante no se puede expresar como FieldMapping. Vienen de la
+// configuración del tenant y GANAN sobre el valor mapeado, misma precedencia que los defaults de
+// BusinessPartner/ContactEmployee: si es una constante del documento, un deal no la discute.
 export function buildPurchaseQuotationPayload({
   mappedDealFields = {},
+  documentDefaults = {},
   documentLines,
   slpCode = null,
 }) {
@@ -72,9 +78,10 @@ export function buildPurchaseQuotationPayload({
     );
   }
 
-  const payload = { ...mappedDealFields };
+  const payload = { ...mappedDealFields, ...documentDefaults };
   // Guard: a mapping copied from the inventory transfer flow must not inject the stock
-  // transfer lines collection into a purchasing document.
+  // transfer lines collection into a purchasing document. Va después del spread de los
+  // defaults, así que tampoco un default puede meterla.
   delete payload.StockTransferLines;
 
   const cardCode = toNonEmptyString(payload.CardCode);

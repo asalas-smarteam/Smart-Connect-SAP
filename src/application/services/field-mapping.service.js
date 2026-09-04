@@ -27,7 +27,9 @@ function mapFields(
   dynamicDescriptionConfig = null,
   sourceContext = null,
   fallbackConfig = null,
-  phoneConfig = null
+  phoneConfig = null,
+  ownerDirectory = null,
+  onUnresolvedOwner = null
 ) {
   const resolvedInput = inputData ?? {};
   const result = buildMappedProperties({
@@ -35,6 +37,8 @@ function mapFields(
     mappings,
     fallbackConfig,
     phoneConfig,
+    ownerDirectory,
+    onUnresolvedOwner,
   });
 
   // Runs after the 1:1 pass so a composed value deliberately overwrites the
@@ -67,13 +71,57 @@ export class FieldMappingService {
     dynamicDescriptionConfigRepository = null,
     mappingFallbackConfigRepository = null,
     phoneNormalizationConfigRepository = null,
+    ownerDirectoryRepository = null,
     logger = console,
   }) {
     this.fieldMappingRepository = fieldMappingRepository;
     this.dynamicDescriptionConfigRepository = dynamicDescriptionConfigRepository;
     this.mappingFallbackConfigRepository = mappingFallbackConfigRepository;
     this.phoneNormalizationConfigRepository = phoneNormalizationConfigRepository;
+    this.ownerDirectoryRepository = ownerDirectoryRepository;
     this.logger = logger;
+  }
+
+  // Sin repositorio inyectado no se traduce nada: el servicio se construye en
+  // cuatro composiciones y una que quede sin la dependencia debe seguir
+  // funcionando como antes, no romperse.
+  async getOwnerDirectory(hubspotCredentialId, tenantModels) {
+    if (typeof this.ownerDirectoryRepository?.loadOwnerDirectory !== 'function') {
+      return null;
+    }
+
+    try {
+      return await this.ownerDirectoryRepository.loadOwnerDirectory({
+        tenantModels,
+        hubspotCredentialId,
+      });
+    } catch (error) {
+      this.logger.error?.('Failed to fetch owner directory:', error);
+      return null;
+    }
+  }
+
+  // Un aviso por (propiedad, código de SAP) y por corrida. Repetirlo por
+  // registro llenaría el log con miles de líneas idénticas.
+  buildUnresolvedOwnerReporter(objectType) {
+    const reported = new Set();
+
+    return ({ sourceField, targetField, value }) => {
+      const key = `${targetField}:${value}`;
+
+      if (reported.has(key)) {
+        return;
+      }
+
+      reported.add(key);
+      this.logger.warn?.({
+        msg: 'Campo de usuario omitido: el código de SAP no está homologado en OwnerMappings',
+        objectType,
+        sapField: sourceField,
+        hubspotProperty: targetField,
+        sapOwnerId: value,
+      });
+    };
   }
 
   // Returns null (conducta histórica: solo se limpia lo cosmético de `phone`)
@@ -177,11 +225,13 @@ export class FieldMappingService {
       }
 
       // Read once per batch, not per record.
-      const [dynamicDescriptionConfig, fallbackConfig, phoneConfig] = await Promise.all([
+      const [dynamicDescriptionConfig, fallbackConfig, phoneConfig, ownerDirectory] = await Promise.all([
         this.getDynamicDescriptionConfig(tenantModels),
         this.getMappingFallbackConfig(tenantModels),
         this.getPhoneNormalizationConfig(tenantModels),
+        this.getOwnerDirectory(hubspotCredentialId, tenantModels),
       ]);
+      const onUnresolvedOwner = this.buildUnresolvedOwnerReporter(objectType);
 
       return records.map(
         (record) => mapFields(
@@ -191,7 +241,9 @@ export class FieldMappingService {
           dynamicDescriptionConfig,
           resolvedSourceContext,
           fallbackConfig,
-          phoneConfig
+          phoneConfig,
+          ownerDirectory,
+          onUnresolvedOwner
         )
       );
     } catch (error) {
@@ -257,10 +309,11 @@ export class FieldMappingService {
       // La config de teléfono también acá: este es el endpoint con el que se
       // prueba un mapeo, y una prueba que no normaliza igual que el sync real
       // hace perder la tarde buscando una diferencia que no existe.
-      const [mappings, dynamicDescriptionConfig, phoneConfig] = await Promise.all([
+      const [mappings, dynamicDescriptionConfig, phoneConfig, ownerDirectory] = await Promise.all([
         this.getMappings(hubspotCredentialId, objectType, tenantModels, sourceContext),
         this.getDynamicDescriptionConfig(tenantModels),
         this.getPhoneNormalizationConfig(tenantModels),
+        this.getOwnerDirectory(hubspotCredentialId, tenantModels),
       ]);
 
       return mapFields(
@@ -270,7 +323,9 @@ export class FieldMappingService {
         dynamicDescriptionConfig,
         resolveSourceContext(objectType, sourceContext),
         null,
-        phoneConfig
+        phoneConfig,
+        ownerDirectory,
+        this.buildUnresolvedOwnerReporter(objectType)
       );
     } catch (error) {
       this.logger.error?.('Failed to apply mappings:', error);

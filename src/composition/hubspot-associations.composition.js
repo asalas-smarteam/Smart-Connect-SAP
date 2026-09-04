@@ -7,6 +7,7 @@ import MongooseSyncWarningRepository from '#infrastructure/database/repositories
 import TenantFieldMappingRepository from '#infrastructure/database/repositories/TenantFieldMappingRepository.js';
 import DynamicDescriptionConfigRepository from '#infrastructure/config/DynamicDescriptionConfigRepository.js';
 import PhoneNormalizationConfigRepository from '#infrastructure/config/PhoneNormalizationConfigRepository.js';
+import OwnerDirectoryRepository from '#infrastructure/database/repositories/OwnerDirectoryRepository.js';
 import HubspotAssociationFetchAdapter from '#infrastructure/hubspot/HubspotAssociationFetchAdapter.js';
 import associationRegistryService from '#infrastructure/hubspot/associationRegistryService.js';
 import associationService from '#infrastructure/hubspot/associationService.js';
@@ -23,6 +24,7 @@ export function buildHandleHubspotAssociations() {
       fieldMappingRepository: new TenantFieldMappingRepository(),
       dynamicDescriptionConfigRepository: new DynamicDescriptionConfigRepository(),
       phoneNormalizationConfigRepository: new PhoneNormalizationConfigRepository(),
+      ownerDirectoryRepository: new OwnerDirectoryRepository(),
     }),
     contactHandler,
     fallbackEmailGenerator: generateFallbackEmail,
