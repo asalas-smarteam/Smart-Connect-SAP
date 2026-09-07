@@ -11,7 +11,11 @@ const mockLoggerError = jest.fn();
 jest.unstable_mockModule('../../src/infrastructure/queue/sapSync.queue.js', () => ({
   SAP_SYNC_JOB_NAME: 'sap-sync-job',
   addScheduledSapSyncJob: mockAddScheduledSapSyncJob,
-  buildScheduledJobId: ({ tenantKey, configId }) => `sap-sync:${tenantKey}:${String(configId)}`,
+  buildScheduledJobId: ({ tenantKey, configId, slotIndex = null }) => (
+    Number.isInteger(slotIndex)
+      ? `sap-sync:${tenantKey}:${String(configId)}:${slotIndex}`
+      : `sap-sync:${tenantKey}:${String(configId)}`
+  ),
   getSapSyncQueue: mockGetSapSyncQueue,
 }));
 
@@ -161,6 +165,120 @@ describe('sapSyncScheduler.service', () => {
     }));
   });
 
+  it('registers one scheduler per hour for a multi-hour FULL config', async () => {
+    const queue = {
+      getRepeatableJobs: jest.fn().mockResolvedValue([]),
+      getJobSchedulers: jest.fn().mockResolvedValue([]),
+      removeRepeatableByKey: jest.fn(),
+      removeJobScheduler: jest.fn(),
+    };
+    mockGetSapSyncQueue.mockReturnValue(queue);
+    mockAddScheduledSapSyncJob.mockResolvedValue({ id: 'scheduled-job' });
+
+    const config = {
+      _id: 'cfg-printer',
+      active: true,
+      mode: 'FULL',
+      executionTime: ['15:00', '07:00', '12:00'],
+      executionDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+      objectType: 'product',
+    };
+
+    const result = await syncScheduledJob({ tenantKey: 'printer', config });
+
+    expect(result).toEqual({ action: 'registered' });
+    expect(mockAddScheduledSapSyncJob).toHaveBeenCalledTimes(3);
+
+    const calls = mockAddScheduledSapSyncJob.mock.calls.map(([schedule]) => ({
+      slotIndex: schedule.slotIndex,
+      executionTime: schedule.executionTime,
+      repeatPattern: schedule.repeatPattern,
+      repeatTimezone: schedule.repeatTimezone,
+    }));
+
+    expect(calls).toEqual([
+      { slotIndex: 0, executionTime: '07:00', repeatPattern: '0 7 * * 1,2,3,4,5,6', repeatTimezone: 'America/Costa_Rica' },
+      { slotIndex: 1, executionTime: '12:00', repeatPattern: '0 12 * * 1,2,3,4,5,6', repeatTimezone: 'America/Costa_Rica' },
+      { slotIndex: 2, executionTime: '15:00', repeatPattern: '0 15 * * 1,2,3,4,5,6', repeatTimezone: 'America/Costa_Rica' },
+    ]);
+  });
+
+  it('schedules a legacy string executionTime as slot 0', async () => {
+    const queue = {
+      getRepeatableJobs: jest.fn().mockResolvedValue([]),
+      getJobSchedulers: jest.fn().mockResolvedValue([]),
+      removeRepeatableByKey: jest.fn(),
+      removeJobScheduler: jest.fn(),
+    };
+    mockGetSapSyncQueue.mockReturnValue(queue);
+    mockAddScheduledSapSyncJob.mockResolvedValue({ id: 'scheduled-job' });
+
+    const config = {
+      _id: 'cfg-legacy',
+      active: true,
+      mode: 'FULL',
+      executionTime: '05:00',
+      objectType: 'Items',
+    };
+
+    await syncScheduledJob({ tenantKey: 'tenant-legacy', config });
+
+    expect(mockAddScheduledSapSyncJob).toHaveBeenCalledTimes(1);
+    expect(mockAddScheduledSapSyncJob).toHaveBeenCalledWith(expect.objectContaining({
+      slotIndex: 0,
+      executionTime: '05:00',
+      repeatPattern: '0 5 * * *',
+    }));
+  });
+
+  it('removes the job when a FULL config has no valid execution times', async () => {
+    const queue = {
+      getRepeatableJobs: jest.fn().mockResolvedValue([]),
+      getJobSchedulers: jest.fn().mockResolvedValue([]),
+      removeRepeatableByKey: jest.fn(),
+      removeJobScheduler: jest.fn(),
+    };
+    mockGetSapSyncQueue.mockReturnValue(queue);
+
+    const config = {
+      _id: 'cfg-empty',
+      active: true,
+      mode: 'FULL',
+      executionTime: [],
+      objectType: 'Items',
+    };
+
+    const result = await syncScheduledJob({ tenantKey: 'tenant-empty', config });
+
+    expect(result).toEqual({ action: 'removed' });
+    expect(mockAddScheduledSapSyncJob).not.toHaveBeenCalled();
+  });
+
+  it('logs and skips scheduling when executionTime holds garbage', async () => {
+    const queue = {
+      getRepeatableJobs: jest.fn().mockResolvedValue([]),
+      getJobSchedulers: jest.fn().mockResolvedValue([]),
+      removeRepeatableByKey: jest.fn(),
+      removeJobScheduler: jest.fn(),
+    };
+    mockGetSapSyncQueue.mockReturnValue(queue);
+
+    const config = {
+      _id: 'cfg-garbage',
+      active: true,
+      mode: 'FULL',
+      executionTime: ['not-a-time'],
+      objectType: 'Items',
+    };
+
+    const result = await syncScheduledJob({ tenantKey: 'tenant-garbage', config });
+
+    expect(result).toEqual({ action: 'removed' });
+    expect(mockLoggerError).toHaveBeenCalledWith(expect.objectContaining({
+      msg: 'Invalid executionTime on ClientConfig, schedule skipped',
+    }));
+  });
+
   it('replaces the previous INCREMENTAL schedule using the legacy hashed key', async () => {
     const queue = {
       getRepeatableJobs: jest.fn(),
@@ -280,6 +398,118 @@ describe('sapSyncScheduler.service', () => {
       tenantKey: 'tenant-new',
       configId: 'cfg-new',
       repeatPattern: '0 5 * * *',
+    }));
+  });
+
+  it('drops the schedulers of hours that were removed from the config', async () => {
+    const queue = {
+      getRepeatableJobs: jest.fn().mockResolvedValue([]),
+      getJobSchedulers: jest.fn().mockResolvedValue([
+        { key: 'sap-sync:printer:cfg-shrink:0', name: 'sap-sync-job', template: { data: {} } },
+        { key: 'sap-sync:printer:cfg-shrink:1', name: 'sap-sync-job', template: { data: {} } },
+        { key: 'sap-sync:printer:cfg-shrink:2', name: 'sap-sync-job', template: { data: {} } },
+      ]),
+      removeRepeatableByKey: jest.fn(),
+      removeJobScheduler: jest.fn().mockResolvedValue(true),
+    };
+    mockGetSapSyncQueue.mockReturnValue(queue);
+    mockAddScheduledSapSyncJob.mockResolvedValue({ id: 'scheduled-job' });
+
+    // Sin previousConfig a propósito: la lista de nombres a borrar es fija, no derivada del estado
+    // anterior.
+    const config = {
+      _id: 'cfg-shrink',
+      active: true,
+      mode: 'FULL',
+      executionTime: ['07:00'],
+      objectType: 'product',
+    };
+
+    await syncScheduledJob({ tenantKey: 'printer', config });
+
+    expect(queue.removeJobScheduler).toHaveBeenCalledWith('sap-sync:printer:cfg-shrink:0');
+    expect(queue.removeJobScheduler).toHaveBeenCalledWith('sap-sync:printer:cfg-shrink:1');
+    expect(queue.removeJobScheduler).toHaveBeenCalledWith('sap-sync:printer:cfg-shrink:2');
+    expect(mockAddScheduledSapSyncJob).toHaveBeenCalledTimes(1);
+  });
+
+  it('bootstrap replaces a legacy flat scheduler instead of leaving it running beside slot 0', async () => {
+    const queue = {
+      getRepeatableJobs: jest.fn().mockResolvedValue([]),
+      getJobSchedulers: jest.fn().mockResolvedValue([
+        { key: 'sap-sync:tenant-e:cfg-5', name: 'sap-sync-job', template: { data: {} } },
+      ]),
+      removeRepeatableByKey: jest.fn(),
+      removeJobScheduler: jest.fn().mockResolvedValue(true),
+    };
+    mockGetSapSyncQueue.mockReturnValue(queue);
+    mockAddScheduledSapSyncJob.mockResolvedValue({ id: 'scheduled-job' });
+    mockListActiveTenants.mockResolvedValue([{ client: { tenantKey: 'tenant-e' } }]);
+    mockGetTenantModels.mockResolvedValue({
+      ClientConfig: {
+        find: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue([
+            {
+              _id: 'cfg-5',
+              active: true,
+              mode: 'FULL',
+              executionTime: '05:00',
+              objectType: 'Items',
+            },
+          ]),
+        }),
+      },
+    });
+
+    const result = await bootstrapScheduledJobs();
+
+    expect(result).toEqual(expect.objectContaining({ configsScheduled: 1 }));
+    expect(queue.removeJobScheduler).toHaveBeenCalledWith('sap-sync:tenant-e:cfg-5');
+    expect(mockAddScheduledSapSyncJob).toHaveBeenCalledWith(expect.objectContaining({
+      slotIndex: 0,
+      repeatPattern: '0 5 * * *',
+    }));
+  });
+
+  it('bootstrap upsert keeps every slot it just created', async () => {
+    const queue = {
+      getRepeatableJobs: jest.fn().mockResolvedValue([]),
+      getJobSchedulers: jest.fn(),
+      removeRepeatableByKey: jest.fn(),
+      removeJobScheduler: jest.fn().mockResolvedValue(true),
+    };
+    mockGetSapSyncQueue.mockReturnValue(queue);
+    mockAddScheduledSapSyncJob.mockResolvedValue({ id: 'scheduled-job' });
+    mockListActiveTenants.mockResolvedValue([{ client: { tenantKey: 'printer' } }]);
+    mockGetTenantModels.mockResolvedValue({
+      ClientConfig: {
+        find: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue([
+            {
+              _id: 'cfg-multi',
+              active: true,
+              mode: 'FULL',
+              executionTime: ['07:00', '12:00', '15:00'],
+              objectType: 'product',
+            },
+          ]),
+        }),
+      },
+    });
+
+    // El barrido de huérfanos vuelve a leer la cola al final: devolvemos los tres slots recién
+    // creados para comprobar que NO se los lleva por delante.
+    queue.getJobSchedulers.mockImplementation(async () => ([
+      { key: 'sap-sync:printer:cfg-multi:0', name: 'sap-sync-job', template: { data: {} } },
+      { key: 'sap-sync:printer:cfg-multi:1', name: 'sap-sync-job', template: { data: {} } },
+      { key: 'sap-sync:printer:cfg-multi:2', name: 'sap-sync-job', template: { data: {} } },
+    ]));
+
+    const result = await bootstrapScheduledJobs({ upsertExisting: true });
+
+    expect(result).toEqual(expect.objectContaining({
+      configsScheduled: 1,
+      orphanRemoved: 0,
     }));
   });
 

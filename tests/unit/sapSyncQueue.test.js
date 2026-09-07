@@ -21,6 +21,7 @@ const {
   SAP_SYNC_JOB_NAME,
   SAP_SYNC_QUEUE_NAME,
   addScheduledSapSyncJob,
+  buildScheduledJobId,
   buildScheduledSapSyncJobTemplate,
   closeSapSyncQueue,
 } = await import('../../src/infrastructure/queue/sapSync.queue.js');
@@ -70,6 +71,50 @@ describe('sapSync.queue', () => {
       }
     );
     expect(mockAdd).not.toHaveBeenCalled();
+  });
+
+  it('keeps the flat scheduler id when there is no slot index', () => {
+    expect(buildScheduledJobId({ tenantKey: 'tenant-a', configId: 'cfg-1' }))
+      .toBe('sap-sync:tenant-a:cfg-1');
+    expect(buildScheduledJobId({ tenantKey: 'tenant-a', configId: 'cfg-1', slotIndex: null }))
+      .toBe('sap-sync:tenant-a:cfg-1');
+  });
+
+  it('suffixes the scheduler id with the slot index', () => {
+    expect(buildScheduledJobId({ tenantKey: 'tenant-a', configId: 'cfg-1', slotIndex: 0 }))
+      .toBe('sap-sync:tenant-a:cfg-1:0');
+    expect(buildScheduledJobId({ tenantKey: 'tenant-a', configId: 'cfg-1', slotIndex: 2 }))
+      .toBe('sap-sync:tenant-a:cfg-1:2');
+  });
+
+  it('registers each hour of a multi-hour FULL schedule under its own scheduler id', async () => {
+    mockUpsertJobScheduler.mockResolvedValue({ id: 'scheduled-job' });
+
+    await addScheduledSapSyncJob({
+      tenantKey: 'printer',
+      configId: 'cfg-multi',
+      objectType: 'product',
+      mode: 'FULL',
+      executionTime: '12:00',
+      executionDays: ['Monday'],
+      slotIndex: 1,
+      repeatPattern: '0 12 * * 1',
+      repeatTimezone: 'America/Costa_Rica',
+    });
+
+    expect(mockUpsertJobScheduler).toHaveBeenCalledWith(
+      'sap-sync:printer:cfg-multi:1',
+      { pattern: '0 12 * * 1', tz: 'America/Costa_Rica' },
+      {
+        name: SAP_SYNC_JOB_NAME,
+        data: expect.objectContaining({
+          tenantKey: 'printer',
+          configId: 'cfg-multi',
+          executionTime: '12:00',
+          triggerType: 'scheduled',
+        }),
+      }
+    );
   });
 
   it('builds interval scheduler template for INCREMENTAL schedules', () => {

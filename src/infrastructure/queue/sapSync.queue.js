@@ -11,8 +11,11 @@ const DEFAULT_REMOVE_ON_FAIL = Number(process.env.SAP_SYNC_REMOVE_ON_FAIL || 500
 
 let sapSyncQueue = null;
 
-export function buildScheduledJobId({ tenantKey, configId }) {
-  return `sap-sync:${tenantKey}:${String(configId)}`;
+// slotIndex identifica cada hora de una config FULL multihora. Sin slotIndex el nombre queda igual
+// que antes de multihora, y así lo siguen usando las configs INCREMENTAL.
+export function buildScheduledJobId({ tenantKey, configId, slotIndex = null }) {
+  const base = `sap-sync:${tenantKey}:${String(configId)}`;
+  return Number.isInteger(slotIndex) ? `${base}:${slotIndex}` : base;
 }
 
 export function buildManualJobId({ tenantKey, configId }) {
@@ -98,6 +101,7 @@ export async function addManualSapSyncJob(payload) {
 export function buildScheduledSapSyncJobTemplate({
   tenantKey,
   configId,
+  slotIndex,
   objectType,
   mode,
   intervalMinutes,
@@ -109,7 +113,7 @@ export function buildScheduledSapSyncJobTemplate({
   repeatPattern,
   repeatTimezone,
 }) {
-  const schedulerId = buildScheduledJobId({ tenantKey, configId });
+  const schedulerId = buildScheduledJobId({ tenantKey, configId, slotIndex });
   const repeatOptions = buildRepeatOptions({ repeatEvery, repeatPattern, repeatTimezone });
 
   return {

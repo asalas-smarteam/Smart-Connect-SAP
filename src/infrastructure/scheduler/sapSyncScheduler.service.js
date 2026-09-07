@@ -1,5 +1,6 @@
 import logger from '../logger/logger.js';
 import crypto from 'crypto';
+import { MAX_EXECUTION_TIMES, normalizeExecutionTimes } from '#domain/sync/execution-times.js';
 import { getTenantModels } from '../database/tenant/tenantDatabase.js';
 import { listActiveTenants } from '../tenants/tenantSubscriptions.js';
 import {
@@ -98,16 +99,47 @@ function normalizeExecutionDayNames(executionDays) {
   return days.map((day) => WEEKDAY_NAMES[day]);
 }
 
-function buildDailyPattern({ executionTime, executionDays }) {
-  const value = String(executionTime || '').trim();
-  const time = parseTime(value);
+// Lee executionTime de un documento que puede venir de tres formas: array (lo normal a partir de
+// ahora), string suelto (documentos anteriores a la migración, y también cualquier lectura hecha con
+// .lean(), que NO pasa por el casteo de Mongoose) o null.
+// No propaga la excepción a propósito: un documento con basura debe dejar esa config sin programar y
+// con un log visible, no tumbar el bootstrap del resto del tenant.
+function readExecutionTimes(config) {
+  try {
+    return normalizeExecutionTimes(config?.executionTime);
+  } catch (error) {
+    logger.error({
+      msg: 'Invalid executionTime on ClientConfig, schedule skipped',
+      configId: String(config?._id || config?.id || ''),
+      executionTime: config?.executionTime,
+      error: error.message,
+    });
+    return [];
+  }
+}
+
+function buildDailyPatterns({ executionTimes, executionDays }) {
   const days = normalizeExecutionDays(executionDays);
-  if (!time || days === null) {
+  if (days === null || !executionTimes.length) {
     return null;
   }
 
   const dayPattern = days.length ? days.join(',') : '*';
-  return `${time.minutes} ${time.hours} * * ${dayPattern}`;
+  const patterns = [];
+
+  for (const value of executionTimes) {
+    const time = parseTime(value);
+    if (!time) {
+      return null;
+    }
+
+    patterns.push({
+      executionTime: time.value,
+      repeatPattern: `${time.minutes} ${time.hours} * * ${dayPattern}`,
+    });
+  }
+
+  return patterns;
 }
 
 function buildHourField(start, end) {
@@ -172,26 +204,31 @@ function buildIncrementalWindowPattern({ intervalMinutes, startTime, endTime }) 
 function resolveSchedulePlan(config) {
   const mode = normalizeMode(config?.mode);
   const intervalMinutes = normalizeIntervalMinutes(config?.intervalMinutes);
-  const executionTime = String(config?.executionTime || '').trim() || null;
+  const executionTimes = readExecutionTimes(config);
   const executionDayNames = normalizeExecutionDayNames(config?.executionDays);
-  const cronPattern = buildDailyPattern({ executionTime, executionDays: config?.executionDays });
   const startTime = String(config?.startTime || '').trim() || null;
   const endTime = String(config?.endTime || '').trim() || null;
 
   if (mode === 'FULL') {
-    if (!cronPattern) {
+    const patterns = buildDailyPatterns({ executionTimes, executionDays: config?.executionDays });
+    if (!patterns) {
       return null;
     }
+
     return {
       mode,
       intervalMinutes: null,
-      executionTime,
+      executionTimes,
       executionDays: executionDayNames || [],
       startTime: null,
       endTime: null,
-      repeatEvery: null,
-      repeatPattern: cronPattern,
-      repeatTimezone: SAP_SYNC_SCHEDULER_TIMEZONE,
+      slots: patterns.map((pattern, slotIndex) => ({
+        slotIndex,
+        executionTime: pattern.executionTime,
+        repeatEvery: null,
+        repeatPattern: pattern.repeatPattern,
+        repeatTimezone: SAP_SYNC_SCHEDULER_TIMEZONE,
+      })),
     };
   }
 
@@ -208,26 +245,34 @@ function resolveSchedulePlan(config) {
     return {
       mode,
       intervalMinutes,
-      executionTime: null,
+      executionTimes: [],
       executionDays: [],
       startTime: windowPattern.startTime,
       endTime: windowPattern.endTime,
-      repeatEvery: null,
-      repeatPattern: windowPattern.repeatPattern,
-      repeatTimezone: SAP_SYNC_SCHEDULER_TIMEZONE,
+      slots: [{
+        slotIndex: null,
+        executionTime: null,
+        repeatEvery: null,
+        repeatPattern: windowPattern.repeatPattern,
+        repeatTimezone: SAP_SYNC_SCHEDULER_TIMEZONE,
+      }],
     };
   }
 
   return {
     mode,
     intervalMinutes,
-    executionTime: null,
+    executionTimes: [],
     executionDays: [],
     startTime: null,
     endTime: null,
-    repeatEvery: intervalMinutes * 60 * 1000,
-    repeatPattern: null,
-    repeatTimezone: null,
+    slots: [{
+      slotIndex: null,
+      executionTime: null,
+      repeatEvery: intervalMinutes * 60 * 1000,
+      repeatPattern: null,
+      repeatTimezone: null,
+    }],
   };
 }
 
@@ -274,27 +319,38 @@ function buildLegacyRepeatableKey({ jobId, repeatEvery, repeatPattern, repeatTim
   return crypto.createHash('md5').update(repeatConcatOptions).digest('hex');
 }
 
+// La lista de nombres a borrar es FIJA, no derivada del estado anterior: el nombre plano (el que
+// usaban las configs antes de multihora, y el que siguen usando las INCREMENTAL) más un nombre por
+// cada slot posible. Por eso bajar de 3 horas a 1 limpia igual sin recibir previousConfig.
+// Las claves md5 legacy (repeatable jobs de la API vieja de BullMQ) sí se derivan del plan, una por
+// slot.
 function buildRemovalKeyCandidates({ jobId, config }) {
-  const schedulePlan = resolveSchedulePlan(config);
   const keys = new Set([jobId]);
 
+  for (let slotIndex = 0; slotIndex < MAX_EXECUTION_TIMES; slotIndex += 1) {
+    keys.add(`${jobId}:${slotIndex}`);
+  }
+
+  const schedulePlan = resolveSchedulePlan(config);
   if (!schedulePlan) {
     return Array.from(keys);
   }
 
-  keys.add(buildLegacyRepeatableKey({
-    jobId,
-    repeatEvery: schedulePlan.repeatEvery,
-    repeatPattern: schedulePlan.repeatPattern,
-  }));
-
-  if (schedulePlan.repeatPattern) {
+  for (const slot of schedulePlan.slots) {
     keys.add(buildLegacyRepeatableKey({
       jobId,
-      repeatEvery: schedulePlan.repeatEvery,
-      repeatPattern: schedulePlan.repeatPattern,
-      repeatTimezone: schedulePlan.repeatTimezone || '',
+      repeatEvery: slot.repeatEvery,
+      repeatPattern: slot.repeatPattern,
     }));
+
+    if (slot.repeatPattern) {
+      keys.add(buildLegacyRepeatableKey({
+        jobId,
+        repeatEvery: slot.repeatEvery,
+        repeatPattern: slot.repeatPattern,
+        repeatTimezone: slot.repeatTimezone || '',
+      }));
+    }
   }
 
   return Array.from(keys);
@@ -346,20 +402,23 @@ async function createScheduledJob({ tenantKey, config }) {
     throw new Error('tenantKey, configId and valid schedule config are required');
   }
 
-  await addScheduledSapSyncJob({
-    tenantKey,
-    configId,
-    objectType,
-    mode: schedulePlan.mode,
-    intervalMinutes: schedulePlan.intervalMinutes,
-    executionTime: schedulePlan.executionTime,
-    executionDays: schedulePlan.executionDays,
-    startTime: schedulePlan.startTime,
-    endTime: schedulePlan.endTime,
-    repeatEvery: schedulePlan.repeatEvery,
-    repeatPattern: schedulePlan.repeatPattern,
-    repeatTimezone: schedulePlan.repeatTimezone,
-  });
+  for (const slot of schedulePlan.slots) {
+    await addScheduledSapSyncJob({
+      tenantKey,
+      configId,
+      objectType,
+      mode: schedulePlan.mode,
+      intervalMinutes: schedulePlan.intervalMinutes,
+      executionTime: slot.executionTime,
+      executionDays: schedulePlan.executionDays,
+      startTime: schedulePlan.startTime,
+      endTime: schedulePlan.endTime,
+      slotIndex: slot.slotIndex,
+      repeatEvery: slot.repeatEvery,
+      repeatPattern: slot.repeatPattern,
+      repeatTimezone: slot.repeatTimezone,
+    });
+  }
 
   return {
     jobId: buildScheduledJobId({ tenantKey, configId }),
@@ -369,16 +428,43 @@ async function createScheduledJob({ tenantKey, config }) {
   };
 }
 
+// Exige que estén TODOS los slots del plan, no cualquiera: la lista de candidatos de borrado incluye
+// los 24 nombres posibles, así que un `.some()` sobre ella daría verdadero con que existiera uno
+// solo y dejaría la config a medio programar.
 function hasScheduledJob({ scheduledJobs, tenantKey, config }) {
   const configId = String(config?._id || config?.id || '');
   if (!tenantKey || !configId || !Array.isArray(scheduledJobs)) {
     return false;
   }
 
-  const jobId = buildScheduledJobId({ tenantKey, configId });
-  const candidateKeys = new Set(buildRemovalKeyCandidates({ jobId, config }));
+  const schedulePlan = resolveSchedulePlan(config);
+  if (!schedulePlan) {
+    return false;
+  }
 
-  return scheduledJobs.some((job) => matchesScheduledJobKeys(job, candidateKeys));
+  const jobId = buildScheduledJobId({ tenantKey, configId });
+
+  return schedulePlan.slots.every((slot) => {
+    const keys = new Set([
+      buildScheduledJobId({ tenantKey, configId, slotIndex: slot.slotIndex }),
+      buildLegacyRepeatableKey({
+        jobId,
+        repeatEvery: slot.repeatEvery,
+        repeatPattern: slot.repeatPattern,
+      }),
+    ]);
+
+    if (slot.repeatPattern) {
+      keys.add(buildLegacyRepeatableKey({
+        jobId,
+        repeatEvery: slot.repeatEvery,
+        repeatPattern: slot.repeatPattern,
+        repeatTimezone: slot.repeatTimezone || '',
+      }));
+    }
+
+    return scheduledJobs.some((job) => matchesScheduledJobKeys(job, keys));
+  });
 }
 
 export async function registerScheduledJob({ tenantKey, config, previousConfig = null }) {
@@ -398,13 +484,17 @@ export async function registerScheduledJob({ tenantKey, config, previousConfig =
     objectType,
     mode: schedulePlan.mode,
     intervalMinutes: schedulePlan.intervalMinutes,
-    executionTime: schedulePlan.executionTime,
+    executionTimes: schedulePlan.executionTimes,
     executionDays: schedulePlan.executionDays,
     startTime: schedulePlan.startTime,
     endTime: schedulePlan.endTime,
-    repeatEvery: schedulePlan.repeatEvery,
-    repeatPattern: schedulePlan.repeatPattern,
-    repeatTimezone: schedulePlan.repeatTimezone,
+    slots: schedulePlan.slots.map((slot) => ({
+      slotIndex: slot.slotIndex,
+      executionTime: slot.executionTime,
+      repeatEvery: slot.repeatEvery,
+      repeatPattern: slot.repeatPattern,
+      repeatTimezone: slot.repeatTimezone,
+    })),
     jobId,
     removedCount,
   });
@@ -475,12 +565,19 @@ export async function bootstrapScheduledJobs({ upsertExisting = false } = {}) {
 
       for (const config of configs) {
         const configId = String(config._id);
-        const jobKey = buildScheduledJobId({ tenantKey, configId });
         const schedulePlan = resolveSchedulePlan(config);
 
         if (config.active && schedulePlan) {
+          const slotKeys = schedulePlan.slots.map((slot) => buildScheduledJobId({
+            tenantKey,
+            configId,
+            slotIndex: slot.slotIndex,
+          }));
+
           if (upsertExisting) {
-            expectedJobKeys.add(jobKey);
+            for (const slotKey of slotKeys) {
+              expectedJobKeys.add(slotKey);
+            }
             await registerScheduledJob({ tenantKey, config });
             summary.configsScheduled += 1;
             continue;
@@ -491,12 +588,17 @@ export async function bootstrapScheduledJobs({ upsertExisting = false } = {}) {
             continue;
           }
 
-          await createScheduledJob({ tenantKey, config });
-          scheduledJobs.all.push({
-            key: jobKey,
-            id: jobKey,
-            name: SAP_SYNC_JOB_NAME,
-          });
+          // registerScheduledJob y no createScheduledJob: borra antes de crear. Si no, una config
+          // FULL registrada bajo el nombre plano de antes de multihora quedaría con el plano Y con
+          // :0, y correría dos veces a esa hora.
+          await registerScheduledJob({ tenantKey, config });
+          for (const slotKey of slotKeys) {
+            scheduledJobs.all.push({
+              key: slotKey,
+              id: slotKey,
+              name: SAP_SYNC_JOB_NAME,
+            });
+          }
           summary.configsScheduled += 1;
         } else {
           if (upsertExisting) {

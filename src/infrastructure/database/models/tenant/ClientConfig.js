@@ -4,6 +4,10 @@ import {
   CLIENT_CONFIG_TASK_TYPE_VALUES,
   DEFAULT_CLIENT_CONFIG_TASK_TYPE,
 } from '#domain/sync/dropdown-options.constants.js';
+import {
+  EXECUTION_TIME_PATTERN,
+  MAX_EXECUTION_TIMES,
+} from '#domain/sync/execution-times.js';
 
 const { Schema } = mongoose;
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -113,14 +117,26 @@ export const clientConfigSchema = new Schema(
       type: Number,
       default: null,
     },
+    // Array de horas 'HH:mm'. Antes era un String único; Mongoose envuelve solo un escalar tanto al
+    // asignar como al hidratar, así que los documentos viejos que guardan "01:00" se siguen leyendo
+    // como ['01:00'] sin migrar. Ojo: .lean() NO castea, ahí llega el string crudo -- por eso el
+    // scheduler normaliza al leer.
     executionTime: {
-      type: String,
-      default: null,
+      type: [String],
+      default: [],
       validate: {
         validator(value) {
-          return value === null || value === '' || TIME_PATTERN.test(value);
+          if (value === null || value === undefined) {
+            return true;
+          }
+
+          if (!Array.isArray(value) || value.length > MAX_EXECUTION_TIMES) {
+            return false;
+          }
+
+          return value.every((entry) => EXECUTION_TIME_PATTERN.test(String(entry ?? '').trim()));
         },
-        message: 'executionTime must use HH:mm format',
+        message: `executionTime must use HH:mm format and have at most ${MAX_EXECUTION_TIMES} entries`,
       },
     },
     executionDays: {

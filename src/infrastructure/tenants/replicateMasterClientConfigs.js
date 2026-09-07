@@ -3,6 +3,7 @@ import { createMasterClientConfigModel } from '../database/models/master/ClientC
 import { SAP_FLAVORS } from '#domain/sap/sap-flavor.constants.js';
 import { resolveSapFlavor } from '#infrastructure/config/SapFlavorConfigRepository.js';
 import { buildMergedFilters } from '#application/services/clientConfigFilters.service.js';
+import { normalizeExecutionTimes } from '#domain/sync/execution-times.js';
 import {
   ensureDefaultContactEmployeeMappings,
   ensureDefaultDealMappings,
@@ -26,7 +27,7 @@ function buildClientConfigPayload({
     objectType: masterConfig.objectType,
     mode: masterConfig.mode || 'INCREMENTAL',
     intervalMinutes: masterConfig.intervalMinutes,
-    executionTime: masterConfig.executionTime || null,
+    executionTime: normalizeExecutionTimes(masterConfig.executionTime),
     executionDays: Array.isArray(masterConfig.executionDays) ? masterConfig.executionDays : [],
     startTime: masterConfig.startTime || null,
     endTime: masterConfig.endTime || null,

@@ -1,3 +1,4 @@
+import { normalizeExecutionTimes } from '#domain/sync/execution-times.js';
 import { getTenantModels } from '../database/tenant/tenantDatabase.js';
 import logger from '../logger/logger.js';
 import { addManualSapSyncJob, getSapSyncQueue } from '../queue/sapSync.queue.js';
@@ -7,6 +8,16 @@ import {
   syncScheduledJob,
 } from './sapSyncScheduler.service.js';
 
+// Si el valor guardado no se puede normalizar, se devuelve tal cual en vez de vaciarlo: la respuesta
+// del API es el lugar donde el operador tiene que PODER VER que el dato está mal.
+function serializeExecutionTimes(value) {
+  try {
+    return normalizeExecutionTimes(value);
+  } catch (error) {
+    return value;
+  }
+}
+
 function serializeConfig(config) {
   return {
     id: String(config._id),
@@ -14,7 +25,7 @@ function serializeConfig(config) {
     objectType: config.objectType || null,
     mode: config.mode || 'INCREMENTAL',
     intervalMinutes: config.intervalMinutes || null,
-    executionTime: config.executionTime || null,
+    executionTime: serializeExecutionTimes(config.executionTime),
     executionDays: Array.isArray(config.executionDays) ? config.executionDays : [],
     startTime: config.startTime || null,
     endTime: config.endTime || null,
@@ -129,7 +140,7 @@ export async function runConfigManualJob({ tenantKey, configId }) {
     objectType: config.objectType || null,
     mode: config.mode || 'INCREMENTAL',
     intervalMinutes: config.intervalMinutes || null,
-    executionTime: config.executionTime || null,
+    executionTime: serializeExecutionTimes(config.executionTime),
     executionDays: Array.isArray(config.executionDays) ? config.executionDays : [],
     startTime: config.startTime || null,
     endTime: config.endTime || null,

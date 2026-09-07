@@ -1,3 +1,4 @@
+import { normalizeExecutionTimes } from '#domain/sync/execution-times.js';
 import { createMasterClientConfigModel } from '../database/models/master/ClientConfig.js';
 
 const EDITABLE_FIELDS = [
@@ -75,10 +76,7 @@ function sanitizeMasterPayload(payload = {}) {
   }
 
   if (Object.prototype.hasOwnProperty.call(sanitized, 'executionTime')) {
-    sanitized.executionTime = String(sanitized.executionTime || '').trim();
-    if (!TIME_PATTERN.test(sanitized.executionTime)) {
-      throw new Error('executionTime must use HH:mm format');
-    }
+    sanitized.executionTime = normalizeExecutionTimes(sanitized.executionTime);
   }
 
   if (Object.prototype.hasOwnProperty.call(sanitized, 'executionDays')) {
@@ -130,7 +128,12 @@ function ensureRequiredForCreate(payload) {
     }
   }
 
-  const missing = required.filter((field) => !payload[field]);
+  // Un array vacío es truthy: sin este chequeo de largo, una plantilla FULL sin horas pasaría la
+  // validación y quedaría guardada sin nada que programar.
+  const missing = required.filter((field) => {
+    const value = payload[field];
+    return Array.isArray(value) ? value.length === 0 : !value;
+  });
 
   if (missing.length) {
     throw new Error(`Missing required fields: ${missing.join(', ')}`);
