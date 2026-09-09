@@ -944,6 +944,181 @@ describe('ProcessHubspotConvertQuotationToOrder', () => {
     expect(result.sapAudit.auditTrail.response_SAP.order).toEqual({ DocEntry: 67890, DocNum: 9001 });
   });
 
+  // Caso real del cliente (portal 49373530): al convertir la oferta, el asesor corrige centro de
+  // costo, departamento y subdepartamento de cada elemento de pedido. El workflow manda la
+  // coleccion como `lineItems` y el id del line item como `hs_object_id`.
+  //
+  // Los line items llegan en orden inverso al de las lineas de la oferta a proposito: el match es
+  // por identificador contra link.lines, no por posicion.
+  it('aplica los campos mapeados de los elementos de pedido sobre su linea base', async () => {
+    const context = buildContext();
+    context.mappings.productOrdersQuotationsMappings = [
+      { sourceField: 'U_Marca', targetField: 'centro_de_costo_marca' },
+      { sourceField: 'U_Departamento', targetField: 'departamento' },
+      { sourceField: 'U_SubDepartamento', targetField: 'sub_departamento' },
+    ];
+    const deps = buildDeps();
+    deps.runtimeRepository.resolveRuntimeContext.mockResolvedValue(context);
+    deps.sapDocumentLinkRepository.findByDeal
+      .mockResolvedValueOnce({
+        cardCode: 'CL00129',
+        sapDocEntry: 12345,
+        sapDocNum: 8001,
+        lines: [
+          { hubspotLineItemId: '58786797171', sapLineNum: 0 },
+          { hubspotLineItemId: '58786797172', sapLineNum: 1 },
+        ],
+      })
+      .mockResolvedValueOnce(null);
+    const useCase = new ProcessHubspotConvertQuotationToOrder(deps);
+
+    const event = {
+      ...convertEvent,
+      payload: {
+        ...convertEvent.payload,
+        lineItems: [
+          {
+            hs_object_id: '58786797172',
+            centro_de_costo_marca: 'CCM-0001',
+            departamento: 'CCD-0004',
+            sub_departamento: 'CCS-0001',
+          },
+          {
+            hs_object_id: '58786797171',
+            centro_de_costo_marca: 'CCM-0002',
+            departamento: 'CCD-0009',
+            // Vacia a proposito: una propiedad sin valor no produce clave, asi que SAP conserva
+            // lo que la oferta ya traia en U_SubDepartamento para esa linea.
+            sub_departamento: '',
+          },
+        ],
+      },
+    };
+
+    await useCase.execute({ event, tenantModels });
+
+    const orderPayload = deps.sapOrderAdapter.createOrder.mock.calls[0][0].orderPayload;
+    expect(orderPayload.DocumentLines).toEqual([
+      {
+        BaseType: 23,
+        BaseEntry: 12345,
+        BaseLine: 0,
+        U_Marca: 'CCM-0002',
+        U_Departamento: 'CCD-0009',
+      },
+      {
+        BaseType: 23,
+        BaseEntry: 12345,
+        BaseLine: 1,
+        U_Marca: 'CCM-0001',
+        U_Departamento: 'CCD-0004',
+        U_SubDepartamento: 'CCS-0001',
+      },
+    ]);
+  });
+
+  it('tambien acepta line_items con hubspot_id, la grafia de los otros webhooks', async () => {
+    const context = buildContext();
+    context.mappings.productOrdersQuotationsMappings = [
+      { sourceField: 'U_Departamento', targetField: 'departamento' },
+    ];
+    const deps = buildDeps();
+    deps.runtimeRepository.resolveRuntimeContext.mockResolvedValue(context);
+    deps.sapDocumentLinkRepository.findByDeal
+      .mockResolvedValueOnce({
+        cardCode: 'CL00129',
+        sapDocEntry: 12345,
+        lines: [{ hubspotLineItemId: 'li-1', sapLineNum: 0 }],
+      })
+      .mockResolvedValueOnce(null);
+    const useCase = new ProcessHubspotConvertQuotationToOrder(deps);
+
+    const event = {
+      ...convertEvent,
+      payload: {
+        ...convertEvent.payload,
+        line_items: [{ hubspot_id: 'li-1', departamento: 'CCD-0004' }],
+      },
+    };
+
+    await useCase.execute({ event, tenantModels });
+
+    expect(deps.sapOrderAdapter.createOrder.mock.calls[0][0].orderPayload.DocumentLines).toEqual([
+      { BaseType: 23, BaseEntry: 12345, BaseLine: 0, U_Departamento: 'CCD-0004' },
+    ]);
+  });
+
+  // La linea base tiene que viajar igual: omitirla dejaria la orden sin ese renglon. Se avisa
+  // con warn porque la causa es de configuracion (el workflow manda un line item que no existe
+  // en la oferta que la integracion creo), no un error de SAP.
+  it('ignora con warn el elemento de pedido que no empata con ninguna linea guardada', async () => {
+    const context = buildContext();
+    context.mappings.productOrdersQuotationsMappings = [
+      { sourceField: 'U_Departamento', targetField: 'departamento' },
+    ];
+    const deps = buildDeps();
+    deps.runtimeRepository.resolveRuntimeContext.mockResolvedValue(context);
+    deps.sapDocumentLinkRepository.findByDeal
+      .mockResolvedValueOnce({
+        cardCode: 'CL00129',
+        sapDocEntry: 12345,
+        lines: [{ hubspotLineItemId: 'li-1', sapLineNum: 0 }],
+      })
+      .mockResolvedValueOnce(null);
+    const useCase = new ProcessHubspotConvertQuotationToOrder(deps);
+
+    const event = {
+      ...convertEvent,
+      payload: {
+        ...convertEvent.payload,
+        lineItems: [{ hs_object_id: 'no-esta-en-la-oferta', departamento: 'CCD-0004' }],
+      },
+    };
+
+    await useCase.execute({ event, tenantModels });
+
+    expect(deps.sapOrderAdapter.createOrder.mock.calls[0][0].orderPayload.DocumentLines).toEqual([
+      { BaseType: 23, BaseEntry: 12345, BaseLine: 0 },
+    ]);
+    expect(deps.logger.warn).toHaveBeenCalled();
+  });
+
+  // Sin pickMappedLineFields, un mapeo hacia BaseLine reescribiria el renglon de la oferta al que
+  // apunta la linea, y SAP lo aceptaria sin error: la orden saldria copiando el articulo
+  // equivocado.
+  it('no deja que un mapeo de linea pise BaseLine ni ItemCode', async () => {
+    const context = buildContext();
+    context.mappings.productOrdersQuotationsMappings = [
+      { sourceField: 'BaseLine', targetField: 'departamento' },
+      { sourceField: 'ItemCode', targetField: 'centro_de_costo_marca' },
+      { sourceField: 'U_Departamento', targetField: 'departamento' },
+    ];
+    const deps = buildDeps();
+    deps.runtimeRepository.resolveRuntimeContext.mockResolvedValue(context);
+    deps.sapDocumentLinkRepository.findByDeal
+      .mockResolvedValueOnce({
+        cardCode: 'CL00129',
+        sapDocEntry: 12345,
+        lines: [{ hubspotLineItemId: 'li-1', sapLineNum: 0 }],
+      })
+      .mockResolvedValueOnce(null);
+    const useCase = new ProcessHubspotConvertQuotationToOrder(deps);
+
+    const event = {
+      ...convertEvent,
+      payload: {
+        ...convertEvent.payload,
+        lineItems: [{ hs_object_id: 'li-1', departamento: '7', centro_de_costo_marca: 'CCM-0001' }],
+      },
+    };
+
+    await useCase.execute({ event, tenantModels });
+
+    expect(deps.sapOrderAdapter.createOrder.mock.calls[0][0].orderPayload.DocumentLines).toEqual([
+      { BaseType: 23, BaseEntry: 12345, BaseLine: 0, U_Departamento: '7' },
+    ]);
+  });
+
   it('is idempotent: skips when an order link already exists', async () => {
     const deps = buildDeps();
     deps.sapDocumentLinkRepository.findByDeal

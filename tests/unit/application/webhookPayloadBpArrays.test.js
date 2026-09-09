@@ -64,3 +64,39 @@ describe('resolveEventPayload — arrays de BusinessPartner', () => {
     expect(result.lineItems).toEqual([{ hs_object_id: '4' }]);
   });
 });
+
+describe('resolveEventPayload — coleccion de line items', () => {
+  it('acepta lineItems (camelCase), que es como la manda el workflow de conversion a orden', () => {
+    const result = resolveEventPayload({
+      payload: {
+        deal: { hs_object_id: '64836790697' },
+        lineItems: [{ hs_object_id: '58786797171', departamento: 'CCD-0004' }],
+      },
+    });
+
+    expect(result.lineItems).toEqual([{ hs_object_id: '58786797171', departamento: 'CCD-0004' }]);
+  });
+
+  it('acepta lineItems tambien bajo payload.data', () => {
+    const result = resolveEventPayload({
+      payload: { data: { lineItems: [{ hs_object_id: '1' }] } },
+    });
+
+    expect(result.lineItems).toEqual([{ hs_object_id: '1' }]);
+  });
+
+  it('line_items gana sobre lineItems cuando el workflow manda las dos', () => {
+    const result = resolveEventPayload({
+      payload: {
+        line_items: [{ hubspot_id: 'snake' }],
+        lineItems: [{ hs_object_id: 'camel' }],
+      },
+    });
+
+    expect(result.lineItems).toEqual([{ hubspot_id: 'snake' }]);
+  });
+
+  it('devuelve [] cuando no viene ninguna de las dos', () => {
+    expect(resolveEventPayload({ payload: { deal: { hs_object_id: '1' } } }).lineItems).toEqual([]);
+  });
+});

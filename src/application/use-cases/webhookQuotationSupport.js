@@ -366,7 +366,12 @@ export function buildSapDocumentLinkLines({ lineItems, documentLines, responseLi
     const sapLineNum = normalizeNumber(respLine?.LineNum, index);
 
     return {
-      hubspotLineItemId: toNonEmptyString(lineItem?.hubspot_id) || null,
+      // `hs_object_id` es el nombre nativo de la propiedad en HubSpot y `hubspot_id` el alias
+      // que usan los workflows de oferta. Se guardan los dos como fallback para que el id que
+      // el evento de conversion manda (hs_object_id) empate contra lo que quedo guardado aqui:
+      // sin esto el match cae al SKU, que no distingue dos lineas del mismo articulo.
+      hubspotLineItemId:
+        toNonEmptyString(lineItem?.hubspot_id || lineItem?.hs_object_id) || null,
       hubspotProductId: toNonEmptyString(lineItem?.hs_product_id) || null,
       sku: toNonEmptyString(docLine?.ItemCode || lineItem?.hs_sku) || null,
       sapLineNum: Number.isFinite(sapLineNum) ? sapLineNum : index,

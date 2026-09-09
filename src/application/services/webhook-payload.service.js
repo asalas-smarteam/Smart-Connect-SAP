@@ -11,6 +11,23 @@ function toObjectArray(value) {
   return value && typeof value === 'object' ? [value] : [];
 }
 
+// Los workflows de HubSpot no son consistentes en como nombran la coleccion de line items: los
+// de creacion/actualizacion de oferta mandan `line_items`, y el de conversion a orden que el
+// cliente ya tiene publicado manda `lineItems`. Se aceptan ambas grafias, en payload y en
+// payload.data, porque exigir una sola obliga a reeditar workflows en produccion y el sintoma de
+// equivocarse es mudo: la coleccion llega vacia y el documento se crea sin ningun campo de linea,
+// sin error en ningun lado.
+function resolveLineItemsCollection(payload) {
+  const candidates = [
+    payload?.line_items,
+    payload?.lineItems,
+    payload?.data?.line_items,
+    payload?.data?.lineItems,
+  ];
+
+  return candidates.find((candidate) => Array.isArray(candidate)) || [];
+}
+
 export function resolveEventPayload(event) {
   const payload = event?.payload || {};
   return {
@@ -18,9 +35,7 @@ export function resolveEventPayload(event) {
     deal: payload?.deal || payload?.data?.deal || null,
     company: payload?.company || payload?.data?.company || null,
     contact: payload?.contact || payload?.data?.contact || null,
-    lineItems: Array.isArray(payload?.line_items)
-      ? payload.line_items
-      : (Array.isArray(payload?.data?.line_items) ? payload.data.line_items : []),
+    lineItems: resolveLineItemsCollection(payload),
     // Contactos que se convierten en ContactEmployees de SAP. Solo se usa
     // cuando el tenant configura contactEmployeeSource: 'payloadArray'.
     contactEmployees: toObjectArray(payload?.contactEmployees ?? payload?.data?.contactEmployees),

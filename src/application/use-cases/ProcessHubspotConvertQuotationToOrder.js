@@ -36,7 +36,7 @@ export class ProcessHubspotConvertQuotationToOrder {
   }
 
   async execute({ event, tenantModels, tenantId, tenantKey, portalId }) {
-    const { payload, deal } = resolveEventPayload(event);
+    const { payload, deal, lineItems } = resolveEventPayload(event);
     const SapDocumentLink = tenantModels?.SapDocumentLink;
     const dealId = toNonEmptyString(deal?.hs_object_id);
     const sapCallRecorder = this.createSapCallRecorder();
@@ -116,6 +116,13 @@ export class ProcessHubspotConvertQuotationToOrder {
         baseLines: quotationLink.lines,
         slpCode,
         mappedDealFields: mappedDeal,
+        // Al convertir, el asesor no solo ajusta la cabecera: tambien corrige campos de los
+        // elementos de pedido (centro de costo, departamento, subdepartamento). Se usa el mismo
+        // contexto product/orders-quotations que la creacion y el PATCH de la oferta, y el match
+        // contra quotationLink.lines es lo que traduce el line item de HubSpot a su LineNum.
+        lineItems,
+        lineMappings: mappings.productOrdersQuotationsMappings,
+        logger: this.logger,
       });
       auditTrail.payload_SAP.order = orderPayload;
 

@@ -485,6 +485,45 @@ export function buildQuotationPayload({
   return payload;
 }
 
+// Resuelve, por LineNum de la oferta base, los campos de linea que el asesor cambio en HubSpot
+// al convertir (centro de costo, departamento, subdepartamento, ...). Devuelve un Map vacio
+// cuando el evento no trae line items, que es el caso de todos los workflows anteriores a esto:
+// la conversion sigue funcionando exactamente igual que antes.
+//
+// El match reusa resolveQuotationLinkLine, la misma funcion que usa el PATCH de la oferta, asi
+// que ambos flujos empatan line item de HubSpot con LineNum de SAP con el mismo criterio y las
+// mismas prioridades (id de line item -> id de producto -> SKU).
+function resolveBaseLineOverrides({ lineItems, lineMappings, baseLines, logger }) {
+  const overridesByLineNum = new Map();
+  const usedLineNums = new Set();
+
+  for (const lineItem of Array.isArray(lineItems) ? lineItems : []) {
+    const matchedLink = resolveQuotationLinkLine(lineItem, baseLines, usedLineNums);
+
+    if (!matchedLink) {
+      logger?.warn?.({
+        msg: 'Campos de linea ignorados al convertir: no hay LineNum guardado para el line item de HubSpot',
+        hubspotLineItemId: toNonEmptyString(lineItem?.hs_object_id || lineItem?.hubspot_id),
+        hubspotProductId: toNonEmptyString(lineItem?.hs_product_id),
+        sku: toNonEmptyString(lineItem?.hs_sku),
+      });
+      continue;
+    }
+
+    usedLineNums.add(matchedLink.sapLineNum);
+
+    const mappedLine = pickMappedLineFields(
+      mapHubspotToSapFields(lineItem, lineMappings, { logger })
+    );
+
+    if (Object.keys(mappedLine).length) {
+      overridesByLineNum.set(matchedLink.sapLineNum, mappedLine);
+    }
+  }
+
+  return overridesByLineNum;
+}
+
 // La cabecera la copia SAP de la cotización base, así que aquí sólo viajan los campos que el
 // tenant mapeó en el contexto deal/orders-quotations. Ese derrame es la ÚNICA fuente de
 // NumAtCard, Comments y de cualquier campo extra que el workflow de HubSpot agregue después.
@@ -498,6 +537,13 @@ export function buildOrderFromQuotationPayload({
   baseLines,
   slpCode = null,
   mappedDealFields = {},
+  // Contexto product/orders-quotations, el mismo que derraman mapDocumentLines al crear y
+  // buildQuotationLineUpdates al actualizar. Sin esto, un campo que el asesor corrige en los
+  // elementos de pedido justo al convertir se quedaba en HubSpot: la cabecera si viajaba (por el
+  // derrame de mappedDealFields) pero las lineas se creaban como pura referencia a la oferta.
+  lineItems = [],
+  lineMappings = [],
+  logger = null,
 }) {
   const normalizedBaseEntry = baseEntry === null || typeof baseEntry === 'undefined'
     ? null
@@ -506,10 +552,29 @@ export function buildOrderFromQuotationPayload({
     throw new PermanentWebhookError('A valid quotation BaseEntry is required to create SAP Order');
   }
 
+  // Los campos van en el MISMO POST que crea la orden, sobre la linea base a la que pertenecen:
+  // B1 copia de la oferta todo lo que la linea no traiga explicito, asi que BaseType/BaseEntry/
+  // BaseLine mas los campos mapeados actualiza esos campos sin tocar el resto de la linea.
+  //
+  // No se hace como un PATCH posterior a proposito: la orden ya quedaria creada con los valores
+  // viejos y, si el PATCH falla, el flujo es idempotente por dealId (ve la orden y se salta la
+  // conversion), asi que el reintento nunca corregiria los campos.
+  //
+  // MISMA ADVERTENCIA que en buildQuotationLineUpdates: RESERVED_LINE_FIELDS protege lo que este
+  // builder posee, pero no es la lista completa de campos que Service Layer rechaza sobre una
+  // linea con documento base. Un campo no admitido tumba el POST COMPLETO, no solo esa linea.
+  const lineOverrides = resolveBaseLineOverrides({
+    lineItems,
+    lineMappings,
+    baseLines,
+    logger,
+  });
+
   const documentLines = (Array.isArray(baseLines) ? baseLines : [])
     .map((line) => normalizeNumber(line?.sapLineNum ?? line, null))
     .filter((baseLine) => Number.isFinite(baseLine))
     .map((baseLine) => ({
+      ...(lineOverrides.get(baseLine) || {}),
       BaseType: QUOTATION_BASE_TYPE,
       BaseEntry: normalizedBaseEntry,
       BaseLine: baseLine,
@@ -543,6 +608,10 @@ function resolveQuotationLinkLine(lineItem, linkLines, usedLineNums) {
   const candidateIds = [
     toNonEmptyString(lineItem?.hubspot_id),
     toNonEmptyString(lineItem?.hubspotLineItemId),
+    // El workflow de conversion a orden manda el id del line item como `hs_object_id` (es el
+    // nombre nativo de la propiedad en HubSpot), no como `hubspot_id`. Sin esta entrada ningun
+    // line item de ese evento hace match y sus campos se descartan con un warn, no con un error.
+    toNonEmptyString(lineItem?.hs_object_id),
     toNonEmptyString(lineItem?.hs_product_id),
     toNonEmptyString(lineItem?.hubspotProductId),
     toNonEmptyString(lineItem?.productId),
