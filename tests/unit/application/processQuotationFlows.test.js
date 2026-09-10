@@ -614,7 +614,16 @@ describe('ProcessHubspotUpdateQuotation', () => {
     return {
       runtimeRepository,
       sapQuotationAdapter: {
-        getQuotation: jest.fn().mockResolvedValue({ DocEntry: 12345, DocumentLines: [{ LineNum: 0 }] }),
+        // El GET tiene que imitar la forma que devuelve el Service Layer, no una minima: de aca
+        // salen el estado del documento, los LineNum con los que se numeran las altas y las
+        // lineas con las que se reconstruye link.lines. Un mock incompleto esconde esa costura.
+        getQuotation: jest.fn().mockResolvedValue({
+          DocEntry: 12345,
+          DocumentStatus: 'bost_Open',
+          DocumentLines: [
+            { LineNum: 0, ItemCode: 'A01', Quantity: 1, UnitPrice: 10, WarehouseCode: '01', LineStatus: 'bost_Open' },
+          ],
+        }),
         updateQuotation: jest.fn().mockResolvedValue({ updated: true }),
       },
       sapDocumentLinkRepository: {
@@ -647,6 +656,196 @@ describe('ProcessHubspotUpdateQuotation', () => {
     expect(patch.SalesPersonCode).toBe(61);
     expect(deps.sapDocumentLinkRepository.updateLines).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({ docEntry: 12345, docNum: 8001, dealId: '59680314911' });
+  });
+
+  // Sin el header, una linea que el asesor quito en HubSpot (y que por lo tanto no viaja en
+  // DocumentLines) se queda viva en SAP: el PATCH normal conserva las filas que no vienen.
+  it('manda el PATCH con reemplazo de coleccion', async () => {
+    const deps = buildDeps();
+    const useCase = new ProcessHubspotUpdateQuotation(deps);
+
+    await useCase.execute({ event: updateEvent, tenantModels });
+
+    expect(deps.sapQuotationAdapter.updateQuotation.mock.calls[0][0].replaceCollections).toBe(true);
+  });
+
+  it('deja fuera del PATCH la linea que ningun line item del evento reclama', async () => {
+    const deps = buildDeps();
+    deps.sapQuotationAdapter.getQuotation.mockResolvedValue({
+      DocEntry: 12345,
+      DocumentStatus: 'bost_Open',
+      DocumentLines: [
+        { LineNum: 0, ItemCode: 'A01', Quantity: 1, UnitPrice: 10, LineStatus: 'bost_Open' },
+        { LineNum: 1, ItemCode: 'A02', Quantity: 1, UnitPrice: 10, LineStatus: 'bost_Open' },
+      ],
+    });
+    deps.sapDocumentLinkRepository.findByDeal.mockResolvedValue({
+      _id: 'link-1',
+      cardCode: 'CL00129',
+      sapDocEntry: 12345,
+      sapDocNum: 8001,
+      lines: [
+        { hubspotLineItemId: 'li-1', sku: 'A01', sapLineNum: 0, quantity: 1, unitPrice: 10 },
+        { hubspotLineItemId: 'li-2', sku: 'A02', sapLineNum: 1, quantity: 1, unitPrice: 10 },
+      ],
+    });
+    const useCase = new ProcessHubspotUpdateQuotation(deps);
+
+    // El evento solo trae li-1: li-2 se borro en HubSpot.
+    await useCase.execute({ event: updateEvent, tenantModels });
+
+    const patch = deps.sapQuotationAdapter.updateQuotation.mock.calls[0][0].patchPayload;
+    expect(patch.DocumentLines).toEqual([{ LineNum: 0, UnitPrice: 17.5, Quantity: 2 }]);
+    expect(patch.DocumentLines.map((line) => line.LineNum)).not.toContain(1);
+  });
+
+  it('agrega la linea nueva numerada desde los LineNum que devolvio SAP', async () => {
+    const deps = buildDeps();
+    deps.sapQuotationAdapter.getQuotation.mockResolvedValue({
+      DocEntry: 12345,
+      DocumentStatus: 'bost_Open',
+      DocumentLines: [
+        { LineNum: 0, ItemCode: 'A01', Quantity: 1, UnitPrice: 10, LineStatus: 'bost_Open' },
+        { LineNum: 3, ItemCode: 'A04', Quantity: 1, UnitPrice: 10, LineStatus: 'bost_Open' },
+      ],
+    });
+    const useCase = new ProcessHubspotUpdateQuotation(deps);
+
+    const event = {
+      ...updateEvent,
+      payload: {
+        ...updateEvent.payload,
+        line_items: [
+          ...updateEvent.payload.line_items,
+          { hubspot_id: 'li-nuevo', hs_sku: 'A99', quantity: '4', price: '3' },
+        ],
+      },
+    };
+
+    await useCase.execute({ event, tenantModels });
+
+    const patch = deps.sapQuotationAdapter.updateQuotation.mock.calls[0][0].patchPayload;
+    // 4 = max(0, 3) + 1. Con `length` habria salido 2 y habria pisado una fila viva.
+    expect(patch.DocumentLines).toEqual([
+      { LineNum: 0, UnitPrice: 17.5, Quantity: 2 },
+      { LineNum: 4, ItemCode: 'A99', Quantity: 4, UnitPrice: 3 },
+    ]);
+  });
+
+  // El PATCH responde 204 sin cuerpo, asi que los LineNum de las altas no vuelven por ninguna otra
+  // via, y las bajas hay que sacarlas del link para que la conversion a orden no las arrastre.
+  it('reconstruye link.lines desde el GET posterior al PATCH, no mutando el array anterior', async () => {
+    const deps = buildDeps();
+    const openLine = (lineNum, itemCode) => ({
+      LineNum: lineNum,
+      ItemCode: itemCode,
+      Quantity: 2,
+      UnitPrice: 17.5,
+      WarehouseCode: '01',
+      LineStatus: 'bost_Open',
+    });
+    deps.sapQuotationAdapter.getQuotation
+      .mockResolvedValueOnce({
+        DocEntry: 12345,
+        DocumentStatus: 'bost_Open',
+        DocumentLines: [openLine(0, 'A01'), openLine(1, 'A02')],
+      })
+      // Despues del PATCH: A02 se elimino y quedo un hueco con LineNum 4.
+      .mockResolvedValueOnce({
+        DocEntry: 12345,
+        DocumentStatus: 'bost_Open',
+        DocumentLines: [openLine(0, 'A01'), openLine(4, 'A99')],
+      });
+    const useCase = new ProcessHubspotUpdateQuotation(deps);
+
+    const event = {
+      ...updateEvent,
+      payload: {
+        ...updateEvent.payload,
+        line_items: [
+          ...updateEvent.payload.line_items,
+          { hubspot_id: 'li-nuevo', hs_product_id: 'prod-99', hs_sku: 'A99', quantity: '2', price: '17.5' },
+        ],
+      },
+    };
+
+    await useCase.execute({ event, tenantModels });
+
+    expect(deps.sapQuotationAdapter.getQuotation).toHaveBeenCalledTimes(2);
+    expect(deps.sapDocumentLinkRepository.updateLines).toHaveBeenCalledWith({
+      SapDocumentLink: expect.anything(),
+      id: 'link-1',
+      lines: [
+        {
+          hubspotLineItemId: 'li-1',
+          hubspotProductId: null,
+          sku: 'A01',
+          sapLineNum: 0,
+          quantity: 2,
+          unitPrice: 17.5,
+          warehouseCode: '01',
+        },
+        {
+          hubspotLineItemId: 'li-nuevo',
+          hubspotProductId: 'prod-99',
+          sku: 'A99',
+          sapLineNum: 4,
+          quantity: 2,
+          unitPrice: 17.5,
+          warehouseCode: '01',
+        },
+      ],
+    });
+  });
+
+  it('falla visible cuando la oferta ya no esta abierta, sin intentar el PATCH', async () => {
+    const deps = buildDeps();
+    deps.sapQuotationAdapter.getQuotation.mockResolvedValue({
+      DocEntry: 12345,
+      DocumentStatus: 'bost_Close',
+      DocumentLines: [{ LineNum: 0, ItemCode: 'A01', LineStatus: 'bost_Close' }],
+    });
+    const useCase = new ProcessHubspotUpdateQuotation(deps);
+
+    await expect(useCase.execute({ event: updateEvent, tenantModels })).rejects.toMatchObject({
+      permanent: true,
+      message: expect.stringContaining('bost_Close'),
+    });
+    expect(deps.sapQuotationAdapter.updateQuotation).not.toHaveBeenCalled();
+  });
+
+  it('falla visible cuando una linea ya alimento otro documento', async () => {
+    const deps = buildDeps();
+    deps.sapQuotationAdapter.getQuotation.mockResolvedValue({
+      DocEntry: 12345,
+      DocumentStatus: 'bost_Open',
+      DocumentLines: [
+        { LineNum: 0, ItemCode: 'A01', LineStatus: 'bost_Open' },
+        { LineNum: 1, ItemCode: 'A02', LineStatus: 'bost_Close' },
+      ],
+    });
+    const useCase = new ProcessHubspotUpdateQuotation(deps);
+
+    await expect(useCase.execute({ event: updateEvent, tenantModels })).rejects.toMatchObject({
+      permanent: true,
+      message: expect.stringContaining('line 1'),
+    });
+    expect(deps.sapQuotationAdapter.updateQuotation).not.toHaveBeenCalled();
+  });
+
+  // No todas las versiones del Service Layer devuelven LineStatus; fallar por su ausencia
+  // bloquearia ofertas perfectamente abiertas.
+  it('no toma una oferta sin DocumentStatus ni LineStatus como cerrada', async () => {
+    const deps = buildDeps();
+    deps.sapQuotationAdapter.getQuotation.mockResolvedValue({
+      DocEntry: 12345,
+      DocumentLines: [{ LineNum: 0, ItemCode: 'A01', Quantity: 1, UnitPrice: 10 }],
+    });
+    const useCase = new ProcessHubspotUpdateQuotation(deps);
+
+    await expect(useCase.execute({ event: updateEvent, tenantModels })).resolves.toMatchObject({
+      docEntry: 12345,
+    });
   });
 
   // El campo de linea editable tiene que seguir al documento YA creado, no solo aterrizar al
@@ -824,6 +1023,20 @@ describe('ProcessHubspotUpdateQuotation', () => {
     ];
     const deps = buildDeps();
     deps.runtimeRepository.resolveRuntimeContext.mockResolvedValue(context);
+    // La cuenta sale del GET a SAP, no de link.lines: cuando el link quedo desincronizado por los
+    // descuadres de este flujo, link.lines miente y el ancla cae en el lugar equivocado. El mock
+    // tiene las mismas 5 lineas que el link para que el test asierte lo que dice su nombre.
+    deps.sapQuotationAdapter.getQuotation.mockResolvedValue({
+      DocEntry: 12345,
+      DocumentStatus: 'bost_Open',
+      DocumentLines: [0, 1, 2, 3, 4].map((lineNum) => ({
+        LineNum: lineNum,
+        ItemCode: `A0${lineNum + 1}`,
+        Quantity: 1,
+        UnitPrice: 10,
+        LineStatus: 'bost_Open',
+      })),
+    });
     deps.sapDocumentLinkRepository.findByDeal.mockResolvedValue({
       _id: 'link-1',
       cardCode: 'CL00129',

@@ -1,6 +1,6 @@
 import { calculateUnitPriceWithMisc } from '#domain/prices/misc-price-calculation.service.js';
 import { PermanentWebhookError } from '#shared/errors/index.js';
-import { pickByPath } from '#shared/utils/object-path.utils.js';
+import { hasByPath, pickByPath } from '#shared/utils/object-path.utils.js';
 import { normalizeInteger, normalizeNumber, toNonEmptyString } from '#shared/utils/string.utils.js';
 
 // Un workflow de HubSpot mal configurado serializa una propiedad vacia como el TEXTO 'null' o
@@ -30,7 +30,18 @@ function isBlankString(value) {
   return typeof value === 'string' && value.trim() === '';
 }
 
-export function mapHubspotToSapFields(source, mappings, { logger = null } = {}) {
+// `clearEmptyValues` cambia lo que significa un valor vacio: con la bandera apagada (default, y
+// el comportamiento historico de los cuatro flujos) la clave se omite, asi que SAP conserva lo que
+// tenga. Con la bandera prendida, una propiedad que llega PRESENTE y vacia viaja como '' para
+// borrar el campo en SAP.
+//
+// La distincion es entre "la clave no vino" y "la clave vino vacia", y necesita hasByPath: el
+// return de pickByPath normaliza undefined a null, asi que colapsa los dos casos. Sin eso, la
+// bandera borraria tambien los campos que el workflow simplemente no maneja.
+//
+// Solo la usa el PATCH de lineas de buildQuotationLineUpdates. La cabecera queda afuera a
+// proposito: ahi la omision es lo que protege los campos que alguien corrige a mano en SAP.
+export function mapHubspotToSapFields(source, mappings, { logger = null, clearEmptyValues = false } = {}) {
   const mapped = {};
 
   for (const mapping of Array.isArray(mappings) ? mappings : []) {
@@ -56,11 +67,20 @@ export function mapHubspotToSapFields(source, mappings, { logger = null } = {}) 
         hubspotProperty: targetField,
         value,
       });
+    }
+
+    const isEmpty = value === null
+      || typeof value === 'undefined'
+      || isBlankString(value)
+      || isEmptyTextSentinel(value);
+
+    if (!isEmpty) {
+      mapped[sourceField] = value;
       continue;
     }
 
-    if (value !== null && typeof value !== 'undefined' && !isBlankString(value)) {
-      mapped[sourceField] = value;
+    if (clearEmptyValues && hasByPath(source, targetField)) {
+      mapped[sourceField] = '';
     }
   }
 
@@ -662,64 +682,141 @@ function resolveQuotationLinkLine(lineItem, linkLines, usedLineNums) {
 // (ItemCode, LineNum, BaseType/BaseEntry/BaseLine y los importes), pero NO es la lista completa
 // de campos que SAP prohibe cambiar: audita los mapeos product/orders-quotations del tenant
 // antes de prender este flujo.
-export function buildQuotationLineUpdates({ lineItems, productMappings, lineMappings = [], linkLines, taxCodes = [], miscPriceCalculationConfig = null, discountConfig = null, logger = null }) {
+// El proximo LineNum libre es max + 1, NO la cantidad de lineas: borrar una fila del medio deja
+// un hueco (verificado contra SAP: conservando 0 y 3, los sobrevivientes siguen siendo 0 y 3), asi
+// que `length` colisionaria con una fila viva y la sobreescribiria en silencio.
+//
+// `documentLineNums` (los LineNum que devolvio el GET a SAP) manda sobre `linkLines`: el link
+// puede estar desincronizado justamente por los descuadres que este flujo viene a arreglar.
+function resolveNextLineNum({ documentLineNums, linkLines }) {
+  const candidates = [
+    ...(Array.isArray(documentLineNums) ? documentLineNums : []),
+    ...(Array.isArray(linkLines) ? linkLines.map((link) => link?.sapLineNum) : []),
+  ]
+    // normalizeNumber(null) devuelve 0, no null, asi que un sapLineNum nulo se colaria como 0.
+    .filter((value) => value !== null && typeof value !== 'undefined')
+    .map((value) => normalizeNumber(value, null))
+    .filter((value) => Number.isFinite(value));
+
+  return candidates.length ? Math.max(...candidates) + 1 : 0;
+}
+
+export function buildQuotationLineUpdates({ lineItems, productMappings, lineMappings = [], linkLines, documentLineNums = [], taxCodes = [], miscPriceCalculationConfig = null, discountConfig = null, logger = null }) {
   const updates = [];
   const usedLineNums = new Set();
+  let nextLineNum = resolveNextLineNum({ documentLineNums, linkLines });
 
   for (const lineItem of Array.isArray(lineItems) ? lineItems : []) {
     const matchedLink = resolveQuotationLinkLine(lineItem, linkLines, usedLineNums);
-    if (!matchedLink) {
-      logger?.warn?.({
-        msg: 'Skipping quotation line update: no stored LineNum for HubSpot line item',
-        hubspotLineItemId: toNonEmptyString(lineItem?.hubspot_id),
-        hubspotProductId: toNonEmptyString(lineItem?.hs_product_id),
-        sku: toNonEmptyString(lineItem?.hs_sku),
-      });
-      continue;
-    }
-
-    usedLineNums.add(matchedLink.sapLineNum);
 
     const mapped = mapHubspotToSapFields(lineItem, productMappings, { logger });
     const quantity = normalizeNumber(mapped?.Quantity ?? lineItem?.quantity, null);
     const discount = resolveLineDiscount(lineItem, discountConfig, null);
     const { unitPrice, warning } = resolveUnitPrice({ mapped, lineItem, miscPriceCalculationConfig });
-
-    if (warning) {
-      logger?.warn?.({ msg: warning, sapLineNum: matchedLink.sapLineNum });
-    }
-
-    const mappedLine = pickMappedLineFields(
-      mapHubspotToSapFields(lineItem, lineMappings, { logger })
-    );
-    const line = { ...mappedLine, LineNum: matchedLink.sapLineNum };
-
-    if (Number.isFinite(unitPrice)) {
-      line.UnitPrice = unitPrice;
-    }
-
-    if (Number.isFinite(quantity) && quantity > 0) {
-      line.Quantity = quantity;
-    }
-
-    if (Number.isFinite(discount)) {
-      line.DiscountPercent = discount;
-    }
-
     // Allow changing the warehouse on update (accepts both `warehouseCode` and `warehouses`).
     const warehouseCode = toNonEmptyString(lineItem?.warehouseCode || lineItem?.warehouses);
-    if (warehouseCode) {
-      line.WarehouseCode = warehouseCode;
-    }
-
     const taxCode = resolveTaxCodeByRate(taxCodes, lineItem?.hs_tax_rate);
-    if (taxCode) {
-      line.TaxCode = taxCode;
+
+    if (warning) {
+      logger?.warn?.({ msg: warning, sapLineNum: matchedLink?.sapLineNum ?? nextLineNum });
     }
 
-    updates.push(line);
+    if (matchedLink) {
+      usedLineNums.add(matchedLink.sapLineNum);
+
+      // clearEmptyValues: en una linea que YA existe, una propiedad de HubSpot que llega presente
+      // y vacia significa "borra este campo en SAP", no "no lo toques". Sin esto el PATCH omite la
+      // clave, SAP conserva el valor anterior (el merge es por LineNum) y un campo que el asesor
+      // vacio en HubSpot se queda con el texto viejo para siempre, sin error en ningun lado.
+      // La clave AUSENTE del payload se sigue omitiendo: eso es lo que protege un campo que este
+      // workflow no maneja.
+      const mappedLine = pickMappedLineFields(
+        mapHubspotToSapFields(lineItem, lineMappings, { logger, clearEmptyValues: true })
+      );
+      const line = { ...mappedLine, LineNum: matchedLink.sapLineNum };
+
+      if (Number.isFinite(unitPrice)) {
+        line.UnitPrice = unitPrice;
+      }
+
+      if (Number.isFinite(quantity) && quantity > 0) {
+        line.Quantity = quantity;
+      }
+
+      if (Number.isFinite(discount)) {
+        line.DiscountPercent = discount;
+      }
+
+      if (warehouseCode) {
+        line.WarehouseCode = warehouseCode;
+      }
+
+      if (taxCode) {
+        line.TaxCode = taxCode;
+      }
+
+      updates.push(line);
+      continue;
+    }
+
+    // Line item que no existe en SAP: se da de alta. Antes se descartaba con un warn y el evento
+    // terminaba en `completed`, asi que agregar un articulo en HubSpot no llegaba nunca a la
+    // oferta y nadie se enteraba.
+    //
+    // El alta se construye completa, como en mapDocumentLines: SAP no tiene de donde sacar los
+    // datos de una fila que esta creando. Aca NO se usa clearEmptyValues -- no hay valor previo
+    // que borrar, y mandar '' obligaria a SAP a resolver sus defaults sobre un campo en blanco.
+    const itemCode = toNonEmptyString(mapped?.ItemCode || lineItem?.hs_sku || lineItem?.itemCode);
+    if (!itemCode) {
+      throw new PermanentWebhookError(
+        'ItemCode/hs_sku is required to add a new quotation line'
+      );
+    }
+
+    const newQuantity = normalizeNumber(mapped?.Quantity ?? lineItem?.quantity, 1);
+    if (!Number.isFinite(newQuantity) || newQuantity <= 0) {
+      throw new PermanentWebhookError(`Invalid quantity for item ${itemCode}`);
+    }
+
+    const mappedNewLine = pickMappedLineFields(
+      mapHubspotToSapFields(lineItem, lineMappings, { logger })
+    );
+    const newLine = {
+      ...mappedNewLine,
+      // Obligatorio en TODA entrada: una linea sin LineNum hace que SAP haga merge POSICIONAL y
+      // sobreescriba la fila de ese indice (verificado: una entrada sin LineNum le cambio el
+      // ItemCode a la linea 0). SAP responde 204, sin error.
+      LineNum: nextLineNum,
+      ItemCode: itemCode,
+      Quantity: newQuantity,
+    };
+    nextLineNum += 1;
+
+    // B1 takes either the net price or the VAT-inclusive price, never both.
+    if (!Object.prototype.hasOwnProperty.call(mappedNewLine, 'PriceAfterVAT')) {
+      newLine.UnitPrice = Number.isFinite(unitPrice) ? unitPrice : 0;
+    }
+
+    if (Number.isFinite(discount) && discount !== 0) {
+      newLine.DiscountPercent = discount;
+    }
+
+    // Se omite cuando viene vacio en vez de mandar null: SAP resuelve el almacen por defecto
+    // (verificado, puso '01'), y un null explicito en un PATCH no tiene el mismo trato que en el
+    // POST de creacion.
+    if (warehouseCode) {
+      newLine.WarehouseCode = warehouseCode;
+    }
+
+    if (taxCode) {
+      newLine.TaxCode = taxCode;
+    }
+
+    updates.push(newLine);
   }
 
+  // Ya no es alcanzable por falta de match (esas lineas ahora se dan de alta): solo salta si el
+  // evento llego sin ninguna linea, que es un payload roto y no debe vaciar la oferta entera.
   if (!updates.length) {
     throw new PermanentWebhookError('No matching quotation lines found to update');
   }

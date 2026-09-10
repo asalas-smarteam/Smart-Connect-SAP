@@ -438,13 +438,117 @@ describe('order-builder.service buildQuotationLineUpdates', () => {
     expect(updates).toEqual([{ LineNum: 3, UnitPrice: 5, Quantity: 1 }]);
   });
 
-  it('throws when none match by id or SKU', () => {
+  // Antes esto tiraba: una linea sin match se descartaba con un warn y el evento terminaba en
+  // `completed`, asi que agregar un articulo en HubSpot no llegaba nunca a la oferta. Ahora se da
+  // de alta.
+  it('da de alta la linea que no matchea por id ni por SKU', () => {
+    const updates = buildQuotationLineUpdates({
+      productMappings,
+      linkLines,
+      lineItems: [{ hubspot_id: 'unknown', hs_sku: 'A99', quantity: '3', price: '1' }],
+    });
+
+    expect(updates).toEqual([
+      { LineNum: 2, ItemCode: 'A99', Quantity: 3, UnitPrice: 1 },
+    ]);
+  });
+
+  it('numera el alta con max(LineNum) + 1 y no con la cantidad de lineas', () => {
+    // linkLines con hueco: borrar la del medio deja 0 y 3, asi que `length` (2) apuntaria a una
+    // fila viva y la sobreescribiria.
+    const updates = buildQuotationLineUpdates({
+      productMappings,
+      linkLines: [
+        { hubspotLineItemId: 'li-1', sapLineNum: 0 },
+        { hubspotLineItemId: 'li-4', sapLineNum: 3 },
+      ],
+      lineItems: [{ hubspot_id: 'nuevo', hs_sku: 'A99', quantity: '1', price: '1' }],
+    });
+
+    expect(updates[0].LineNum).toBe(4);
+  });
+
+  it('prefiere los LineNum de SAP sobre los del link para numerar el alta', () => {
+    // El link puede haber quedado corto por los descuadres que este flujo arregla: si se numerara
+    // desde el link (max 0 -> LineNum 1) el alta pisaria la linea 1 que SAP si tiene.
+    const updates = buildQuotationLineUpdates({
+      productMappings,
+      linkLines: [{ hubspotLineItemId: 'li-1', sapLineNum: 0 }],
+      documentLineNums: [0, 1, 2],
+      lineItems: [{ hubspot_id: 'nuevo', hs_sku: 'A99', quantity: '1', price: '1' }],
+    });
+
+    expect(updates[0].LineNum).toBe(3);
+  });
+
+  it('numera desde 0 cuando no hay ninguna linea previa', () => {
+    const updates = buildQuotationLineUpdates({
+      productMappings,
+      linkLines: [],
+      lineItems: [{ hubspot_id: 'nuevo', hs_sku: 'A99', quantity: '1', price: '1' }],
+    });
+
+    expect(updates[0].LineNum).toBe(0);
+  });
+
+  // Guard contra la trampa medida en SAP: una entrada sin LineNum hace merge POSICIONAL y le
+  // cambia el ItemCode a la fila de ese indice, con respuesta 204 y sin error.
+  it('emite LineNum en TODAS las entradas, altas incluidas', () => {
+    const updates = buildQuotationLineUpdates({
+      productMappings,
+      linkLines,
+      lineItems: [
+        { hubspot_id: 'li-1', hs_sku: 'A01', quantity: '1', price: '5' },
+        { hubspot_id: 'nuevo', hs_sku: 'A99', quantity: '1', price: '1' },
+      ],
+    });
+
+    expect(updates).toHaveLength(2);
+    for (const update of updates) {
+      expect(Number.isInteger(update.LineNum)).toBe(true);
+    }
+  });
+
+  it('revienta cuando el alta no tiene ItemCode resoluble, en vez de descartarla en silencio', () => {
+    const logger = { warn: jest.fn() };
+
     expect(() =>
       buildQuotationLineUpdates({
         productMappings,
         linkLines,
-        lineItems: [{ hubspot_id: 'unknown', hs_sku: 'A99', price: '1' }],
+        logger,
+        lineItems: [{ hubspot_id: 'nuevo', quantity: '1', price: '1' }],
       })
+    ).toThrow(/ItemCode\/hs_sku is required to add a new quotation line/);
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('derrama los campos de lineMappings tambien en el alta', () => {
+    const updates = buildQuotationLineUpdates({
+      productMappings,
+      lineMappings: [{ sourceField: 'ItemDescription', targetField: 'item_description' }],
+      linkLines,
+      lineItems: [
+        {
+          hubspot_id: 'nuevo',
+          hs_sku: 'A99',
+          quantity: '1',
+          price: '1',
+          item_description: 'Descripcion del asesor',
+        },
+      ],
+    });
+
+    expect(updates[0]).toMatchObject({
+      LineNum: 2,
+      ItemCode: 'A99',
+      ItemDescription: 'Descripcion del asesor',
+    });
+  });
+
+  it('sigue reventando cuando el evento no trae ninguna linea', () => {
+    expect(() =>
+      buildQuotationLineUpdates({ productMappings, linkLines, lineItems: [] })
     ).toThrow(/No matching quotation lines/);
   });
 
@@ -481,9 +585,13 @@ describe('order-builder.service buildQuotationLineUpdates', () => {
     ]);
   });
 
-  // Si el workflow no manda la propiedad (o la manda vacia) la clave no viaja, para no pisar en
-  // SAP una descripcion que alguien haya corregido a mano ahi.
-  it('omite el campo de linea cuando el line item no trae valor', () => {
+  // En una linea que ya existe, "vacio" y "no vino" significan cosas distintas:
+  // - la propiedad AUSENTE del payload se omite, para no pisar en SAP un campo que este workflow
+  //   no maneja y que alguien pudo corregir a mano ahi;
+  // - la propiedad PRESENTE y vacia viaja como '' para BORRAR el campo. Sin esto el PATCH omite la
+  //   clave, SAP conserva el valor anterior (merge por LineNum) y una descripcion que el asesor
+  //   borro en HubSpot se queda con el texto viejo para siempre.
+  it('omite el campo de linea ausente del payload y limpia el que llega presente y vacio', () => {
     const updates = buildQuotationLineUpdates({
       productMappings,
       lineMappings: [{ sourceField: 'ItemDescription', targetField: 'item_description' }],
@@ -495,10 +603,24 @@ describe('order-builder.service buildQuotationLineUpdates', () => {
     });
 
     expect(updates[0]).not.toHaveProperty('ItemDescription');
-    expect(updates[1]).not.toHaveProperty('ItemDescription');
+    expect(updates[1].ItemDescription).toBe('');
   });
 
-  it('descarta el campo de linea que llega como el texto "null" y avisa', () => {
+  it('limpia el campo de linea que llega como null explicito', () => {
+    // Es como lo serializan los workflows del tenant: `?? null` en cada propiedad.
+    const updates = buildQuotationLineUpdates({
+      productMappings,
+      lineMappings: [{ sourceField: 'ItemDescription', targetField: 'item_description' }],
+      linkLines,
+      lineItems: [
+        { hubspot_id: 'li-1', hs_sku: 'A01', quantity: '1', price: '5', item_description: null },
+      ],
+    });
+
+    expect(updates[0].ItemDescription).toBe('');
+  });
+
+  it('limpia el campo de linea que llega como el texto "null" y avisa', () => {
     const logger = { warn: jest.fn() };
 
     const updates = buildQuotationLineUpdates({
@@ -511,13 +633,30 @@ describe('order-builder.service buildQuotationLineUpdates', () => {
       ],
     });
 
-    expect(updates[0]).not.toHaveProperty('ItemDescription');
+    // El texto "null" es un workflow mal configurado, pero la propiedad VINO: se trata como vacia
+    // y se limpia. El warn se mantiene porque es lo que hace que alguien lo corrija en HubSpot.
+    expect(updates[0].ItemDescription).toBe('');
     expect(logger.warn).toHaveBeenCalledWith({
       msg: 'Propiedad de HubSpot descartada por llegar como el texto "null"/"undefined"',
       sapField: 'ItemDescription',
       hubspotProperty: 'item_description',
       value: 'null',
     });
+  });
+
+  // El alta no usa clearEmptyValues: no hay valor previo que borrar, y mandar '' obligaria a SAP a
+  // resolver sus defaults sobre un campo en blanco.
+  it('no manda cadenas vacias en el alta', () => {
+    const updates = buildQuotationLineUpdates({
+      productMappings,
+      lineMappings: [{ sourceField: 'ItemDescription', targetField: 'item_description' }],
+      linkLines,
+      lineItems: [
+        { hubspot_id: 'nuevo', hs_sku: 'A99', quantity: '1', price: '1', item_description: null },
+      ],
+    });
+
+    expect(updates[0]).not.toHaveProperty('ItemDescription');
   });
 
   // RESERVED_LINE_FIELDS protege el PATCH igual que la creacion: LineNum identifica la linea a
