@@ -89,7 +89,19 @@ export function mapHubspotToSapFields(source, mappings, { logger = null, clearEm
 
 // Header fields owned by the builders (or with dedicated coercion, like PaymentGroupCode)
 // are excluded from the generic deal-mapping spread so mapped raw values cannot clobber them.
-const RESERVED_HEADER_FIELDS = new Set(['CardCode', 'DocDueDate', 'DocumentLines', 'PaymentGroupCode']);
+//
+// DocumentsOwner entra aca por el mismo motivo, y ademas arregla un bug latente: su mapeo
+// `DocumentsOwner -> <propiedad>` existe para decir DE DONDE sale el digitador, no para
+// copiar el valor. Sin reservarlo, el spread escribia el hubspot_owner_id crudo
+// ('82929068') en un campo donde SAP espera un EmployeeID entero, sin pasar por la
+// traduccion de OwnerMappings. Quien lo resuelve es resolveDocumentsOwnerCode.
+const RESERVED_HEADER_FIELDS = new Set([
+  'CardCode',
+  'DocDueDate',
+  'DocumentLines',
+  'PaymentGroupCode',
+  'DocumentsOwner',
+]);
 
 // BoDocSpecialLineType member for a free-text special line (the alternative is dslt_Subtotal).
 const SPECIAL_LINE_TYPE_TEXT = 'dslt_Text';
@@ -448,6 +460,7 @@ export function buildOrderPayload({
   cardCode,
   documentLines,
   slpCode = null,
+  documentsOwner = null,
   paymentGroupCode = null,
   mappedDealFields = {},
 }) {
@@ -466,6 +479,12 @@ export function buildOrderPayload({
     payload.SalesPersonCode = slpCode;
   }
 
+  // Omitido cuando no se resuelve, nunca enviado en null: SAP llena DocumentsOwner solo
+  // (con el empleado del usuario del Service Layer) y mandar null lo dejaria vacio.
+  if (Number.isInteger(documentsOwner)) {
+    payload.DocumentsOwner = documentsOwner;
+  }
+
   if (Number.isInteger(paymentGroupCode)) {
     payload.PaymentGroupCode = paymentGroupCode;
   }
@@ -480,6 +499,7 @@ export function buildQuotationPayload({
   cardCode,
   documentLines,
   slpCode = null,
+  documentsOwner = null,
   paymentGroupCode = null,
   mappedDealFields = {},
 }) {
@@ -496,6 +516,10 @@ export function buildQuotationPayload({
 
   if (Number.isInteger(slpCode)) {
     payload.SalesPersonCode = slpCode;
+  }
+
+  if (Number.isInteger(documentsOwner)) {
+    payload.DocumentsOwner = documentsOwner;
   }
 
   if (Number.isInteger(paymentGroupCode)) {
@@ -556,6 +580,7 @@ export function buildOrderFromQuotationPayload({
   baseEntry,
   baseLines,
   slpCode = null,
+  documentsOwner = null,
   mappedDealFields = {},
   // Contexto product/orders-quotations, el mismo que derraman mapDocumentLines al crear y
   // buildQuotationLineUpdates al actualizar. Sin esto, un campo que el asesor corrige en los
@@ -615,6 +640,13 @@ export function buildOrderFromQuotationPayload({
 
   if (Number.isInteger(slpCode)) {
     payload.SalesPersonCode = slpCode;
+  }
+
+  // La orden NO hereda el DocumentsOwner de la oferta base: SAP lo vuelve a poner con el
+  // usuario del Service Layer al crear el documento nuevo. Por eso se resuelve otra vez aca
+  // en vez de confiar en la copia desde la oferta.
+  if (Number.isInteger(documentsOwner)) {
+    payload.DocumentsOwner = documentsOwner;
   }
 
   return payload;
@@ -733,6 +765,26 @@ export function buildQuotationLineUpdates({ lineItems, productMappings, lineMapp
       const mappedLine = pickMappedLineFields(
         mapHubspotToSapFields(lineItem, lineMappings, { logger, clearEmptyValues: true })
       );
+
+      // ItemDescription es la EXCEPCION al "vacio = borrar" de arriba: en SAP no es un campo libre
+      // como U_TEXTO_LIBRE, es la descripcion de la linea. Mandarla como '' la deja literalmente en
+      // blanco en la oferta -- verificado en produccion: seis lineas de la 51802 quedaron sin
+      // descripcion, SAP NO cae al articulo del maestro por su cuenta.
+      //
+      // El valor por defecto lo resuelve el workflow de HubSpot, que manda el nombre del producto
+      // cuando el asesor no escribio nada (`item_description || name`). Esta guarda es para el dia
+      // que eso falte -- un tenant nuevo, alguien que edita el workflow, la propiedad renombrada:
+      // omitiendo la clave SAP conserva la descripcion que ya tiene, asi que el peor caso pasa a
+      // ser "no se actualizo" en vez de "se borro", que es un error mucho mas barato.
+      if (mappedLine.ItemDescription === '') {
+        delete mappedLine.ItemDescription;
+        logger?.warn?.({
+          msg: 'ItemDescription llego vacia: se conserva la que ya tiene SAP. El workflow deberia mandar el nombre del producto como default.',
+          sapLineNum: matchedLink.sapLineNum,
+          sku: toNonEmptyString(lineItem?.hs_sku),
+        });
+      }
+
       const line = { ...mappedLine, LineNum: matchedLink.sapLineNum };
 
       if (Number.isFinite(unitPrice)) {

@@ -9,6 +9,7 @@ import { resolveBusinessPartnerAndContactEmployees } from '#domain/business-part
 import { buildBpAddresses } from '#domain/business-partners/bp-addresses.service.js';
 import { buildSapPropertiesFlags } from '#domain/business-partners/sap-properties-flags.service.js';
 import { normalizeNumber, toNonEmptyString } from '#shared/utils/string.utils.js';
+import { pickByPath } from '#shared/utils/object-path.utils.js';
 
 // `sapCalls` es el array del grabador de tráfico (lo inyecta el use case): se comparte por
 // referencia para que el catch vea todas las llamadas, incluida la que falló.
@@ -116,6 +117,95 @@ export async function resolveDocumentSlpCode({
   }
 
   return slpCode;
+}
+
+// Campo de SAP que identifica al DIGITADOR del documento. Se resuelve aparte de
+// SalesPersonCode porque son dos catalogos distintos de SAP: SalesPersonCode es un SlpCode
+// de /SalesPersons y DocumentsOwner es un EmployeeID de /EmployeesInfo. Mandar el SlpCode
+// en DocumentsOwner asigna OTRA persona y SAP lo acepta sin devolver error.
+const DOCUMENTS_OWNER_SAP_FIELD = 'DocumentsOwner';
+
+// El tenant que quiera digitador crea en su contexto deal/orders-quotations un FieldMapping
+// `DocumentsOwner -> <propiedad>` (por ejemplo `digitador`) y llena `sapOwnerId_2` en sus
+// OwnerMappings. Esa fila de mapeo es TODO el interruptor: un tenant que no la tenga recibe
+// null aca y su payload sale identico a como sale hoy, sin la clave DocumentsOwner.
+//
+// La propiedad de HubSpot NO esta fija en el codigo a proposito: el digitador puede vivir en
+// una propiedad con otro nombre segun el portal, y el mapeo ya es el lugar donde el tenant
+// declara eso. De ahi que se busque el mapeo por sourceField y se lea el deal por su
+// targetField, en vez de leer `deal.digitador` directo.
+function resolveDocumentsOwnerMapping(dealMappings) {
+  return (Array.isArray(dealMappings) ? dealMappings : []).find(
+    (mapping) => mapping?.isActive !== false
+      && String(mapping?.sourceField || '').trim() === DOCUMENTS_OWNER_SAP_FIELD
+      && String(mapping?.targetField || '').trim() !== ''
+  ) || null;
+}
+
+// Espeja resolveDocumentSlpCode pero por el SEGUNDO catalogo: entra por la propiedad que el
+// mapeo declare (no por hubspot_owner_id, que es el asesor y casi nunca es el digitador) y
+// traduce con `sapOwnerId_2` en vez de `sapOwnerId`.
+//
+// Todos los caminos sin dato devuelven null en vez de tirar: un digitador sin homologar no
+// puede tumbar la creacion de la cotizacion, que es el motivo por el que el asesor disparo
+// el workflow. El warn es lo que hace que alguien complete el OwnerMapping.
+export async function resolveDocumentsOwnerCode({
+  runtimeRepository,
+  tenantModels,
+  deal,
+  dealMappings,
+  hubspotCredentials,
+  logger,
+}) {
+  const mapping = resolveDocumentsOwnerMapping(dealMappings);
+
+  if (!mapping) {
+    return null;
+  }
+
+  const hubspotProperty = String(mapping.targetField).trim();
+  const dealId = toNonEmptyString(deal?.hs_object_id);
+  const hubspotOwnerId = toNonEmptyString(pickByPath(deal || {}, hubspotProperty));
+
+  if (!hubspotOwnerId) {
+    logger?.warn?.({
+      msg: 'DocumentsOwner no resuelto: la propiedad de HubSpot del digitador llego vacia',
+      hubspotProperty,
+      dealId,
+    });
+    return null;
+  }
+
+  const ownerMapping = await runtimeRepository.findOwnerMappingByHubspotOwner({
+    tenantModels,
+    hubspotCredentialId: hubspotCredentials?._id,
+    hubspotOwnerId,
+  });
+  const sapOwnerId2 = toNonEmptyString(ownerMapping?.sapOwnerId_2);
+
+  if (!sapOwnerId2) {
+    logger?.warn?.({
+      msg: 'OwnerMapping sin sapOwnerId_2 para el digitador de HubSpot',
+      hubspotProperty,
+      hubspotOwnerId,
+      dealId,
+    });
+    return null;
+  }
+
+  const documentsOwner = Number(sapOwnerId2);
+  if (!Number.isInteger(documentsOwner)) {
+    logger?.warn?.({
+      msg: 'OwnerMapping con sapOwnerId_2 invalido para DocumentsOwner',
+      hubspotProperty,
+      hubspotOwnerId,
+      sapOwnerId_2: sapOwnerId2,
+      dealId,
+    });
+    return null;
+  }
+
+  return documentsOwner;
 }
 
 // Mirrors the Business Partner resolution + HubSpot id sync + contact employee steps of

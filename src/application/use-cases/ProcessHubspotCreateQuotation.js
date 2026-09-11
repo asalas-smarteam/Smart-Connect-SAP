@@ -14,6 +14,7 @@ import {
   mergeHubspotResponses,
   resolveBusinessPartnerForDocument,
   resolveDocumentSlpCode,
+  resolveDocumentsOwnerCode,
 } from './webhookQuotationSupport.js';
 import { createNoopSapCallRecorder } from '../services/sap-call-audit.service.js';
 import { BusinessPartnerPayloadStrategyFactory } from '#domain/business-partners/business-partner-payload.factory.js';
@@ -158,6 +159,16 @@ export class ProcessHubspotCreateQuotation {
         hubspotCredentials,
         logger: this.logger,
       });
+      // Digitador. Devuelve null salvo que el tenant tenga el mapeo DocumentsOwner en su
+      // contexto deal/orders-quotations, asi que los demas tenants no cambian de payload.
+      const documentsOwner = await resolveDocumentsOwnerCode({
+        runtimeRepository: this.runtimeRepository,
+        tenantModels,
+        deal,
+        dealMappings: mappings.dealOrdersQuotationsMappings,
+        hubspotCredentials,
+        logger: this.logger,
+      });
       const mappedDeal = mapHubspotToSapFields(
         deal || {},
         mappings.dealOrdersQuotationsMappings,
@@ -169,6 +180,7 @@ export class ProcessHubspotCreateQuotation {
         cardCode,
         documentLines,
         slpCode,
+        documentsOwner,
         paymentGroupCode,
         mappedDealFields: mappedDeal,
       });

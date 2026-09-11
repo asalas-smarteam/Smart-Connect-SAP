@@ -71,9 +71,19 @@ export class ManageOwnerMappings {
       if (validation) return validation;
 
       const updatePayload = {};
-      const { sapOwnerId, sapOwnerName, active } = payload || {};
+      const {
+        sapOwnerId,
+        // Segundo catalogo de SAP (EmployeeID) para el digitador. Se acepta aparte porque
+        // no es un alias de sapOwnerId: los dos pueden convivir en la misma fila.
+        sapOwnerId_2: sapOwnerId2,
+        sapOwnerName,
+        active,
+      } = payload || {};
       if (Object.hasOwn(payload || {}, 'sapOwnerId')) {
         updatePayload.sapOwnerId = sapOwnerId;
+      }
+      if (Object.hasOwn(payload || {}, 'sapOwnerId_2')) {
+        updatePayload.sapOwnerId_2 = sapOwnerId2;
       }
       if (Object.hasOwn(payload || {}, 'sapOwnerName')) {
         updatePayload.sapOwnerName = sapOwnerName;
@@ -118,6 +128,7 @@ export class ManageOwnerMappings {
         hubspotOwnerEmail,
         hubspotOwnerName,
         sapOwnerId,
+        sapOwnerId_2: sapOwnerId2,
         sapOwnerName,
       } = payload || {};
 
@@ -140,6 +151,7 @@ export class ManageOwnerMappings {
           hubspotOwnerEmail,
           hubspotOwnerName,
           sapOwnerId,
+          sapOwnerId_2: sapOwnerId2,
           sapOwnerName,
         },
       });

@@ -594,30 +594,30 @@ describe('order-builder.service buildQuotationLineUpdates', () => {
   it('omite el campo de linea ausente del payload y limpia el que llega presente y vacio', () => {
     const updates = buildQuotationLineUpdates({
       productMappings,
-      lineMappings: [{ sourceField: 'ItemDescription', targetField: 'item_description' }],
+      lineMappings: [{ sourceField: 'U_TEXTO_LIBRE', targetField: 'u_texto_libre' }],
       linkLines,
       lineItems: [
         { hubspot_id: 'li-1', hs_sku: 'A01', quantity: '1', price: '5' },
-        { hubspot_id: 'li-2', hs_sku: 'A02', quantity: '1', price: '5', item_description: '   ' },
+        { hubspot_id: 'li-2', hs_sku: 'A02', quantity: '1', price: '5', u_texto_libre: '   ' },
       ],
     });
 
-    expect(updates[0]).not.toHaveProperty('ItemDescription');
-    expect(updates[1].ItemDescription).toBe('');
+    expect(updates[0]).not.toHaveProperty('U_TEXTO_LIBRE');
+    expect(updates[1].U_TEXTO_LIBRE).toBe('');
   });
 
   it('limpia el campo de linea que llega como null explicito', () => {
     // Es como lo serializan los workflows del tenant: `?? null` en cada propiedad.
     const updates = buildQuotationLineUpdates({
       productMappings,
-      lineMappings: [{ sourceField: 'ItemDescription', targetField: 'item_description' }],
+      lineMappings: [{ sourceField: 'U_TEXTO_LIBRE', targetField: 'u_texto_libre' }],
       linkLines,
       lineItems: [
-        { hubspot_id: 'li-1', hs_sku: 'A01', quantity: '1', price: '5', item_description: null },
+        { hubspot_id: 'li-1', hs_sku: 'A01', quantity: '1', price: '5', u_texto_libre: null },
       ],
     });
 
-    expect(updates[0].ItemDescription).toBe('');
+    expect(updates[0].U_TEXTO_LIBRE).toBe('');
   });
 
   it('limpia el campo de linea que llega como el texto "null" y avisa', () => {
@@ -625,22 +625,82 @@ describe('order-builder.service buildQuotationLineUpdates', () => {
 
     const updates = buildQuotationLineUpdates({
       productMappings,
-      lineMappings: [{ sourceField: 'ItemDescription', targetField: 'item_description' }],
+      lineMappings: [{ sourceField: 'U_TEXTO_LIBRE', targetField: 'u_texto_libre' }],
       linkLines,
       logger,
       lineItems: [
-        { hubspot_id: 'li-1', hs_sku: 'A01', quantity: '1', price: '5', item_description: 'null' },
+        { hubspot_id: 'li-1', hs_sku: 'A01', quantity: '1', price: '5', u_texto_libre: 'null' },
       ],
     });
 
     // El texto "null" es un workflow mal configurado, pero la propiedad VINO: se trata como vacia
     // y se limpia. El warn se mantiene porque es lo que hace que alguien lo corrija en HubSpot.
-    expect(updates[0].ItemDescription).toBe('');
+    expect(updates[0].U_TEXTO_LIBRE).toBe('');
     expect(logger.warn).toHaveBeenCalledWith({
       msg: 'Propiedad de HubSpot descartada por llegar como el texto "null"/"undefined"',
-      sapField: 'ItemDescription',
-      hubspotProperty: 'item_description',
+      sapField: 'U_TEXTO_LIBRE',
+      hubspotProperty: 'u_texto_libre',
       value: 'null',
+    });
+  });
+
+  // ItemDescription es la EXCEPCION a "vacio = borrar": en SAP no es un campo libre, es la
+  // descripcion de la linea, y mandarla como '' la deja en blanco en la oferta (verificado en
+  // produccion: seis lineas de la 51802 quedaron sin descripcion, SAP no cae al maestro solo).
+  // El default lo resuelve el workflow de HubSpot con `item_description || name`; estos tests
+  // fijan la guarda que evita el blanqueo si eso falta.
+  describe('guarda de ItemDescription vacia', () => {
+    const descriptionMappings = [{ sourceField: 'ItemDescription', targetField: 'item_description' }];
+
+    it('nunca manda ItemDescription vacia: omite la clave y avisa', () => {
+      const logger = { warn: jest.fn() };
+
+      const updates = buildQuotationLineUpdates({
+        productMappings,
+        lineMappings: descriptionMappings,
+        linkLines,
+        logger,
+        lineItems: [
+          { hubspot_id: 'li-1', hs_sku: 'A01', quantity: '1', price: '5', item_description: null },
+          { hubspot_id: 'li-2', hs_sku: 'A02', quantity: '1', price: '5', item_description: '   ' },
+        ],
+      });
+
+      expect(updates[0]).not.toHaveProperty('ItemDescription');
+      expect(updates[1]).not.toHaveProperty('ItemDescription');
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ sku: 'A01', sapLineNum: 0 })
+      );
+    });
+
+    it('deja pasar la descripcion que el workflow ya resolvio', () => {
+      // El workflow manda `item_description || name`, asi que aca llega siempre con valor: la
+      // descripcion del asesor cuando escribio algo, o el nombre del producto cuando no.
+      const updates = buildQuotationLineUpdates({
+        productMappings,
+        lineMappings: descriptionMappings,
+        linkLines,
+        lineItems: [
+          { hubspot_id: 'li-1', hs_sku: 'A01', quantity: '1', price: '5', item_description: 'panel metal 100x100' },
+          { hubspot_id: 'li-2', hs_sku: 'A02', quantity: '1', price: '5', item_description: 'ARRANCADOR DIRECTO 9-13A 220VAC' },
+        ],
+      });
+
+      expect(updates[0].ItemDescription).toBe('panel metal 100x100');
+      expect(updates[1].ItemDescription).toBe('ARRANCADOR DIRECTO 9-13A 220VAC');
+    });
+
+    it('en el alta la clave se omite sin necesidad de la guarda: SAP resuelve el maestro', () => {
+      const updates = buildQuotationLineUpdates({
+        productMappings,
+        lineMappings: descriptionMappings,
+        linkLines,
+        lineItems: [
+          { hubspot_id: 'nuevo', hs_sku: 'A99', quantity: '1', price: '1', item_description: null },
+        ],
+      });
+
+      expect(updates[0]).not.toHaveProperty('ItemDescription');
     });
   });
 
@@ -762,5 +822,60 @@ describe('order-builder.service buildOrderPayload toma la cabecera del mapeo', (
     const payload = buildOrderPayload({ cardCode: 'CL00129', documentLines, mappedDealFields });
 
     expect(payload).not.toHaveProperty('Comments');
+  });
+});
+
+describe('order-builder.service DocumentsOwner', () => {
+  const baseArgs = {
+    cardCode: 'CL00129',
+    documentLines: [{ ItemCode: 'A01', Quantity: 1, UnitPrice: 10 }],
+  };
+
+  it('envia DocumentsOwner resuelto y NO el valor crudo del mapeo', () => {
+    const payload = buildQuotationPayload({
+      ...baseArgs,
+      slpCode: 64,
+      documentsOwner: 23,
+      // Asi llega el mapeo `DocumentsOwner -> digitador` despues de mapHubspotToSapFields: con
+      // el hubspot_owner_id crudo. Es un id de HubSpot, no un EmployeeID de SAP.
+      mappedDealFields: { DocumentsOwner: '82929068' },
+    });
+
+    expect(payload.DocumentsOwner).toBe(23);
+    expect(payload.SalesPersonCode).toBe(64);
+  });
+
+  // Sin esto, el spread generico escribia '82929068' en un campo donde SAP espera un entero.
+  it('descarta el DocumentsOwner del spread cuando no se resolvio ninguno', () => {
+    const payload = buildQuotationPayload({
+      ...baseArgs,
+      mappedDealFields: { DocumentsOwner: '82929068', Comments: 'ok' },
+    });
+
+    expect(payload).not.toHaveProperty('DocumentsOwner');
+    expect(payload.Comments).toBe('ok');
+  });
+
+  it('omite la clave cuando el digitador no se resolvio', () => {
+    const payload = buildQuotationPayload({ ...baseArgs, documentsOwner: null });
+
+    expect(payload).not.toHaveProperty('DocumentsOwner');
+  });
+
+  it('aplica el mismo criterio al convertir la oferta en orden', () => {
+    const payload = buildOrderFromQuotationPayload({
+      cardCode: 'CL00129',
+      baseEntry: 55990,
+      baseLines: [{ sapLineNum: 0 }],
+      documentsOwner: 23,
+      mappedDealFields: { DocumentsOwner: '82929068' },
+    });
+
+    expect(payload.DocumentsOwner).toBe(23);
+  });
+
+  it('pickMappedHeaderFields deja DocumentsOwner fuera', () => {
+    expect(pickMappedHeaderFields({ DocumentsOwner: '82929068', Comments: 'ok' }))
+      .toEqual({ Comments: 'ok' });
   });
 });

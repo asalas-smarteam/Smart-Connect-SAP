@@ -9,6 +9,7 @@ import {
   createDocumentAuditTrail,
   mergeHubspotResponses,
   resolveDocumentSlpCode,
+  resolveDocumentsOwnerCode,
 } from './webhookQuotationSupport.js';
 import { toNonEmptyString } from '#shared/utils/string.utils.js';
 
@@ -106,6 +107,17 @@ export class ProcessHubspotConvertQuotationToOrder {
         logger: this.logger,
       });
 
+      // Digitador. Mismo contexto de mapeos que la creacion de la oferta, asi que el tenant
+      // lo configura una sola vez y aplica a los dos documentos.
+      const documentsOwner = await resolveDocumentsOwnerCode({
+        runtimeRepository: this.runtimeRepository,
+        tenantModels,
+        deal,
+        dealMappings: mappings.dealOrdersQuotationsMappings,
+        hubspotCredentials,
+        logger: this.logger,
+      });
+
       const mappedDeal = mapHubspotToSapFields(deal || {}, mappings.dealOrdersQuotationsMappings, {
         logger: this.logger,
       });
@@ -115,6 +127,7 @@ export class ProcessHubspotConvertQuotationToOrder {
         baseEntry: quotationLink.sapDocEntry,
         baseLines: quotationLink.lines,
         slpCode,
+        documentsOwner,
         mappedDealFields: mappedDeal,
         // Al convertir, el asesor no solo ajusta la cabecera: tambien corrige campos de los
         // elementos de pedido (centro de costo, departamento, subdepartamento). Se usa el mismo

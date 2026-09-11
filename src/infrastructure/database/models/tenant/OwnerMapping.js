@@ -48,6 +48,28 @@ export const ownerMappingSchema = new Schema(
       type: String,
       default: null,
     },
+    // SEGUNDA lista de codigos de SAP para la MISMA persona de HubSpot. Existe porque
+    // `sapOwnerId` es un SlpCode (catalogo /SalesPersons, lo que viaja en SalesPersonCode)
+    // y `DocumentsOwner` espera un EmployeeID (catalogo /EmployeesInfo): son numeraciones
+    // distintas, asi que reusar `sapOwnerId` para las dos asignaria OTRA persona y SAP lo
+    // aceptaria sin error.
+    //
+    // Solo se usa en la direccion HubSpot -> SAP. La direccion SAP -> HubSpot sigue
+    // traduciendo unicamente por `sapOwnerId` (ver owner-directory.service.js): meter esta
+    // segunda lista ahi haria que un mismo codigo resolviera a dos owners distintos segun
+    // el catalogo del que venga, y el directorio no sabe de cual viene.
+    //
+    // Queda SIN indice unico a proposito, al reves que `sapOwnerId`. El lookup de
+    // resolveDocumentsOwnerCode entra por `hubspotOwnerId`, asi que la unicidad no aporta
+    // nada al camino de lectura, y un indice unico nuevo sobre una coleccion que ya tiene
+    // datos falla al crearse si algun tenant repite el codigo.
+    //
+    // Igual que `sapOwnerId`, un valor CSV ('23,24') NO sirve para HubSpot -> SAP:
+    // resolveDocumentsOwnerCode lo valida con Number.isInteger y omite el campo con un warn.
+    sapOwnerId_2: {
+      type: String,
+      default: null,
+    },
     active: {
       type: Boolean,
       default: true,
