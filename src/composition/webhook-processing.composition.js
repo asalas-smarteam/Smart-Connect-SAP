@@ -16,6 +16,9 @@ import MongooseWebhookEventProgressRepository from '#infrastructure/database/rep
 import MongooseWebhookReferenceRepository from '#infrastructure/database/repositories/MongooseWebhookReferenceRepository.js';
 import TenantWebhookRuntimeRepository from '#infrastructure/database/repositories/TenantWebhookRuntimeRepository.js';
 import { getWebhookFailureNotificationConfig } from '#infrastructure/config/webhookFailureNotification.config.js';
+import { createSalesDocumentStrategy } from '#infrastructure/sap/salesDocuments/salesDocumentStrategyFactory.js';
+import { S4SalesDocumentConfigRepository } from '#infrastructure/config/S4SalesDocumentConfigRepository.js';
+import { WarehouseStockConfigRepository } from '#infrastructure/config/WarehouseStockConfigRepository.js';
 import hubspotClient from '#infrastructure/hubspot/hubspot-client.adapter.js';
 import HubspotWebhookAdapter from '#infrastructure/hubspot/HubspotWebhookAdapter.js';
 import { buildPublishIntegrationStatus } from '#infrastructure/hubspot/dealIntegrationStatus.service.js';
@@ -79,6 +82,9 @@ export function buildProcessHubspotCreateQuotationUseCase() {
     webhookReferenceRepository: new MongooseWebhookReferenceRepository(),
     sapDocumentLinkRepository: new MongooseSapDocumentLinkRepository(),
     businessPartnerPayloadStrategyFactory: buildBusinessPartnerPayloadStrategyFactory(),
+    salesDocumentStrategyFactory: createSalesDocumentStrategy,
+    salesDocumentConfigRepository: new S4SalesDocumentConfigRepository(),
+    warehouseStockConfigRepository: new WarehouseStockConfigRepository(),
     buildWebhookSyncErrorEntry,
     buildErrorResponseSnapshot,
     buildWebhookSapAudit,

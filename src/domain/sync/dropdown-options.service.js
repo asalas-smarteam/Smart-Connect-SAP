@@ -42,9 +42,21 @@ function normalizeFieldList(fields) {
   return [...new Set(list.map(toTrimmedString).filter(Boolean))];
 }
 
-// Query values are stored raw in the config so a human can read the $filter,
+// Query values are stored raw in the config so a human can read the filter,
 // but the B1 transport forwards them untouched -- encoding belongs to whoever
 // builds the URL, so it happens here, once.
+//
+// La clave se acepta CON y SIN el `$` de OData y siempre sale con él, porque
+// guardarla con `$` vuelve el documento inmutable: Mongo < 5.0 (el de
+// producción es 4.4) rechaza cualquier clave prefijada y valida el documento
+// RESULTANTE, no el payload que uno manda. Un `dropdownOptionsSync` que tenga
+// `$filter` adentro no admite ni un `$set` ni un `$push` sobre otra parte del
+// documento, y la única salida es borrar el filtro -- que es exactamente lo
+// que hubo que hacerle a printer para poder agregarle una fuente. Guardado
+// como `filter` el documento sigue siendo editable, y los tenants que ya
+// tienen `$filter` no cambian de conducta porque una clave ya prefijada se
+// respeta tal cual. Eso mismo deja pasar intacto el `$filter` que arma
+// expandUdfSource, que se genera en memoria y nunca llega a Mongo.
 function normalizeQuery(query) {
   if (!query || typeof query !== 'object' || Array.isArray(query)) {
     return {};
@@ -55,7 +67,8 @@ function normalizeQuery(query) {
     const normalizedValue = toTrimmedString(value);
 
     if (normalizedKey && normalizedValue) {
-      accumulator[normalizedKey] = normalizedValue;
+      const odataKey = normalizedKey.startsWith('$') ? normalizedKey : `$${normalizedKey}`;
+      accumulator[odataKey] = normalizedValue;
     }
 
     return accumulator;
@@ -97,6 +110,29 @@ function expandUdfSource(rawSource) {
   };
 }
 
+// `labelField` (one path) stays the documented shape; `labelFields` (several)
+// is what a composed label needs. Both normalize to the same array so the
+// extraction engine keeps a single code path.
+function normalizeLabelFields(candidate) {
+  const many = Array.isArray(candidate?.labelFields)
+    ? candidate.labelFields.map(toTrimmedString).filter(Boolean)
+    : [];
+
+  if (many.length > 0) {
+    return many;
+  }
+
+  const single = toTrimmedString(candidate?.labelField);
+
+  return single ? [single] : [];
+}
+
+// Not run through toTrimmedString: a separator is meant to carry spaces, and
+// trimming " - " down to "-" would glue the parts together.
+function normalizeLabelSeparator(candidate) {
+  return typeof candidate?.labelSeparator === 'string' ? candidate.labelSeparator : ' ';
+}
+
 export function normalizeDropdownSource(rawSource, index = 0) {
   const id = `sources[${index}]`;
 
@@ -120,6 +156,7 @@ export function normalizeDropdownSource(rawSource, index = 0) {
   const serviceLayerPath = toTrimmedString(candidate.serviceLayerPath);
   const valueField = toTrimmedString(candidate.valueField);
   const fields = normalizeFieldList(candidate.fields);
+  const labelFields = normalizeLabelFields(candidate);
 
   if (!serviceLayerPath) {
     return { id, index, error: 'serviceLayerPath is required' };
@@ -145,7 +182,9 @@ export function normalizeDropdownSource(rawSource, index = 0) {
       query: normalizeQuery(candidate.query),
       optionsPath: toTrimmedString(candidate.optionsPath) || null,
       valueField,
-      labelField: toTrimmedString(candidate.labelField) || null,
+      labelField: labelFields[0] ?? null,
+      labelFields,
+      labelSeparator: normalizeLabelSeparator(candidate),
       fieldNameField: toTrimmedString(candidate.fieldNameField) || null,
       fieldNamePrefix: toTrimmedString(candidate.fieldNamePrefix),
       tableName: toTrimmedString(candidate.tableName) || null,
@@ -182,7 +221,19 @@ export function normalizeDropdownOptionsConfig(rawValue) {
   };
 }
 
-function buildOptions(rawItems, { valueField, labelField }) {
+// A label can be composed from several SAP fields, because B1 splits what a
+// human reads as one name across columns (EmployeesInfo has FirstName and
+// LastName and never a full name). Empty parts are dropped so a missing
+// MiddleName does not leave a double separator behind.
+function buildLabel(item, { labelFields, labelSeparator }) {
+  return (Array.isArray(labelFields) ? labelFields : [])
+    .map((path) => toTrimmedString(resolveByPath(item, path)))
+    .filter(Boolean)
+    .join(labelSeparator)
+    .trim();
+}
+
+function buildOptions(rawItems, { valueField, labelFields, labelSeparator }) {
   const items = Array.isArray(rawItems) ? rawItems : [];
   const options = [];
   const seen = new Set();
@@ -217,7 +268,7 @@ function buildOptions(rawItems, { valueField, labelField }) {
     seen.add(value);
     options.push({
       value,
-      label: (labelField ? toTrimmedString(resolveByPath(item, labelField)) : '') || value,
+      label: buildLabel(item, { labelFields, labelSeparator }) || value,
     });
   });
 

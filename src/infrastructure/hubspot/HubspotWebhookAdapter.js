@@ -3,6 +3,12 @@ import * as hubspotClient from './hubspotClient.js';
 import { resolveHubspotPropertyNameBySapField } from '#domain/orders/order-builder.service.js';
 import { toNonEmptyString } from '#shared/utils/string.utils.js';
 
+// Ni undefined ni null: `String(null)` deja el texto "null" escrito en HubSpot, la misma
+// basura contra la que ya se defienden los centinelas de cadena vacía de order-builder.service.
+function isPresent(value) {
+  return value !== undefined && value !== null;
+}
+
 export class HubspotWebhookAdapter {
   async getAccessToken({ tenantModels, hubspotCredentials }) {
     return hubspotAuthService.getAccessToken(
@@ -95,11 +101,16 @@ export class HubspotWebhookAdapter {
       const docNumProperty = resolveHubspotPropertyNameBySapField(dealMappings, 'DocNum');
       const dealProperties = {};
 
-      if (docEntryProperty && orderResponse?.DocEntry !== undefined) {
+      // La guarda anterior era `!== undefined`, y `null !== undefined` es verdadero: un número
+      // de documento nulo pasaba el filtro y `String(null)` escribía el TEXTO literal "null" en
+      // la propiedad del negocio. El adapter de S/4 devuelve null cuando la respuesta no trae
+      // número; B1 manda siempre un entero, así que para B1 esta guarda decide exactamente lo
+      // mismo que antes (incluido el 0, que sigue viajando como "0").
+      if (docEntryProperty && isPresent(orderResponse?.DocEntry)) {
         dealProperties[docEntryProperty] = String(orderResponse.DocEntry);
       }
 
-      if (docNumProperty && orderResponse?.DocNum !== undefined) {
+      if (docNumProperty && isPresent(orderResponse?.DocNum)) {
         dealProperties[docNumProperty] = String(orderResponse.DocNum);
       }
 

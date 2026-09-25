@@ -88,10 +88,38 @@ describe('normalizeDropdownSource', () => {
       query: { $filter: "Type eq 'bbpgt_CustomerGroup'" },
       valueField: 'Code',
       labelField: 'Name',
+      labelFields: ['Name'],
+      labelSeparator: ' ',
       optionsPath: null,
       fieldNameField: null,
       fields: ['GroupCode'],
     });
+  });
+
+  // Mongo 4.4 no deja guardar una clave con `$`, así que el config la escribe
+  // sin él y la URL de OData lo necesita: el prefijo se pone acá.
+  it('prefixes a query key stored without the OData dollar', () => {
+    const { source } = normalizeDropdownSource({
+      serviceLayerPath: '/SalesPersons',
+      query: { filter: "Active eq 'tYES'", top: '50' },
+      valueField: 'SalesEmployeeCode',
+      labelField: 'SalesEmployeeName',
+      fields: ['SalesPersonCode'],
+    });
+
+    expect(source.query).toEqual({ $filter: "Active eq 'tYES'", $top: '50' });
+  });
+
+  it('leaves an already prefixed query key untouched', () => {
+    const { source } = normalizeDropdownSource({
+      serviceLayerPath: '/SalesPersons',
+      query: { $filter: "Active eq 'tYES'" },
+      valueField: 'SalesEmployeeCode',
+      labelField: 'SalesEmployeeName',
+      fields: ['SalesPersonCode'],
+    });
+
+    expect(source.query).toEqual({ $filter: "Active eq 'tYES'" });
   });
 
   it('expands a udf shorthand into the generic per-row shape', () => {
@@ -133,6 +161,59 @@ describe('normalizeDropdownSource', () => {
     expect(normalizeDropdownSource({ serviceLayerPath: '/x', valueField: 'Code' }).error)
       .toBe('fields must contain at least one SAP field name');
     expect(normalizeDropdownSource('nope').error).toBe('source must be an object');
+  });
+});
+
+describe('extractOptionSets - composed labels', () => {
+  // B1 never stores a full name in one column: EmployeesInfo splits it across
+  // FirstName / MiddleName / LastName, so a single labelField would turn the
+  // whole dropdown into a list of surnames.
+  const { source } = normalizeDropdownSource({
+    serviceLayerPath: '/EmployeesInfo',
+    valueField: 'EmployeeID',
+    labelFields: ['FirstName', 'MiddleName', 'LastName'],
+    fields: ['DocumentsOwner'],
+  });
+
+  it('joins several label fields and skips the empty ones', () => {
+    const { optionSets } = extractOptionSets({
+      source,
+      rows: [
+        { EmployeeID: 709, FirstName: 'Abdiel', MiddleName: null, LastName: 'Garcia' },
+        { EmployeeID: 644, FirstName: 'Abdy', LastName: 'Hernandez' },
+      ],
+    });
+
+    expect(optionSets[0].options).toEqual([
+      { value: '709', label: 'Abdiel Garcia' },
+      { value: '644', label: 'Abdy Hernandez' },
+    ]);
+  });
+
+  it('honours a custom separator and keeps its spaces', () => {
+    const { source: dashed } = normalizeDropdownSource({
+      serviceLayerPath: '/EmployeesInfo',
+      valueField: 'EmployeeID',
+      labelFields: ['EmployeeCode', 'LastName'],
+      labelSeparator: ' - ',
+      fields: ['DocumentsOwner'],
+    });
+
+    const { optionSets } = extractOptionSets({
+      source: dashed,
+      rows: [{ EmployeeID: 182, EmployeeCode: '182', LastName: 'Herrarte' }],
+    });
+
+    expect(optionSets[0].options).toEqual([{ value: '182', label: '182 - Herrarte' }]);
+  });
+
+  it('falls back to the value when every label field is empty', () => {
+    const { optionSets } = extractOptionSets({
+      source,
+      rows: [{ EmployeeID: 500, FirstName: '  ', LastName: null }],
+    });
+
+    expect(optionSets[0].options).toEqual([{ value: '500', label: '500' }]);
   });
 });
 

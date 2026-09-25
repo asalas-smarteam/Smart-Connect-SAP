@@ -16,6 +16,15 @@ const documentsOwnerMapping = {
   targetField: 'digitador',
   objectType: 'deal',
   sourceContext: 'orders-quotations',
+  userField: true,
+};
+
+// printer: `ownercode` es una lista de HubSpot cuyo valor interno ya es el EmployeeID de SAP.
+const directDocumentsOwnerMapping = {
+  sourceField: 'DocumentsOwner',
+  targetField: 'ownercode',
+  objectType: 'deal',
+  sourceContext: 'orders-quotations',
 };
 
 function buildDeps({ ownerMapping = null } = {}) {
@@ -131,5 +140,45 @@ describe('resolveDocumentsOwnerCode', () => {
 
     expect(result).toBeNull();
     expect(deps.logger.warn).toHaveBeenCalled();
+  });
+
+  describe('mapeo sin userField (valor directo)', () => {
+    it('manda el valor de la propiedad tal cual, sin consultar OwnerMappings', async () => {
+      const deps = buildDeps({ ownerMapping: { sapOwnerId_2: '23' } });
+
+      const result = await resolveDocumentsOwnerCode({
+        ...deps,
+        deal: { ...deal, ownercode: '210' },
+        dealMappings: [directDocumentsOwnerMapping],
+      });
+
+      expect(result).toBe(210);
+      expect(deps.runtimeRepository.findOwnerMappingByHubspotOwner).not.toHaveBeenCalled();
+    });
+
+    it('descarta un valor no entero', async () => {
+      const deps = buildDeps();
+
+      const result = await resolveDocumentsOwnerCode({
+        ...deps,
+        deal: { ...deal, ownercode: 'Juan Perez' },
+        dealMappings: [directDocumentsOwnerMapping],
+      });
+
+      expect(result).toBeNull();
+      expect(deps.logger.warn).toHaveBeenCalled();
+    });
+
+    it('devuelve null cuando la propiedad llega vacia', async () => {
+      const deps = buildDeps();
+
+      const result = await resolveDocumentsOwnerCode({
+        ...deps,
+        deal: { ...deal, ownercode: null },
+        dealMappings: [directDocumentsOwnerMapping],
+      });
+
+      expect(result).toBeNull();
+    });
   });
 });

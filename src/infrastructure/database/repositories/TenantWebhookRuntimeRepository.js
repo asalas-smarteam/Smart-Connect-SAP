@@ -19,6 +19,7 @@ import {
   BP_ADDRESS_OBJECT_TYPE,
   BP_ADDRESS_SOURCE_CONTEXT,
 } from '#domain/business-partners/business-partner-creation.constants.js';
+import { resolveSapFlavor } from '#infrastructure/config/SapFlavorConfigRepository.js';
 
 // Key intencionalmente escrita "groupCodeDefauls" (sin la "t") — así existe en los tenants.
 const GROUP_CODE_DEFAULTS_CONFIG_KEY = 'groupCodeDefauls';
@@ -139,6 +140,10 @@ export class TenantWebhookRuntimeRepository {
       ),
     ]);
 
+    // Ausente o inválido => B1. Los cuatro tenants de producción no tienen esta llave y tienen
+    // que seguir yendo por el camino de siempre.
+    const sapFlavor = await resolveSapFlavor({ tenantModels });
+
     return {
       hubspotCredentials,
       sapConfig: {
@@ -166,6 +171,7 @@ export class TenantWebhookRuntimeRepository {
         isRequired: Boolean(requireDiscounts?.isRequired),
         fieldMappings: requireDiscounts?.fieldMappings ?? {},
       },
+      sapFlavor,
     };
   }
 

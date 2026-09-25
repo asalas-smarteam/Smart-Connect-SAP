@@ -181,3 +181,89 @@ Dos condiciones del portal: la propiedad tiene que **existir y ser escribible** 
     "company": ["u_subgrupo", "mobile_phone", "cardcurrency", "phone"],
     "contact": ["firstname", "lastname", "phone"]
 }}
+
+Detalle: s4SalesDocument
+Datos de cabecera que SAP S/4HANA exige en toda oferta de venta. Cada uno de los primeros cuatro campos puede venir también del mapeo del negocio desde HubSpot; esta configuración proporciona los valores por defecto cuando el negocio no los trae. Los valores de `quotationType`, `salesOrganization`, `distributionChannel` y `division` los define el equipo funcional de SAP del cliente, no la integración.
+
+- `quotationType`: Clase de documento SAP para la oferta de venta (p.ej., `"AGN"` para oferta sin referencia obligatoria a documento de origen, o `"ZOFV"` para oferta de venta estándar). Los valores válidos dependen del catálogo de tipos de documento en el S/4 del cliente.
+- `salesOrganization`: Código de la organización de ventas en S/4 (p.ej., `"1000"`, `"DPDO"`). Forma parte de la clave de área de ventas.
+- `distributionChannel`: Canal de distribución (p.ej., `"10"` venta directa, `"20"` distribuidor). Forma parte de la clave de área de ventas.
+- `division`: División de productos (p.ej., `"00"` todas, `"01"` línea A). Forma parte de la clave de área de ventas. Combinados con `salesOrganization` y `distributionChannel` definen el área de ventas en S/4.
+- `salesPersonPartnerFunction`: Función de interlocutor (partner function) con la que viaja el vendedor en la oferta. Típicamente `"VE"` (vendedor / Account Executive). Su valor depende de cómo el cliente haya configurado sus roles en S/4.
+- `priceConditionType`: Tipo de condición de precio SAP. Normalmente `null`: si se deja nulo, S/4 valorizará la oferta con sus propios registros de condición de precios en lugar de que la integración le imponga un precio fijo.
+
+Solo aplica a SAP S/4HANA.
+
+{ "key": "s4SalesDocument", "value": {
+    "quotationType": "AGN",
+    "salesOrganization": "1000",
+    "distributionChannel": "10",
+    "division": "00",
+    "salesPersonPartnerFunction": "VE",
+    "priceConditionType": null
+}}
+
+Detalle: s4BusinessPartnerCreation
+Controla cómo se arma el payload de creación del cliente (BusinessPartner, Customer) en SAP S/4HANA cuando el cliente no existe en el sistema. Los códigos de grupo, rol, sociedad, grupo de cuentas y lista de precios los define el equipo funcional de SAP del cliente, no la integración. Solo aplica a SAP S/4HANA.
+
+- `findFallbackField`: Campo de SAP por el que se busca al cliente si el campo primario (`defaultFindSAP`) no da resultado. Acepta la notación con punto de las navegaciones de OData. El caso típico es la identificación fiscal: `"to_BusinessPartnerTax.BPTaxLongNumber"`, que es la tabla de números fiscales del socio de negocio. Ojo: `to_Customer.BPTaxLongNumber` NO existe en este servicio (la entidad de cliente solo ofrece `TaxNumber1` a `TaxNumber5`).
+- `defaults`: Sub-objeto con valores por defecto para cada entidad del alta:
+  - `BusinessPartner`: Campos comunes del socio de negocios (p.ej., `"BusinessPartnerCategory"` — `"2"` es organización —, `"BusinessPartnerGrouping"`, que determina el rango de numeración del cliente).
+  - `BusinessPartnerRole`: Lista de códigos de rol a asignar (p.ej., `["FLCU00", "FLCU01"]`: `FLCU00` es interlocutor comercial de finanzas y `FLCU01` cliente de ventas).
+  - `Customer`: Datos específicos del cliente como cliente (p.ej., `"CustomerAccountGroup"`, `"CustomerClassification"`).
+  - `CustomerCompany`: Datos a nivel de sociedad (p.ej., `"CompanyCode"`, `"ReconciliationAccount"`). Define cómo el cliente se asocia a la estructura financiera de SAP.
+  - `CustomerSalesArea`: Datos del cliente en la combinación de área de ventas (p.ej., `"Currency"`, `"PriceListType"`). La organización de ventas, el canal y la división NO se ponen acá: salen del área de ventas del documento que se está creando.
+
+{ "key": "s4BusinessPartnerCreation", "value": {
+    "findFallbackField": "to_BusinessPartnerTax.BPTaxLongNumber",
+    "defaults": {
+      "BusinessPartner": {
+        "BusinessPartnerCategory": "2",
+        "BusinessPartnerGrouping": "ZC01"
+      },
+      "BusinessPartnerRole": ["FLCU00", "FLCU01"],
+      "Customer": {
+        "CustomerAccountGroup": "ZC01"
+      },
+      "CustomerCompany": {
+        "CompanyCode": "1000",
+        "ReconciliationAccount": "0000110000"
+      },
+      "CustomerSalesArea": {
+        "Currency": "GTQ",
+        "PriceListType": "ZC"
+      }
+    }
+}}
+
+Detalle: defaultFindSAP
+Campo de SAP por el que se busca al cliente de forma primaria. Si la búsqueda por este campo no devuelve un cliente, se reintenta con el campo definido en `findFallbackField` de `s4BusinessPartnerCreation` (solo en S/4). El valor por defecto es `"EmailAddress"` y aplica a SAP Business One; para tenants de SAP S/4HANA el campo debe corresponder a la estructura de datos del socio de negocio en ese sistema (p.ej., `"BusinessPartner"` para buscar por código de cliente, `"OrganizationBPName1"` para buscar por razón social). Un tenant de S/4HANA que se quede con el `"EmailAddress"` heredado no busca nada: ese campo no existe en el socio de negocio, así que toda oferta cae al campo de respaldo o crea un cliente nuevo.
+
+{ "key": "defaultFindSAP", "value": "BusinessPartner" }
+
+Detalle: dropdownOptionsSync
+Qué listas desplegables de HubSpot se llenan con datos maestros de SAP B1, y de dónde salen. Solo B1: en un tenant S/4 la tarea se salta con un warning. La corre una ClientConfig con `taskType: "DROPDOWN_OPTIONS"` (no toca ningún registro del CRM, solo la definición de la propiedad). Cada entrada de `sources` lee una colección del Service Layer y arma una lista de opciones; `fields` NO son propiedades de HubSpot sino campos de SAP: la tarea busca los FieldMappings activos de esa credencial cuyo `sourceField` coincida, y escribe las opciones en el `targetField` de cada uno, en todos los objectType donde esté mapeado. Un campo sin FieldMapping queda con warning `DROPDOWN_FIELD_WITHOUT_MAPPING` y no escribe nada.
+`valueField` es el valor interno de la opción (tiene que ser el mismo que el sync manda al CRM) y la etiqueta sale de `labelField` (un campo) o de `labelFields` (varios campos unidos por `labelSeparator`, que por default es un espacio; las partes vacías se descartan). Sin etiqueta la opción se muestra con su propio valor. HubSpot no tiene "agregar una opción": el PATCH reemplaza la lista completa, así que las opciones que SAP ya no devuelve se conservan con `hidden: true` (los registros históricos siguen leyéndose, pero nadie puede volver a elegirlas) y el límite duro son 1000 opciones por propiedad. `enabled: false` apaga todo sin borrar la configuración.
+
+{ "key": "dropdownOptionsSync", "value": {
+    "enabled": true,
+    "sources": [
+      {
+        "serviceLayerPath": "/SalesPersons",
+        "query": { "$filter": "Active eq 'tYES'" },
+        "valueField": "SalesEmployeeCode",
+        "labelField": "SalesEmployeeName",
+        "fields": ["SalesPersonCode"]
+      },
+      {
+        "serviceLayerPath": "/EmployeesInfo",
+        "query": {
+          "$filter": "Active eq 'tYES'",
+          "$select": "EmployeeID,FirstName,MiddleName,LastName"
+        },
+        "valueField": "EmployeeID",
+        "labelFields": ["FirstName", "MiddleName", "LastName"],
+        "fields": ["DocumentsOwner"]
+      }
+    ]
+}}

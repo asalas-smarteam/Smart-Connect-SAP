@@ -1440,3 +1440,359 @@ describe('ProcessHubspotConvertQuotationToOrder', () => {
     expect(orderPayload.NumAtCard).toBe('OC #P06485');
   });
 });
+
+// Task 7: cableado del trío de S/4 (createSalesDocumentStrategy) en ProcessHubspotCreateQuotation.
+// No hay `buildRuntimeRepositoryStub`/`buildQuotationEvent` en este archivo -- se reusan los
+// helpers reales de arriba (buildRuntimeRepository/buildContext/baseEvent), extendiendo el
+// contexto con sapFlavor via el parametro overrides que buildContext ya soporta.
+// Los cuatro campos de cabecera que S/4 exige en toda oferta. El caso de uso los valida ANTES
+// de resolver al cliente, asi que un tenant de S/4 sin ellos ya no llega al alta.
+const S4_SALES_DOCUMENT_CONFIG = {
+  quotationType: 'AGN',
+  salesOrganization: 'CFG_ORG',
+  distributionChannel: 'CFG_CH',
+  division: 'CFG_DIV',
+  salesPersonPartnerFunction: null,
+  priceConditionType: null,
+};
+
+describe('ProcessHubspotCreateQuotation con sapFlavor S4', () => {
+  it('usa el trío de S/4 y persiste el número de oferta como DocEntry y DocNum', async () => {
+    const createQuotation = jest.fn().mockResolvedValue({
+      DocEntry: 20000123,
+      DocNum: 20000123,
+      DocumentLines: [{ LineNum: 10 }],
+      raw: { SalesQuotation: '20000123' },
+    });
+    const buildQuotationPayloadMock = jest.fn().mockReturnValue({ SoldToParty: '100053', to_Item: [] });
+    const findOrCreateForDocument = jest.fn().mockResolvedValue({
+      cardCode: '100053',
+      businessPartnerResult: { created: false, matchedBy: 'BusinessPartner' },
+      contactEmployeeResult: { created: false, internalCodes: [] },
+      contactEmployeeFailures: [],
+      hubspotToken: 'token-1',
+      dealContactIsContactEmployee: false,
+    });
+    const create = jest.fn().mockResolvedValue({});
+
+    const useCase = new ProcessHubspotCreateQuotation({
+      runtimeRepository: buildRuntimeRepository(buildContext({ sapFlavor: 'S4' })),
+      sapOrderAdapter: {},
+      sapQuotationAdapter: {},
+      hubspotWebhookAdapter: { updateAfterSap: jest.fn().mockResolvedValue({}) },
+      webhookReferenceRepository: { persistReferences: jest.fn() },
+      sapDocumentLinkRepository: { findByDeal: jest.fn().mockResolvedValue(null), create },
+      salesDocumentConfigRepository: { getSalesDocumentConfig: async () => S4_SALES_DOCUMENT_CONFIG },
+      salesDocumentStrategyFactory: () => ({
+        documentBusinessPartnerResolver: { findOrCreateForDocument },
+        salesDocumentBuilder: { buildQuotationPayload: buildQuotationPayloadMock },
+        salesDocumentAdapter: { createQuotation },
+      }),
+      buildWebhookSyncErrorEntry: jest.fn(),
+      buildErrorResponseSnapshot: jest.fn(),
+      buildWebhookSapAudit: jest.fn().mockReturnValue({}),
+      logger: { warn: jest.fn(), info: jest.fn() },
+    });
+
+    const result = await useCase.execute({ event: baseEvent, tenantModels });
+
+    expect(createQuotation).toHaveBeenCalled();
+    expect(result.docEntry).toBe(20000123);
+    expect(result.docNum).toBe(20000123);
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      link: expect.objectContaining({
+        sapObject: 'A_SalesQuotation',
+        sapBaseType: null,
+        sapDocEntry: 20000123,
+      }),
+    }));
+  });
+
+  // Fix round 1 (hallazgo 2): la version anterior de este test solo comprobaba que la factory
+  // fue llamada con cierto sabor, sin asserter nada de la CONDUCTA de B1 -- un `objectContaining`
+  // no hubiera detectado que a las deps les faltara alguna clave. Ahora se comprueba que el
+  // builder recibe documentLines no vacias (las arma mapDocumentLines, exclusivo de B1) y que lo
+  // persistido lleva el vocabulario de B1 (sapObject/sapBaseType).
+  it('un tenant sin sapFlavor sigue por el camino de B1', async () => {
+    const createQuotation = jest.fn().mockResolvedValue({
+      DocEntry: 55,
+      DocNum: 900,
+      DocumentLines: [{ LineNum: 0 }],
+    });
+    const buildQuotationPayloadMock = jest.fn().mockReturnValue({ CardCode: 'CL001' });
+    const create = jest.fn().mockResolvedValue({});
+    const strategyFactory = jest.fn().mockReturnValue({
+      documentBusinessPartnerResolver: {
+        findOrCreateForDocument: jest.fn().mockResolvedValue({
+          cardCode: 'CL001',
+          businessPartnerResult: { created: false, matchedBy: 'cardCode' },
+          contactEmployeeResult: { created: false, internalCodes: [] },
+          contactEmployeeFailures: [],
+          hubspotToken: null,
+          dealContactIsContactEmployee: false,
+        }),
+      },
+      salesDocumentBuilder: { buildQuotationPayload: buildQuotationPayloadMock },
+      salesDocumentAdapter: { createQuotation },
+    });
+
+    const useCase = new ProcessHubspotCreateQuotation({
+      runtimeRepository: buildRuntimeRepository(buildContext({ sapFlavor: undefined })),
+      sapOrderAdapter: {},
+      sapQuotationAdapter: {},
+      hubspotWebhookAdapter: { updateAfterSap: jest.fn().mockResolvedValue({}) },
+      webhookReferenceRepository: { persistReferences: jest.fn() },
+      sapDocumentLinkRepository: { findByDeal: jest.fn().mockResolvedValue(null), create },
+      salesDocumentStrategyFactory: strategyFactory,
+      buildWebhookSyncErrorEntry: jest.fn(),
+      buildErrorResponseSnapshot: jest.fn(),
+      buildWebhookSapAudit: jest.fn().mockReturnValue({}),
+      logger: { warn: jest.fn(), info: jest.fn() },
+    });
+
+    await useCase.execute({ event: baseEvent, tenantModels });
+
+    // documentLines las arma mapDocumentLines (exclusivo de B1) a partir del unico line_item de
+    // baseEvent (hs_sku A01, quantity 1, price 10, warehouses B03) -- si esto llegara vacio,
+    // significaria que el use case tomo el camino de S/4 (documentLines forzado a []) para un
+    // tenant sin sapFlavor.
+    const builderArgs = buildQuotationPayloadMock.mock.calls[0][0];
+    expect(builderArgs.documentLines.length).toBeGreaterThan(0);
+    expect(builderArgs.documentLines[0]).toMatchObject({
+      ItemCode: 'A01',
+      Quantity: 1,
+      WarehouseCode: 'B03',
+    });
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      link: expect.objectContaining({
+        sapObject: 'Quotations',
+        sapBaseType: 23,
+        sapDocEntry: 55,
+        sapDocNum: 900,
+      }),
+    }));
+    expect(strategyFactory).toHaveBeenCalledWith(expect.objectContaining({ sapFlavor: undefined }));
+  });
+
+  // Fix round 1 (hallazgo 1): el requisito mas delicado de la tarea -- el area de ventas
+  // resuelta ANTES de la resolucion del cliente, con la precedencia mapeo-del-negocio > default
+  // de configuracion -- no tenia ningun test. Un refactor que invirtiera el orden de esas dos
+  // lineas pasaba toda la suite en verde.
+  it('resuelve salesArea con la precedencia del mapeo sobre el default de configuración, antes de resolver el cliente', async () => {
+    const baseContext = buildContext({ sapFlavor: 'S4' });
+    const context = {
+      ...baseContext,
+      mappings: {
+        ...baseContext.mappings,
+        // Solo SalesOrganization esta mapeado desde el deal; DistributionChannel y
+        // OrganizationDivision no tienen mapeo, asi que tienen que salir del default de
+        // configuracion.
+        dealOrdersQuotationsMappings: [
+          { sourceField: 'SalesOrganization', targetField: 'sales_org' },
+        ],
+      },
+    };
+    const getSalesDocumentConfig = jest.fn().mockResolvedValue(S4_SALES_DOCUMENT_CONFIG);
+    const findOrCreateForDocument = jest.fn().mockResolvedValue({
+      cardCode: '100053',
+      businessPartnerResult: { created: false, matchedBy: 'BusinessPartner' },
+      contactEmployeeResult: { created: false, internalCodes: [] },
+      contactEmployeeFailures: [],
+      hubspotToken: null,
+      dealContactIsContactEmployee: false,
+    });
+
+    const useCase = new ProcessHubspotCreateQuotation({
+      runtimeRepository: buildRuntimeRepository(context),
+      sapOrderAdapter: {},
+      sapQuotationAdapter: {},
+      hubspotWebhookAdapter: { updateAfterSap: jest.fn().mockResolvedValue({}) },
+      webhookReferenceRepository: { persistReferences: jest.fn() },
+      sapDocumentLinkRepository: { findByDeal: jest.fn().mockResolvedValue(null), create: jest.fn() },
+      salesDocumentConfigRepository: { getSalesDocumentConfig },
+      salesDocumentStrategyFactory: () => ({
+        documentBusinessPartnerResolver: { findOrCreateForDocument },
+        salesDocumentBuilder: { buildQuotationPayload: jest.fn().mockReturnValue({ SoldToParty: '100053', to_Item: [] }) },
+        salesDocumentAdapter: { createQuotation: jest.fn().mockResolvedValue({ DocEntry: 1, DocNum: 1, DocumentLines: [] }) },
+      }),
+      buildWebhookSyncErrorEntry: jest.fn(),
+      buildErrorResponseSnapshot: jest.fn(),
+      buildWebhookSapAudit: jest.fn().mockReturnValue({}),
+      logger: { warn: jest.fn(), info: jest.fn() },
+    });
+
+    const event = {
+      ...baseEvent,
+      payload: {
+        ...baseEvent.payload,
+        deal: { hs_object_id: '59680314911', sales_org: 'DEAL_ORG' },
+      },
+    };
+
+    await useCase.execute({ event, tenantModels });
+
+    expect(findOrCreateForDocument).toHaveBeenCalledWith(
+      expect.objectContaining({
+        salesArea: {
+          salesOrganization: 'DEAL_ORG',
+          distributionChannel: 'CFG_CH',
+          division: 'CFG_DIV',
+        },
+      })
+    );
+    // Orden: la config de documento de venta se lee ANTES de llamar al resolver de cliente --
+    // invertir esas dos lineas dejaria al cliente nuevo registrado en un area de ventas distinta
+    // de la del documento, y SAP rechazaria la oferta. invocationCallOrder da un numero global de
+    // secuencia por invocacion de mock, comparable entre mocks distintos.
+    expect(getSalesDocumentConfig.mock.invocationCallOrder[0])
+      .toBeLessThan(findOrCreateForDocument.mock.invocationCallOrder[0]);
+  });
+
+  // Fix final: el area de ventas ya se validaba antes del alta, pero la clase de documento solo
+  // la miraba el builder, que corre DESPUES. A un tenant al que solo le faltara ese dato se le
+  // creaba el socio de negocio en el maestro de clientes de SAP y recien ahi fallaba, con un
+  // error permanente (sin reintento), dejando un cliente huerfano por cada intento.
+  it('no toca el maestro de clientes cuando falta SalesQuotationType: falla antes de resolver al cliente', async () => {
+    const findOrCreateForDocument = jest.fn();
+    const createQuotation = jest.fn();
+
+    const useCase = new ProcessHubspotCreateQuotation({
+      runtimeRepository: buildRuntimeRepository(buildContext({ sapFlavor: 'S4' })),
+      sapOrderAdapter: {},
+      sapQuotationAdapter: {},
+      hubspotWebhookAdapter: { updateAfterSap: jest.fn() },
+      webhookReferenceRepository: { persistReferences: jest.fn() },
+      sapDocumentLinkRepository: { findByDeal: jest.fn().mockResolvedValue(null), create: jest.fn() },
+      salesDocumentConfigRepository: {
+        getSalesDocumentConfig: async () => ({ ...S4_SALES_DOCUMENT_CONFIG, quotationType: null }),
+      },
+      salesDocumentStrategyFactory: () => ({
+        documentBusinessPartnerResolver: { findOrCreateForDocument },
+        salesDocumentBuilder: { buildQuotationPayload: jest.fn() },
+        salesDocumentAdapter: { createQuotation },
+      }),
+      ...noopSyncError,
+      logger: { warn: jest.fn(), info: jest.fn() },
+    });
+
+    // El error NOMBRA el campo que falta, igual que las validaciones que ya existian.
+    await expect(useCase.execute({ event: baseEvent, tenantModels }))
+      .rejects.toThrow(/SalesQuotationType/);
+
+    expect(findOrCreateForDocument).not.toHaveBeenCalled();
+    expect(createQuotation).not.toHaveBeenCalled();
+  });
+
+  it('valida tambien los tres campos del area de ventas antes de resolver al cliente', async () => {
+    const findOrCreateForDocument = jest.fn();
+
+    const useCase = new ProcessHubspotCreateQuotation({
+      runtimeRepository: buildRuntimeRepository(buildContext({ sapFlavor: 'S4' })),
+      sapOrderAdapter: {},
+      sapQuotationAdapter: {},
+      hubspotWebhookAdapter: { updateAfterSap: jest.fn() },
+      webhookReferenceRepository: { persistReferences: jest.fn() },
+      sapDocumentLinkRepository: { findByDeal: jest.fn().mockResolvedValue(null), create: jest.fn() },
+      salesDocumentConfigRepository: {
+        getSalesDocumentConfig: async () => ({ ...S4_SALES_DOCUMENT_CONFIG, distributionChannel: '' }),
+      },
+      salesDocumentStrategyFactory: () => ({
+        documentBusinessPartnerResolver: { findOrCreateForDocument },
+        salesDocumentBuilder: { buildQuotationPayload: jest.fn() },
+        salesDocumentAdapter: { createQuotation: jest.fn() },
+      }),
+      ...noopSyncError,
+      logger: { warn: jest.fn(), info: jest.fn() },
+    });
+
+    await expect(useCase.execute({ event: baseEvent, tenantModels }))
+      .rejects.toThrow(/DistributionChannel/);
+    expect(findOrCreateForDocument).not.toHaveBeenCalled();
+  });
+
+  // Un tenant de B1 no puede verse afectado por la validacion de S/4: sus cuatro campos no
+  // existen en su configuracion y la oferta tiene que crearse igual que siempre.
+  it('B1 no pasa por la validacion de los campos de cabecera de S/4', async () => {
+    const createQuotation = jest.fn().mockResolvedValue({ DocEntry: 55, DocNum: 900, DocumentLines: [{ LineNum: 0 }] });
+    const findOrCreateForDocument = jest.fn().mockResolvedValue({
+      cardCode: 'CL001',
+      businessPartnerResult: { created: false, matchedBy: 'cardCode' },
+      contactEmployeeResult: { created: false, internalCodes: [] },
+      contactEmployeeFailures: [],
+      hubspotToken: null,
+      dealContactIsContactEmployee: false,
+    });
+
+    const useCase = new ProcessHubspotCreateQuotation({
+      runtimeRepository: buildRuntimeRepository(buildContext({ sapFlavor: undefined })),
+      sapOrderAdapter: {},
+      sapQuotationAdapter: {},
+      hubspotWebhookAdapter: { updateAfterSap: jest.fn().mockResolvedValue({}) },
+      webhookReferenceRepository: { persistReferences: jest.fn() },
+      sapDocumentLinkRepository: { findByDeal: jest.fn().mockResolvedValue(null), create: jest.fn() },
+      salesDocumentStrategyFactory: () => ({
+        documentBusinessPartnerResolver: { findOrCreateForDocument },
+        salesDocumentBuilder: { buildQuotationPayload: jest.fn().mockReturnValue({ CardCode: 'CL001' }) },
+        salesDocumentAdapter: { createQuotation },
+      }),
+      ...noopSyncError,
+      logger: { warn: jest.fn(), info: jest.fn() },
+    });
+
+    // salesDocumentConfigRepository no se inyecta: el default devuelve los cuatro campos en
+    // null, que es exactamente la configuracion de un tenant de B1.
+    const result = await useCase.execute({ event: baseEvent, tenantModels });
+
+    expect(result.docEntry).toBe(55);
+    expect(createQuotation).toHaveBeenCalled();
+  });
+});
+
+// El trio por defecto solo existe para construcciones directas (tests que no pasan por
+// composicion). Armaba SIEMPRE el trio de B1, ignorando el sabor: con un tenant de S/4 salia un
+// hibrido -- builder de Business One, cero posiciones, persistido con el vocabulario de S/4 --
+// justo lo que el trio existe para impedir.
+describe('trio por defecto de ProcessHubspotCreateQuotation', () => {
+  function buildUseCaseWithoutFactory(sapFlavor) {
+    return new ProcessHubspotCreateQuotation({
+      runtimeRepository: buildRuntimeRepository(buildContext({ sapFlavor })),
+      sapOrderAdapter: {
+        findOrCreateBusinessPartner: jest.fn().mockResolvedValue({
+          cardCode: 'CL001',
+          created: false,
+          matchedBy: 'cardCode',
+          businessPartner: { CardCode: 'CL001' },
+          requestPayload: null,
+          responsePayload: null,
+        }),
+        addContactEmployeesIfNeeded: jest.fn(),
+      },
+      sapQuotationAdapter: {
+        createQuotation: jest.fn().mockResolvedValue({ DocEntry: 55, DocNum: 900, DocumentLines: [{ LineNum: 0 }] }),
+      },
+      hubspotWebhookAdapter: {
+        getAccessToken: jest.fn().mockResolvedValue('token'),
+        updateBusinessPartnerIds: jest.fn(),
+        updateAfterSap: jest.fn().mockResolvedValue({}),
+        updateContactEmployeeCodes: jest.fn().mockResolvedValue([]),
+      },
+      webhookReferenceRepository: { persistReferences: jest.fn() },
+      sapDocumentLinkRepository: { findByDeal: jest.fn().mockResolvedValue(null), create: jest.fn() },
+      ...noopSyncError,
+      logger: { warn: jest.fn(), info: jest.fn() },
+    });
+  }
+
+  it('falla diciendo que para S/4 hay que inyectar la factory real, en vez de devolver una mezcla', async () => {
+    await expect(buildUseCaseWithoutFactory('S4').execute({ event: baseEvent, tenantModels }))
+      .rejects.toThrow(/composici/i);
+  });
+
+  it('sigue armando el trio de B1 para un tenant sin sapFlavor', async () => {
+    const result = await buildUseCaseWithoutFactory(undefined)
+      .execute({ event: baseEvent, tenantModels });
+
+    expect(result.docEntry).toBe(55);
+    expect(result.docNum).toBe(900);
+  });
+});

@@ -8,7 +8,7 @@ import { PermanentWebhookError } from '#shared/errors/index.js';
 import { resolveBusinessPartnerAndContactEmployees } from '#domain/business-partners/contact-employee-source.service.js';
 import { buildBpAddresses } from '#domain/business-partners/bp-addresses.service.js';
 import { buildSapPropertiesFlags } from '#domain/business-partners/sap-properties-flags.service.js';
-import { normalizeNumber, toNonEmptyString } from '#shared/utils/string.utils.js';
+import { normalizeInteger, normalizeNumber, toNonEmptyString } from '#shared/utils/string.utils.js';
 import { pickByPath } from '#shared/utils/object-path.utils.js';
 
 // `sapCalls` es el array del grabador de tráfico (lo inyecta el use case): se comparte por
@@ -119,6 +119,50 @@ export async function resolveDocumentSlpCode({
   return slpCode;
 }
 
+// Espeja resolveDocumentSlpCode (mismo hubspot_owner_id, mismo OwnerMapping) pero SIN la
+// conversión numérica: esa conversión es correcta para el SlpCode entero de B1, pero el
+// Personnel Number de S/4 suele traer ceros a la izquierda ('00000123'), que Number() se come
+// en silencio ('123'), o puede ser alfanumérico, en cuyo caso Number.isInteger lo descartaba
+// devolviendo null sin ningún error -- la fila de interlocutor desaparecía del documento sin
+// que nadie se enterara. Por eso esta función NO toca resolveDocumentSlpCode (B1 sigue
+// exactamente igual) y solo la llama el camino de S/4.
+export async function resolveDocumentSalesPersonId({
+  runtimeRepository,
+  tenantModels,
+  deal,
+  hubspotCredentials,
+  logger,
+}) {
+  const hubspotOwnerId = toNonEmptyString(deal?.hubspot_owner_id || deal?.hubspotOwnerId);
+  const dealId = toNonEmptyString(deal?.hs_object_id);
+
+  if (!hubspotOwnerId) {
+    logger?.warn?.({
+      msg: 'salesPersonId de S/4 no resuelto porque el owner del deal de HubSpot está vacío',
+      dealId,
+    });
+    return null;
+  }
+
+  const mapping = await runtimeRepository.findOwnerMappingByHubspotOwner({
+    tenantModels,
+    hubspotCredentialId: hubspotCredentials?._id,
+    hubspotOwnerId,
+  });
+  const sapOwnerId = toNonEmptyString(mapping?.sapOwnerId);
+
+  if (!sapOwnerId) {
+    logger?.warn?.({
+      msg: 'OwnerMapping sin sapOwnerId para el salesPersonId de S/4',
+      hubspotOwnerId,
+      dealId,
+    });
+    return null;
+  }
+
+  return sapOwnerId;
+}
+
 // Campo de SAP que identifica al DIGITADOR del documento. Se resuelve aparte de
 // SalesPersonCode porque son dos catalogos distintos de SAP: SalesPersonCode es un SlpCode
 // de /SalesPersons y DocumentsOwner es un EmployeeID de /EmployeesInfo. Mandar el SlpCode
@@ -126,8 +170,8 @@ export async function resolveDocumentSlpCode({
 const DOCUMENTS_OWNER_SAP_FIELD = 'DocumentsOwner';
 
 // El tenant que quiera digitador crea en su contexto deal/orders-quotations un FieldMapping
-// `DocumentsOwner -> <propiedad>` (por ejemplo `digitador`) y llena `sapOwnerId_2` en sus
-// OwnerMappings. Esa fila de mapeo es TODO el interruptor: un tenant que no la tenga recibe
+// `DocumentsOwner -> <propiedad>` (por ejemplo `digitador`) y, si la marca `userField`, llena
+// `sapOwnerId_2` en sus OwnerMappings. Esa fila de mapeo es TODO el interruptor: un tenant que no la tenga recibe
 // null aca y su payload sale identico a como sale hoy, sin la clave DocumentsOwner.
 //
 // La propiedad de HubSpot NO esta fija en el codigo a proposito: el digitador puede vivir en
@@ -143,8 +187,15 @@ function resolveDocumentsOwnerMapping(dealMappings) {
 }
 
 // Espeja resolveDocumentSlpCode pero por el SEGUNDO catalogo: entra por la propiedad que el
-// mapeo declare (no por hubspot_owner_id, que es el asesor y casi nunca es el digitador) y
-// traduce con `sapOwnerId_2` en vez de `sapOwnerId`.
+// mapeo declare (no por hubspot_owner_id, que es el asesor y casi nunca es el digitador).
+//
+// Que hacer con ese valor lo decide `userField` del mapeo, igual que en el sentido
+// SAP->HubSpot:
+// - `userField: true` (distelsa, `digitador`): la propiedad es de tipo owner de HubSpot, trae
+//   un hubspotOwnerId y se traduce con `sapOwnerId_2` en vez de `sapOwnerId`.
+// - sin el flag (printer, `ownercode`): la propiedad es una lista cuyo valor interno YA es el
+//   EmployeeID de SAP, asi que viaja tal cual. Pasarlo por OwnerMappings buscaria un
+//   hubspotOwnerId '210' que no existe y lo descartaria siempre.
 //
 // Todos los caminos sin dato devuelven null en vez de tirar: un digitador sin homologar no
 // puede tumbar la creacion de la cotizacion, que es el motivo por el que el asesor disparo
@@ -174,6 +225,21 @@ export async function resolveDocumentsOwnerCode({
       dealId,
     });
     return null;
+  }
+
+  if (mapping.userField !== true) {
+    const directDocumentsOwner = Number(hubspotOwnerId);
+    if (!Number.isInteger(directDocumentsOwner)) {
+      logger?.warn?.({
+        msg: 'DocumentsOwner invalido: la propiedad de HubSpot del digitador no es un EmployeeID entero',
+        hubspotProperty,
+        value: hubspotOwnerId,
+        dealId,
+      });
+      return null;
+    }
+
+    return directDocumentsOwner;
   }
 
   const ownerMapping = await runtimeRepository.findOwnerMappingByHubspotOwner({
@@ -453,7 +519,13 @@ export function buildSapDocumentLinkLines({ lineItems, documentLines, responseLi
   return items.map((lineItem, index) => {
     const docLine = docLines[index] || {};
     const respLine = respLines[index] || {};
-    const sapLineNum = normalizeNumber(respLine?.LineNum, index);
+    // normalizeNumber NO sirve acá: `Number(null)` y `Number('')` valen 0, que es finito, así
+    // que un LineNum nulo se guardaba como la posición 0 -- que en Business One es un LineNum
+    // legítimo -- y el respaldo por índice nunca llegaba a correr. El adapter de S/4 produce
+    // null a propósito para una posición sin número, y este consumidor lo convertía en 0. En
+    // B1 la clave llega como entero o AUSENTE (undefined), y los dos casos siguen dando
+    // exactamente lo mismo que antes: el entero tal cual, o el índice.
+    const sapLineNum = normalizeInteger(respLine?.LineNum, index);
 
     return {
       // `hs_object_id` es el nombre nativo de la propiedad en HubSpot y `hubspot_id` el alias
