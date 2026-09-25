@@ -9,6 +9,7 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+    networks: [default, mongo]
 
   worker:
     build:
@@ -18,3 +19,9 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+    networks: [default, mongo]
+
+networks:
+  mongo:
+    external: true
+    name: mongodb-4-kfyz_default
