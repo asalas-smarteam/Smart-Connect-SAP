@@ -17,6 +17,7 @@ import {
 } from '#application/services/hubspotBatching.utils.js';
 import { BATCH_FAILURE, classifyBatchFailure } from '#application/services/hubspotBatchFailure.service.js';
 import { buildContactErrorEntry } from '#application/use-cases/HandleHubspotAssociations.js';
+import { sapOwnershipPropertiesFor } from '#domain/sync/sap-record-ownership.js';
 
 function getCompanySapId(item) {
   return item?.rawSapData?.BusinessPartner
@@ -490,10 +491,15 @@ export class SyncCompanyContactsInBatches {
     // child contact whose email already belongs to some other contact is sent
     // down the create path to earn a guaranteed 409.
     const uniqueProperties = uniquePropertiesFor('contact');
+    // A child contact reached by phone/email must not adopt a record that
+    // already belongs to a BusinessPartner (idsap) or to another
+    // ContactEmployee (internalcode): it would overwrite that record's name.
+    const ownershipProperties = sapOwnershipPropertiesFor('contact');
     const properties = [...new Set([
       this.identityProperty,
       fallbackProperty,
       ...uniqueProperties,
+      ...ownershipProperties,
       ...searchProperties,
     ].filter(Boolean))].filter((name) => name !== 'hs_object_id' && name !== 'associations');
 
@@ -509,6 +515,7 @@ export class SyncCompanyContactsInBatches {
       identityProperty: this.identityProperty,
       fallbackProperty,
       uniqueProperties,
+      ownershipProperties,
     });
   }
 

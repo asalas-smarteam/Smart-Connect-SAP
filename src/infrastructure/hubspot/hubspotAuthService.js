@@ -35,7 +35,7 @@ const hubspotAuthService = {
     return `https://app.hubspot.com/oauth/authorize?${queryParams.toString()}`;
   },
 
-  async exchangeCodeForTokens(code, clientConfigId, tenantModels) {
+  async exchangeCodeForTokens(code, clientConfigId, tenantModels, { expectedPortalId } = {}) {
     const HubspotCredentials = getTenantHubspotCredentials(tenantModels);
     const { HUBSPOT_CLIENT_ID, HUBSPOT_CLIENT_SECRET, HUBSPOT_REDIRECT_URI } = process.env;
 
@@ -52,6 +52,16 @@ const hubspotAuthService = {
     });
 
     const { access_token, refresh_token, expires_in, hub_id } = response.data;
+
+    // Los tokens solo se guardan si HubSpot autorizó el portal que se registró al generar el
+    // link. Se valida antes de tocar HubspotCredentials: si no coincide, las credenciales que
+    // ya tiene el tenant quedan intactas. Sin portal esperado no se guarda nada (fail closed).
+    if (!expectedPortalId || String(hub_id) !== String(expectedPortalId)) {
+      const error = new Error('HubSpot authorized a different portal than the one being installed');
+      error.code = 'HUBSPOT_PORTAL_MISMATCH';
+      throw error;
+    }
+
     const expiresAt = new Date(Date.now() + expires_in * 1000);
 
     const existingCredentials = await HubspotCredentials.findOne({ clientConfigId });

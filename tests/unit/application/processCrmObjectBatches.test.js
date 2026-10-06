@@ -155,7 +155,7 @@ describe('ProcessCrmObjectBatches', () => {
   it('falls back to the configured find property when idsap does not match', async () => {
     const useCase = buildUseCase();
     useCase.crmBatchClient.listAllObjects.mockResolvedValue([
-      { id: 'hs-9', properties: { idsap: 'OTRO', email: 'a@x.com' } },
+      { id: 'hs-9', properties: { email: 'a@x.com' } },
     ]);
     const params = baseParams();
     params.handler.buildBatchUpdateEntry.mockReturnValue({ id: 'hs-9', properties: { idsap: 'C001' } });
@@ -168,6 +168,77 @@ describe('ProcessCrmObjectBatches', () => {
     expect(useCase.crmBatchClient.batchCreateObjects).not.toHaveBeenCalled();
     expect(useCase.crmBatchClient.batchUpdateObjects).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({ sent: 1, updated: 1, created: 0 });
+  });
+
+  it('never updates through the fallback a record that already has another idsap', async () => {
+    const useCase = buildUseCase({ findPropertyResolver: jest.fn().mockResolvedValue('phone') });
+    useCase.crmBatchClient.listAllObjects.mockResolvedValue([
+      { id: 'hs-9', properties: { idsap: 'OTRO', phone: '+50588888888' } },
+    ]);
+    const params = baseParams();
+    params.handler.buildBatchUpdateEntry.mockReturnValue({ id: 'hs-9', properties: { idsap: 'C001' } });
+
+    const result = await useCase.execute({
+      mappedItems: [{ properties: { idsap: 'C001', phone: '+50588888888', email: 'a@x.com' }, rawSapData: {} }],
+      ...params,
+    });
+
+    // Updating hs-9 would overwrite OTRO's idsap; next run OTRO would not be
+    // found and would be created again.
+    expect(useCase.crmBatchClient.batchUpdateObjects).not.toHaveBeenCalled();
+    expect(useCase.crmBatchClient.batchCreateObjects).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ created: 1, updated: 0 });
+  });
+
+  it('never sends the same HubSpot id twice in one batch/update (Duplicate IDs found in batch input)', async () => {
+    const useCase = buildUseCase({ findPropertyResolver: jest.fn().mockResolvedValue('phone') });
+    useCase.crmBatchClient.listAllObjects.mockResolvedValue([
+      { id: 'hs-lead', properties: { phone: '+50588888888' } },
+    ]);
+    const params = baseParams();
+    params.handler.buildBatchUpdateEntry.mockImplementation(({ existing, item }) => ({
+      id: existing.id,
+      properties: { idsap: item.properties.idsap },
+    }));
+
+    const result = await useCase.execute({
+      mappedItems: [
+        { properties: { idsap: 'C001', phone: '+50588888888', email: 'a@x.com' }, rawSapData: {} },
+        { properties: { idsap: 'C002', phone: '+50588888888', email: 'b@x.com' }, rawSapData: {} },
+      ],
+      ...params,
+    });
+
+    const updateInputs = useCase.crmBatchClient.batchUpdateObjects.mock.calls.flatMap(([, , { inputs }]) => inputs);
+    expect(updateInputs.map(({ id }) => id)).toEqual(['hs-lead']);
+    expect(updateInputs[0].properties.idsap).toBe('C001');
+    // The second SAP record shares only the phone: it gets its own record.
+    const createInputs = useCase.crmBatchClient.batchCreateObjects.mock.calls[0][2].inputs;
+    expect(createInputs.map(({ properties }) => properties.idsap)).toEqual(['C002']);
+    expect(params.sequentialFallback).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ created: 1, failed: 0 });
+  });
+
+  it('updates once and skips the twin when two SAP rows share the idsap of an existing record', async () => {
+    const useCase = buildUseCase();
+    useCase.crmBatchClient.listAllObjects.mockResolvedValue([
+      { id: 'hs-1', properties: { idsap: 'C001' } },
+    ]);
+    const params = baseParams();
+    params.handler.buildBatchUpdateEntry.mockReturnValue({ id: 'hs-1', properties: { idsap: 'C001' } });
+
+    const result = await useCase.execute({
+      mappedItems: [
+        { properties: { idsap: 'C001', email: 'a@x.com' }, rawSapData: {} },
+        { properties: { idsap: 'C001', email: 'a@x.com' }, rawSapData: {} },
+      ],
+      ...params,
+    });
+
+    const updateInputs = useCase.crmBatchClient.batchUpdateObjects.mock.calls.flatMap(([, , { inputs }]) => inputs);
+    expect(updateInputs).toHaveLength(1);
+    expect(useCase.crmBatchClient.batchCreateObjects).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ skipped: 1, created: 0 });
   });
 
   it('matches created records by identity property, never by position', async () => {

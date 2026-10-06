@@ -5,8 +5,8 @@ export class HubspotAuthProviderAdapter {
     return hubspotAuthService.generateAuthUrl(clientConfigId, state);
   }
 
-  exchangeCodeForTokens(code, clientConfigId, tenantModels) {
-    return hubspotAuthService.exchangeCodeForTokens(code, clientConfigId, tenantModels);
+  exchangeCodeForTokens(code, clientConfigId, tenantModels, options) {
+    return hubspotAuthService.exchangeCodeForTokens(code, clientConfigId, tenantModels, options);
   }
 }
 

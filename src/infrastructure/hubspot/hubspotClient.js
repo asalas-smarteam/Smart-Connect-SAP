@@ -133,6 +133,15 @@ export async function findContactByEmail(token, email, options = {}) {
   return findContactByProperty(token, 'email', email, options);
 }
 
+// `withoutProperties`: only records that have NO value in those properties
+// (e.g. a lead without idsap), so a secondary lookup never returns a record that
+// already belongs to another SAP object.
+function withoutPropertyFilters(names) {
+  return (Array.isArray(names) ? names : [])
+    .filter(Boolean)
+    .map((name) => ({ propertyName: name, operator: 'NOT_HAS_PROPERTY' }));
+}
+
 export async function findContactByProperty(token, propertyName, value, options = {}) {
   return searchObject(token, 'contacts', [
     {
@@ -140,6 +149,7 @@ export async function findContactByProperty(token, propertyName, value, options 
       operator: 'EQ',
       value,
     },
+    ...withoutPropertyFilters(options?.withoutProperties),
   ], options?.properties);
 }
 
@@ -163,6 +173,7 @@ export async function findCompanyByProperty(token, propertyName, value, options 
       operator: 'EQ',
       value,
     },
+    ...withoutPropertyFilters(options?.withoutProperties),
   ], options?.properties);
 }
 

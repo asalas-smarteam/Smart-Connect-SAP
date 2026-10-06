@@ -68,8 +68,12 @@ function extractTenantId(req) {
   return null;
 }
 
+// Solo las suscripciones de webhooks de HubSpot identifican al tenant por portalId: llegan con
+// un array de eventos de formato fijo, sin headers ni campos propios. Cualquier otro body (un
+// objeto, o ninguno) no aporta portalId y termina en 403 en vez de un TypeError con 500.
 function extractPortalId(req) {
-  const portalId = req.body[0].portalId ?? req.query?.portalId;
+  const firstEvent = Array.isArray(req.body) ? req.body[0] : null;
+  const portalId = firstEvent?.portalId ?? req.query?.portalId;
   const normalized = String(portalId ?? '').trim();
   return normalized || null;
 }
@@ -98,50 +102,66 @@ function respond(reply, statusCode, payload) {
   return false;
 }
 
-export async function tenantResolver(req, reply) {
-  try {
+async function attachTenant(req, reply, client) {
+  if (!client) {
+    return respond(reply, 403, { error: 'Tenant not found' });
+  }
 
-    const token = extractBearerToken(req);
-    let client = await resolveTenantByToken(token);
-    if (!token) {
-      const tenantId = extractTenantId(req);
-      if (tenantId) {
-        client = await SaaSClient.findOne({ _id: tenantId });
-      } else {
-        const portalId = extractPortalId(req);
-        if (portalId) {
-          client = await SaaSClient.findOne({ 'hubspot.portalId': portalId });
-        }
+  if (client.status !== 'active') {
+    return respond(reply, 402, { error: 'Subscription inactive' });
+  }
+
+  const subscription = await Subscription.findOne({ clientId: client._id }).sort({ startedAt: -1 });
+
+  if (!subscription || subscription.status !== 'active' || subscription.paymentStatus !== 'paid') {
+    return respond(reply, 402, { error: 'Subscription inactive' });
+  }
+
+  const tenantDb = await getTenantConnection(client.tenantKey);
+  const tenantModels = await getTenantModels(client.tenantKey);
+
+  req.tenant = {
+    client,
+    subscription,
+  };
+  req.tenantKey = client.tenantKey;
+  req.tenantDb = tenantDb;
+  req.tenantModels = tenantModels;
+
+  return undefined;
+}
+
+// Resolver de los webhooks de HubSpot. Acepta los identificadores que HubSpot puede mandar hoy
+// (x-tenant-id de los workflows con custom code, portalId de las suscripciones), así que no
+// prueba identidad: autenticar esas llamadas es la Fase B (firma / secreto por tenant).
+export async function tenantResolver(req, reply) {
+  const token = extractBearerToken(req);
+  let client = await resolveTenantByToken(token);
+  if (!token) {
+    const tenantId = extractTenantId(req);
+    if (tenantId) {
+      client = await SaaSClient.findOne({ _id: tenantId });
+    } else {
+      const portalId = extractPortalId(req);
+      if (portalId) {
+        client = await SaaSClient.findOne({ 'hubspot.portalId': portalId });
       }
     }
-    
-    if (!client) {
-      return respond(reply, 403, { error: 'Tenant not found' });
-    }
-
-    if (client.status !== 'active') {
-      return respond(reply, 402, { error: 'Subscription inactive' });
-    }
-
-    const subscription = await Subscription.findOne({ clientId: client._id }).sort({ startedAt: -1 });
-
-    if (!subscription || subscription.status !== 'active' || subscription.paymentStatus !== 'paid') {
-      return respond(reply, 402, { error: 'Subscription inactive' });
-    }
-
-    const tenantDb = await getTenantConnection(client.tenantKey);
-    const tenantModels = await getTenantModels(client.tenantKey);
-
-    req.tenant = {
-      client,
-      subscription,
-    };
-    req.tenantKey = client.tenantKey;
-    req.tenantDb = tenantDb;
-    req.tenantModels = tenantModels;
-
-    return undefined;
-  } catch (error) {
-    throw error;
   }
+
+  return attachTenant(req, reply, client);
+}
+
+// Resolver de las rutas administrativas. Va siempre detrás de internalKeyAuthOnly (ver
+// adminAuth.js): la llave interna prueba que quien llama es del equipo y este resolver solo
+// elige el tenant, y únicamente por header. Query, body, portalId y tokens quedan fuera a
+// propósito para que no exista un segundo camino hacia la configuración de un tenant.
+export async function adminTenantResolver(req, reply) {
+  const tenantId = String(req.headers?.['x-tenant-id'] ?? '').trim();
+  if (!tenantId) {
+    return respond(reply, 400, { error: 'x-tenant-id header is required' });
+  }
+
+  const client = await SaaSClient.findOne({ _id: tenantId });
+  return attachTenant(req, reply, client);
 }

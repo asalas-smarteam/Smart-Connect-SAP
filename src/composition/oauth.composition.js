@@ -13,6 +13,13 @@ export function buildHubspotAuthProvider() {
   return new HubspotAuthProviderAdapter();
 }
 
+// El state de OAuth se firma con el client secret de la app: ya es obligatorio para el
+// intercambio de tokens, así que donde OAuth funciona este secret existe sin configurar nada
+// nuevo. Se lee en cada build para respetar cambios de entorno igual que hubspotAuthService.
+function oauthStateSecret() {
+  return process.env.HUBSPOT_CLIENT_SECRET;
+}
+
 export function buildOAuthCallbackUseCase() {
   return new HandleHubspotOAuthCallback({
     tenantRepository: new OAuthTenantRepository(),
@@ -21,6 +28,7 @@ export function buildOAuthCallbackUseCase() {
     tenantHubspotSeeder: new TenantHubspotSeederAdapter(),
     sapFlavorResolver: new SapFlavorConfigRepository(),
     logger,
+    stateSecret: oauthStateSecret(),
   });
 }
 
@@ -28,5 +36,6 @@ export function buildInitHubspotOAuthForTenantUseCase() {
   return new InitHubspotOAuthForTenant({
     tenantRepository: new OAuthTenantRepository(),
     hubspotAuthProvider: buildHubspotAuthProvider(),
+    stateSecret: oauthStateSecret(),
   });
 }

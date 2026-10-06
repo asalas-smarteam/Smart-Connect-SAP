@@ -18,59 +18,87 @@ describe('company.handler', () => {
     jest.clearAllMocks();
   });
 
-  it('requests key HubSpot properties during email search', async () => {
-    mockFindCompanyByEmail.mockResolvedValue(null);
-
-    await find({
-      token: 'token-1',
-      item: {
-        properties: {
-          email: 'company@example.com',
-        },
-      },
-    });
-
-    expect(mockFindCompanyByEmail).toHaveBeenCalledWith(
-      'token-1',
-      'company@example.com',
-      {
-        properties: ['email', 'name', 'phone', 'idsap', 'idSap'],
-      }
-    );
+  const searchProperties = ['email', 'name', 'phone', 'idsap', 'idSap'];
+  const configModels = (value) => ({
+    Configuration: {
+      findOne: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue({ key: 'defaultFindHubspot', value }) }),
+    },
   });
 
-  it('uses configured HubSpot property when email is empty', async () => {
-    mockFindCompanyByProperty.mockResolvedValue({ id: 'hs-company-1' });
-    const lean = jest.fn().mockResolvedValue({
-      key: 'defaultFindHubspot',
-      value: 'idsap',
-    });
-    const findOne = jest.fn().mockReturnValue({ lean });
+  it('searches by idsap first and stops there when it exists', async () => {
+    mockFindCompanyByProperty.mockResolvedValueOnce({ id: 'hs-1', properties: { idsap: 'C004' } });
+    const tenantModels = configModels('phone');
 
     const existing = await find({
       token: 'token-1',
-      tenantModels: {
-        Configuration: { findOne },
-      },
-      item: {
-        properties: {
-          email: '',
-          idsap: 'C004',
-        },
-      },
+      tenantModels,
+      item: { properties: { idsap: 'C004', phone: '+50527741100', email: '' } },
     });
 
-    expect(existing).toEqual({ id: 'hs-company-1' });
-    expect(findOne).toHaveBeenCalledWith({ key: 'defaultFindHubspot' });
+    expect(existing).toEqual({ id: 'hs-1', properties: { idsap: 'C004' } });
+    expect(mockFindCompanyByProperty).toHaveBeenCalledTimes(1);
+    expect(mockFindCompanyByProperty).toHaveBeenCalledWith('token-1', 'idsap', 'C004', { properties: searchProperties });
+    // Found by idsap: the configured property is never even read.
+    expect(tenantModels.Configuration.findOne).not.toHaveBeenCalled();
     expect(mockFindCompanyByEmail).not.toHaveBeenCalled();
-    expect(mockFindCompanyByProperty).toHaveBeenCalledWith(
-      'token-1',
-      'idsap',
-      'C004',
-      {
-        properties: ['email', 'name', 'phone', 'idsap', 'idSap'],
-      }
-    );
+  });
+
+  it('falls back to defaultFindHubspot (phone) only when idsap does not exist', async () => {
+    mockFindCompanyByProperty
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 'hs-lead', properties: { phone: '+50527741100' } });
+
+    const existing = await find({
+      token: 'token-1',
+      tenantModels: configModels('phone'),
+      item: { properties: { idsap: 'C004', phone: '+50527741100', email: '' } },
+    });
+
+    expect(existing).toEqual({ id: 'hs-lead', properties: { phone: '+50527741100' } });
+    expect(mockFindCompanyByProperty).toHaveBeenNthCalledWith(2, 'token-1', 'phone', '+50527741100', {
+      properties: searchProperties,
+      withoutProperties: ['idsap'],
+    });
+  });
+
+  it('without defaultFindHubspot config the second lookup is email, limited to records not owned by SAP', async () => {
+    mockFindCompanyByProperty.mockResolvedValue(null);
+
+    await find({
+      token: 'token-1',
+      item: { properties: { email: 'x@example.com' } },
+    });
+
+    expect(mockFindCompanyByProperty).toHaveBeenCalledTimes(1);
+    expect(mockFindCompanyByProperty).toHaveBeenCalledWith('token-1', 'email', 'x@example.com', {
+      properties: searchProperties,
+      withoutProperties: ['idsap'],
+    });
+  });
+
+  it('returns null when the second lookup lands on a record owned by another idsap', async () => {
+    mockFindCompanyByProperty
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 'hs-other', properties: { idsap: 'OTHER', phone: '+50527741100' } });
+
+    const existing = await find({
+      token: 'token-1',
+      tenantModels: configModels('phone'),
+      item: { properties: { idsap: 'C004', phone: '+50527741100' } },
+    });
+
+    expect(existing).toBeNull();
+  });
+
+  it('returns null without a second lookup when the item has neither idsap nor the configured value', async () => {
+    const existing = await find({
+      token: 'token-1',
+      tenantModels: configModels('phone'),
+      item: { properties: { email: '' } },
+    });
+
+    expect(existing).toBeNull();
+    expect(mockFindCompanyByProperty).not.toHaveBeenCalled();
   });
 
   it('updates only SAP identifier when key fields changed', async () => {

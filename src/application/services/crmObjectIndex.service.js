@@ -1,3 +1,5 @@
+import { belongsToAnotherSapRecord } from '#domain/sync/sap-record-ownership.js';
+
 // HubSpot returns every property as a string. Keys are compared trimmed and
 // lowercased so SAP padding/casing noise cannot cause a false "not found",
 // which would create a duplicate record.
@@ -23,7 +25,13 @@ export function uniquePropertiesFor(objectType) {
 // consistent and batch/read only works with unique properties, so neither can
 // decide whether a record exists.
 export class CrmObjectIndex {
-  constructor({ records = [], identityProperty, fallbackProperty = null, uniqueProperties = [] }) {
+  constructor({
+    records = [],
+    identityProperty,
+    fallbackProperty = null,
+    uniqueProperties = [],
+    ownershipProperties = null,
+  }) {
     this.identityProperty = identityProperty;
     // A fallback identical to the identity property adds nothing.
     this.fallbackProperty = fallbackProperty && fallbackProperty !== identityProperty
@@ -35,7 +43,14 @@ export class CrmObjectIndex {
     // does not risk a duplicate, it guarantees an error.
     this.uniqueProperties = [...new Set(uniqueProperties.filter(Boolean))]
       .filter((name) => name !== this.identityProperty && name !== this.fallbackProperty);
+    // SAP keys that mark a record as already owned by a SAP object. A record
+    // reached through a secondary tier that carries a different value in any of
+    // these belongs to another SAP row and is never handed out as "existing".
+    this.ownershipProperties = [...new Set((ownershipProperties ?? [identityProperty]).filter(Boolean))];
     this.byIdentity = new Map();
+    // Secondary tiers keep EVERY record per key, not just the first: when the
+    // first one with that phone belongs to another SAP row, a later lead with
+    // the same phone is still a valid match.
     this.byFallback = new Map();
     this.byUnique = new Map(this.uniqueProperties.map((name) => [name, new Map()]));
 
@@ -53,72 +68,93 @@ export class CrmObjectIndex {
     }
 
     if (this.fallbackProperty) {
-      const fallback = normalizeIndexKey(record?.properties?.[this.fallbackProperty]);
-
-      if (fallback && !this.byFallback.has(fallback)) {
-        this.byFallback.set(fallback, record);
-      }
+      pushToBucket(this.byFallback, normalizeIndexKey(record?.properties?.[this.fallbackProperty]), record);
     }
 
     for (const name of this.uniqueProperties) {
-      const value = normalizeIndexKey(record?.properties?.[name]);
-      const bucket = this.byUnique.get(name);
-
-      if (value && !bucket.has(value)) {
-        bucket.set(value, record);
-      }
+      pushToBucket(this.byUnique.get(name), normalizeIndexKey(record?.properties?.[name]), record);
     }
+  }
+
+  // Same as match() but returns only the record, for callers that do not care
+  // which tier produced it.
+  find(properties) {
+    return this.match(properties)?.record ?? null;
   }
 
   // idsap is the key between SAP and HubSpot; the tenant's configured
   // defaultFindHubspot property (email/cedula/phone) is only consulted when
-  // the record carries no idsap match yet.
-  find(properties) {
+  // the identity matches nothing. Returns { record, via } where via is
+  // 'identity' | 'fallback' | 'unique', or null.
+  match(properties) {
     const identity = normalizeIndexKey(properties?.[this.identityProperty]);
 
     if (identity) {
       const hit = this.byIdentity.get(identity);
 
       if (hit) {
-        return hit;
+        return { record: hit, via: 'identity' };
       }
     }
 
     if (this.fallbackProperty) {
-      const fallback = normalizeIndexKey(properties?.[this.fallbackProperty]);
+      const hit = this.firstAdoptable(
+        this.byFallback.get(normalizeIndexKey(properties?.[this.fallbackProperty])),
+        properties
+      );
 
-      if (fallback) {
-        const hit = this.byFallback.get(fallback);
-
-        if (hit) {
-          return hit;
-        }
-        // Deliberately falls through instead of returning null: a fallback value
-        // that matches nothing says nothing about the unique tiers below, and
-        // stopping here is what sent conflicting records down the create path.
+      if (hit) {
+        return { record: hit, via: 'fallback' };
       }
+      // Deliberately falls through instead of returning null: a fallback value
+      // that matches nothing says nothing about the unique tiers below, and
+      // stopping here is what sent conflicting records down the create path.
     }
 
-    // Last resort, and only for properties HubSpot enforces: a match here means
-    // "a create would be rejected", so treating it as existing is the only
-    // outcome that is not an error.
+    // Last resort, and only for properties HubSpot enforces. A record owned by
+    // another SAP row is not returned even here: the create it leads to is
+    // answered with 409 and linked by the conflict path without writing any
+    // property, which is better than overwriting the other row's record.
     for (const name of this.uniqueProperties) {
-      const value = normalizeIndexKey(properties?.[name]);
+      const hit = this.firstAdoptable(
+        this.byUnique.get(name).get(normalizeIndexKey(properties?.[name])),
+        properties
+      );
 
-      if (value) {
-        const hit = this.byUnique.get(name).get(value);
-
-        if (hit) {
-          return hit;
-        }
+      if (hit) {
+        return { record: hit, via: 'unique' };
       }
     }
 
     return null;
   }
 
+  firstAdoptable(bucket, properties) {
+    if (!bucket) {
+      return null;
+    }
+
+    return bucket.find((record) =>
+      !belongsToAnotherSapRecord(record?.properties, properties, this.ownershipProperties)
+    ) ?? null;
+  }
+
   get size() {
     return this.byIdentity.size;
+  }
+}
+
+function pushToBucket(map, key, record) {
+  if (!key) {
+    return;
+  }
+
+  const bucket = map.get(key);
+
+  if (bucket) {
+    bucket.push(record);
+  } else {
+    map.set(key, [record]);
   }
 }
 

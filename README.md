@@ -146,8 +146,9 @@ Todos los esquemas principales usan **Mongoose/MongoDB**; los nombres de colecci
 - **Propiedades dinámicas:** Cualquier campo SAP mapeado se convierte en propiedad de HubSpot en el payload saliente; los campos no mapeados se omiten.
 
 ## 7. Flujo OAuth de HubSpot
-1. **Endpoint de inicio:** `GET /oauth/hubspot/init/:clientConfigId` construye la URL de autorización de HubSpot con el `clientConfigId` como parámetro `state` y redirige al navegador.
+1. **Endpoint de inicio:** `POST /oauth/hubspot/init` (header `x-internal-key`, body `{ "tenantId", "portalId" }`) registra el portal del tenant y devuelve `oauthUrl`. El `state` de esa URL va firmado con HMAC (`HUBSPOT_CLIENT_SECRET`), incluye `clientConfigId`, `tenantKey` y `portalId`, y vence a los 15 minutos.
 2. **Consentimiento en HubSpot:** El usuario aprueba los scopes.
+   - El callback rechaza (400) cualquier `state` sin firma válida o vencido, y rechaza (403) sin guardar tokens si HubSpot autorizó un portal distinto al registrado en el paso 1. Un link generado hace más de 15 minutos hay que volver a pedirlo.
 3. **Endpoint de callback:** `GET /oauth/hubspot/callback?code=...&state=...` intercambia el código por tokens.
 4. **Intercambio de código:** `hubspotAuthService.exchangeCodeForTokens()` hace POST a `https://api.hubapi.com/oauth/v1/token` con `grant_type=authorization_code`, guardando `accessToken`, `refreshToken`, `expiresAt` y `portalId` en `HubspotCredentials` (inserta o actualiza por `clientConfigId`).
 5. **Ciclo de refresco:** `hubspotAuthService.getAccessToken()` revisa `expiresAt`; si expiró, `refreshAccessToken()` intercambia el refresh token por un nuevo access token (y actualiza `refreshToken` si HubSpot entrega uno nuevo).
@@ -263,10 +264,19 @@ La aplicación **no ejecuta migraciones Sequelize** (se eliminaron los stubs de 
 ## 18. Ejemplos de uso
 Se asume el servidor en `localhost:3000` y la BD poblada con `ClientConfig` y mapeos.
 
+**Autenticación de rutas.** Hay tres grupos:
+- **Administración de un tenant** (`/config/client`, `/config/mode`, `/config/sap-credentials`, `/mapping`, `/mapping/test`, `/admin/mapping`, `/mappings/*`, `/sap-sync/config/:id/*`): headers `x-internal-key` **y** `x-tenant-id` (el `_id` del `SaaSClient`). El tenant solo se toma del header; `tenantId` en query/body o `portalId` ya no sirven en estas rutas.
+- **Operación interna** (`/master/config/client`, `/sap-sync/run`, `/sap-sync/runWebHook`, `/sap-sync/jobs/*`, `/oauth/hubspot/init`, `/internal/tenant`): header `x-internal-key`.
+- **Webhooks de HubSpot** (`/webhooks/hubspot/*`) y `GET /oauth/hubspot/callback`: sin llave interna, porque los llama HubSpot. Los webhooks siguen resolviendo el tenant por `x-tenant-id` (workflows con custom code) o por el `portalId` del array (suscripciones).
+
+**Secretos en las respuestas.** `/config/client` (`apiToken`, `externalDbPassword`) y `/config/sap-credentials` (`serviceLayerPassword`) nunca devuelven el valor guardado: responden `"********"` si hay uno y `null` si está vacío. En un PATCH, un secreto que llega como `"********"` se ignora y conserva su valor (se puede hacer GET → editar → PATCH del objeto completo sin perder contraseñas); cualquier otro valor lo reemplaza. Para ver un secreto guardado hay que ir a la base.
+
 - **Crear `ClientConfig` en modo `SERVICE_LAYER` (sin `apiUrl` manual):**
   ```bash
   curl -X POST http://localhost:3000/config/client \
        -H "Content-Type: application/json" \
+       -H "x-internal-key: <INTERNAL_KEY>" \
+       -H "x-tenant-id: <_id del SaaSClient>" \
        -d '{
          "clientName": "Obtener Clientes",
          "integrationModeId": "<integrationModeId SERVICE_LAYER>",
@@ -360,15 +370,20 @@ Notas:
 
 - **Ejecutar sincronización manual:**
   ```bash
-  curl -X POST http://localhost:3000/sap-sync/run
+  curl -X POST http://localhost:3000/sap-sync/run \
+       -H "x-internal-key: <INTERNAL_KEY>"
   ```
 
 - **Probar conexión SAP (conceptual):** Usa un `ClientConfig` existente para validar credenciales externas invocando los endpoints del modo configurado o agregando una ruta temporal que llame `testExternalConnection()`.
 
 - **Iniciar OAuth de HubSpot:**
   ```bash
-  curl -i http://localhost:3000/oauth/hubspot/init/<<clientConfigId>>
-  # Sigue el redirect a HubSpot y luego el redirect a /oauth/hubspot/callback
+  curl -X POST http://localhost:3000/oauth/hubspot/init \
+       -H "Content-Type: application/json" \
+       -H "x-internal-key: <INTERNAL_KEY>" \
+       -d '{ "tenantId": "<_id del SaaSClient>", "portalId": "<portalId de HubSpot>" }'
+  # Devuelve { oauthUrl }: abrirla en el navegador antes de 15 minutos. HubSpot redirige a
+  # /oauth/hubspot/callback, que solo guarda los tokens si el portal autorizado es portalId.
   ```
 
 - **Probar mapeo:**

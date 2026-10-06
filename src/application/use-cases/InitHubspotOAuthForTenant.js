@@ -6,9 +6,10 @@ const initHubspotOAuthReasons = Object.freeze({
 });
 
 export class InitHubspotOAuthForTenant {
-  constructor({ tenantRepository, hubspotAuthProvider }) {
+  constructor({ tenantRepository, hubspotAuthProvider, stateSecret }) {
     this.tenantRepository = tenantRepository;
     this.hubspotAuthProvider = hubspotAuthProvider;
+    this.stateSecret = stateSecret;
   }
 
   async execute({ tenantId, portalId }) {
@@ -38,10 +39,16 @@ export class InitHubspotOAuthForTenant {
 
     await this.tenantRepository.updateClientHubspotPortal({ client, portalId });
 
-    const state = buildOAuthState({
-      clientConfigId: clientConfig._id.toString(),
-      tenantKey: client.tenantKey,
-    });
+    // El portal va dentro del state firmado: el callback solo guarda los tokens si HubSpot
+    // autorizó exactamente este portal, y no otro en el que alguien haya instalado la app.
+    const state = buildOAuthState(
+      {
+        clientConfigId: clientConfig._id.toString(),
+        tenantKey: client.tenantKey,
+        portalId: String(portalId),
+      },
+      { secret: this.stateSecret }
+    );
     const oauthUrl = this.hubspotAuthProvider.generateAuthUrl(
       clientConfig._id.toString(),
       state

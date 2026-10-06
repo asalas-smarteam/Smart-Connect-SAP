@@ -57,3 +57,71 @@ describe('hubspotAuthService.getAccessToken', () => {
     });
   });
 });
+
+describe('hubspotAuthService.exchangeCodeForTokens', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  function buildTenantModels(existing = null) {
+    return {
+      HubspotCredentials: {
+        findOne: jest.fn().mockResolvedValue(existing),
+        create: jest.fn(async (doc) => ({ _id: 'cred-new', ...doc })),
+      },
+    };
+  }
+
+  function mockTokenResponse(hubId) {
+    mockAxiosPost.mockResolvedValue({
+      data: {
+        access_token: 'access-1',
+        refresh_token: 'refresh-1',
+        expires_in: 1800,
+        hub_id: hubId,
+      },
+    });
+  }
+
+  it('stores the tokens when HubSpot authorized the expected portal', async () => {
+    const tenantModels = buildTenantModels();
+    mockTokenResponse(50082681);
+
+    const credentials = await hubspotAuthService.exchangeCodeForTokens(
+      'code-1',
+      'cfg-1',
+      tenantModels,
+      { expectedPortalId: '50082681' }
+    );
+
+    expect(credentials.portalId).toBe(50082681);
+    expect(tenantModels.HubspotCredentials.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses to store tokens from a portal other than the tenant being installed', async () => {
+    const existing = { accessToken: 'real-token', save: jest.fn() };
+    const tenantModels = buildTenantModels(existing);
+    mockTokenResponse(99999999);
+
+    await expect(
+      hubspotAuthService.exchangeCodeForTokens('code-1', 'cfg-1', tenantModels, {
+        expectedPortalId: '50082681',
+      })
+    ).rejects.toMatchObject({ code: 'HUBSPOT_PORTAL_MISMATCH' });
+
+    expect(existing.accessToken).toBe('real-token');
+    expect(existing.save).not.toHaveBeenCalled();
+    expect(tenantModels.HubspotCredentials.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses to store tokens when no expected portal is given', async () => {
+    const tenantModels = buildTenantModels();
+    mockTokenResponse(50082681);
+
+    await expect(
+      hubspotAuthService.exchangeCodeForTokens('code-1', 'cfg-1', tenantModels)
+    ).rejects.toMatchObject({ code: 'HUBSPOT_PORTAL_MISMATCH' });
+
+    expect(tenantModels.HubspotCredentials.create).not.toHaveBeenCalled();
+  });
+});

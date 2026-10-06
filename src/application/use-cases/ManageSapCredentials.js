@@ -1,3 +1,5 @@
+import { dropMaskedSecrets, maskSecretFields } from '../services/secret-fields.service.js';
+
 const reasons = Object.freeze({
   INVALID_CLIENT_CONFIG_ID: 'INVALID_CLIENT_CONFIG_ID',
   INVALID_CREDENTIALS_ID: 'INVALID_CREDENTIALS_ID',
@@ -6,6 +8,13 @@ const reasons = Object.freeze({
   DUPLICATE: 'DUPLICATE',
   BAD_REQUEST: 'BAD_REQUEST',
 });
+
+// La contraseña de Service Layer se guarda real (la usa la sync) y se responde enmascarada.
+const SAP_CREDENTIALS_SECRET_FIELDS = Object.freeze(['serviceLayerPassword']);
+
+function toResponse(credentials) {
+  return maskSecretFields(credentials, SAP_CREDENTIALS_SECRET_FIELDS);
+}
 
 function normalizeBaseUrl(value) {
   return String(value || '').trim().replace(/\/+$/, '');
@@ -107,7 +116,7 @@ export class ManageSapCredentials {
       }
 
       const data = await this.sapCredentialsRepository.create({ tenantModels, payload: normalized });
-      return { ok: true, statusCode: 201, data };
+      return { ok: true, statusCode: 201, data: toResponse(data) };
     } catch (error) {
       return this.handleMutationError(error);
     }
@@ -129,7 +138,7 @@ export class ManageSapCredentials {
     }
 
     const data = await this.sapCredentialsRepository.list({ tenantModels, filter });
-    return { ok: true, data };
+    return { ok: true, data: data.map(toResponse) };
   }
 
   async get({ tenantModels, id }) {
@@ -150,7 +159,7 @@ export class ManageSapCredentials {
       };
     }
 
-    return { ok: true, data };
+    return { ok: true, data: toResponse(data) };
   }
 
   async patch({ tenantModels, id, payload }) {
@@ -163,7 +172,7 @@ export class ManageSapCredentials {
         };
       }
 
-      const normalized = normalizePayload(payload, { partial: true });
+      const normalized = normalizePayload(dropMaskedSecrets(payload, SAP_CREDENTIALS_SECRET_FIELDS), { partial: true });
       delete normalized._id;
 
       if (Object.prototype.hasOwnProperty.call(normalized, 'clientConfigId')) {
@@ -202,7 +211,7 @@ export class ManageSapCredentials {
         };
       }
 
-      return { ok: true, data };
+      return { ok: true, data: toResponse(data) };
     } catch (error) {
       return this.handleMutationError(error);
     }
@@ -226,7 +235,7 @@ export class ManageSapCredentials {
       };
     }
 
-    return { ok: true, data };
+    return { ok: true, data: toResponse(data) };
   }
 
   handleMutationError(error) {

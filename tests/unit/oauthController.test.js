@@ -45,14 +45,16 @@ jest.unstable_mockModule('../../src/infrastructure/tenants/tenantModels.js', () 
   requireTenantModels: mockRequireTenantModels,
 }));
 
-const { oauthCallback } = await import('../../src/interfaces/http/controllers/oauth.controller.js');
+process.env.HUBSPOT_CLIENT_SECRET = 'test-client-secret';
 
-function buildState({ clientConfigId, tenantKey }) {
-  return Buffer.from(JSON.stringify({ clientConfigId, tenantKey }), 'utf8')
-    .toString('base64')
-    .replace(/=/g, '')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_');
+const { oauthCallback } = await import('../../src/interfaces/http/controllers/oauth.controller.js');
+const { buildOAuthState } = await import('../../src/application/services/oauth-state.service.js');
+
+function buildState({ clientConfigId, tenantKey, portalId = '50082681' }) {
+  return buildOAuthState(
+    { clientConfigId, tenantKey, portalId },
+    { secret: process.env.HUBSPOT_CLIENT_SECRET }
+  );
 }
 
 describe('oauth.controller oauthCallback', () => {
@@ -88,7 +90,9 @@ describe('oauth.controller oauthCallback', () => {
     await oauthCallback(req, reply);
 
     expect(mockGetTenantModels).toHaveBeenCalledWith('tenant_1');
-    expect(mockExchangeCodeForTokens).toHaveBeenCalledWith('oauth-code-1', 'client-config-1', tenantModels);
+    expect(mockExchangeCodeForTokens).toHaveBeenCalledWith('oauth-code-1', 'client-config-1', tenantModels, {
+      expectedPortalId: '50082681',
+    });
     expect(mockGetTenantConnection).toHaveBeenCalledWith('tenant_1');
     expect(mockSeedHubspotMappings).toHaveBeenCalledWith({
       tenantConnection,
@@ -122,4 +126,43 @@ describe('oauth.controller oauthCallback', () => {
     expect(mockSeedHubspotMappings).not.toHaveBeenCalled();
     expect(mockSeedCreateFieldsHubspot).not.toHaveBeenCalled();
   });
+
+  it('answers 403 when HubSpot authorized a different portal and keeps the tenant untouched', async () => {
+    const error = new Error('HubSpot authorized a different portal');
+    error.code = 'HUBSPOT_PORTAL_MISMATCH';
+    mockGetTenantModels.mockResolvedValue({ HubspotCredentials: {} });
+    mockExchangeCodeForTokens.mockRejectedValue(error);
+
+    const req = {
+      query: {
+        code: 'oauth-code-1',
+        state: buildState({ clientConfigId: 'client-config-1', tenantKey: 'tenant_1' }),
+      },
+    };
+    const reply = {
+      code: jest.fn().mockReturnThis(),
+      send: jest.fn((payload) => payload),
+    };
+
+    await oauthCallback(req, reply);
+
+    expect(reply.code).toHaveBeenCalledWith(403);
+    expect(mockReplicateMasterClientConfigs).not.toHaveBeenCalled();
+    expect(mockSeedHubspotMappings).not.toHaveBeenCalled();
+  });
+
+  it('answers 400 for an unsigned legacy state', async () => {
+    const legacy = Buffer.from(JSON.stringify({ clientConfigId: 'client-config-1', tenantKey: 'tenant_1' }))
+      .toString('base64url');
+    const reply = {
+      code: jest.fn().mockReturnThis(),
+      send: jest.fn((payload) => payload),
+    };
+
+    await oauthCallback({ query: { code: 'oauth-code-1', state: legacy } }, reply);
+
+    expect(reply.code).toHaveBeenCalledWith(400);
+    expect(mockExchangeCodeForTokens).not.toHaveBeenCalled();
+  });
 });
+

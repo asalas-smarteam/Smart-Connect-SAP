@@ -6,6 +6,10 @@ import {
 } from './utils/updateDecision.utils.js';
 import { buildMappedSearchProperties } from './utils/searchProperties.utils.js';
 import { buildConfiguredSearchCriteria } from './utils/searchCriteria.utils.js';
+import {
+  belongsToAnotherSapRecord,
+  sapOwnershipPropertiesFor,
+} from '#domain/sync/sap-record-ownership.js';
 
 const COMPANY_SEARCH_PROPERTIES = [
   'email',
@@ -15,13 +19,13 @@ const COMPANY_SEARCH_PROPERTIES = [
   'idSap',
 ];
 
+// Orden fijo, el mismo del índice del flujo por lotes (CrmObjectIndex):
+// 1) idsap: si lo encuentra, no se busca por nada más.
+// 2) Solo si no existe por idsap, la segunda validación configurada en
+//    defaultFindHubspot (phone, email...), limitada a registros que no son de
+//    otro objeto de SAP. Sin esto, un BP sin email (con defaultFindHubspot=email)
+//    devolvía null y el fallback de a uno lo creaba otra vez aunque existiera.
 export async function find({ token, item, clientConfig, tenantModels }) {
-  const searchCriteria = await buildConfiguredSearchCriteria({ item, tenantModels });
-
-  if (!searchCriteria) {
-    return null;
-  }
-
   const properties = await buildMappedSearchProperties({
     tenantModels,
     clientConfig,
@@ -29,18 +33,33 @@ export async function find({ token, item, clientConfig, tenantModels }) {
     defaults: COMPANY_SEARCH_PROPERTIES,
   });
 
-  if (searchCriteria.propertyName === 'email') {
-    return hubspotClient.findCompanyByEmail(token, searchCriteria.value, {
-      properties,
-    });
+  const idsap = String(item?.properties?.idsap ?? '').trim();
+
+  if (idsap) {
+    const byIdsap = await hubspotClient.findCompanyByProperty(token, 'idsap', idsap, { properties });
+
+    if (byIdsap) {
+      return byIdsap;
+    }
   }
 
-  return hubspotClient.findCompanyByProperty(
+  const searchCriteria = await buildConfiguredSearchCriteria({ item, tenantModels });
+
+  if (!searchCriteria || searchCriteria.propertyName === 'idsap') {
+    return null;
+  }
+
+  const ownershipProperties = sapOwnershipPropertiesFor('company');
+  const found = await hubspotClient.findCompanyByProperty(
     token,
     searchCriteria.propertyName,
     searchCriteria.value,
-    { properties }
+    { properties, withoutProperties: ownershipProperties }
   );
+
+  return found && belongsToAnotherSapRecord(found.properties, item?.properties, ownershipProperties)
+    ? null
+    : found;
 }
 
 export async function create({ token, item }) {

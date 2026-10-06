@@ -56,7 +56,11 @@ describe('CrmObjectIndex', () => {
     expect(index.find({ idsap: 'C777' })).toBeNull();
     index.add({ id: 'hs-new', properties: { idsap: 'C777', email: 'new@x.com' } });
     expect(index.find({ idsap: 'C777' })?.id).toBe('hs-new');
-    expect(index.find({ idsap: 'nope', email: 'new@x.com' })?.id).toBe('hs-new');
+    // A record that already belongs to C777 is never adopted through the
+    // fallback by a row with another idsap (or with none).
+    expect(index.find({ idsap: 'nope', email: 'new@x.com' })).toBeNull();
+    index.add({ id: 'hs-lead', properties: { email: 'lead@x.com' } });
+    expect(index.find({ idsap: 'nope', email: 'lead@x.com' })?.id).toBe('hs-lead');
   });
 
   it('reports how many identity keys it holds', () => {
@@ -74,7 +78,7 @@ describe('CrmObjectIndex unique-property tier', () => {
 
   it('matches a record on a unique property when identity and fallback both miss', () => {
     const index = new CrmObjectIndex({
-      records: [contact('hs-1', { idsap: 'OTHER', email: 'a@x.com' })],
+      records: [contact('hs-1', { idsap: '', email: 'a@x.com' })],
       identityProperty: 'idsap',
       fallbackProperty: 'idsap',
       uniqueProperties: ['email'],
@@ -99,7 +103,7 @@ describe('CrmObjectIndex unique-property tier', () => {
 
   it('falls through to the unique property when the fallback tier misses', () => {
     const index = new CrmObjectIndex({
-      records: [contact('hs-1', { idsap: 'OTHER', cedula: 'NOPE', email: 'a@x.com' })],
+      records: [contact('hs-1', { cedula: 'NOPE', email: 'a@x.com' })],
       identityProperty: 'idsap',
       fallbackProperty: 'cedula',
       uniqueProperties: ['email'],
@@ -110,6 +114,18 @@ describe('CrmObjectIndex unique-property tier', () => {
     expect(index.find({ idsap: 'C001', cedula: 'MISS', email: 'a@x.com' })).toMatchObject({ id: 'hs-1' });
   });
 
+  it('never returns, even on a unique property, a record owned by another idsap', () => {
+    const index = new CrmObjectIndex({
+      records: [contact('hs-1', { idsap: 'OTHER', email: 'a@x.com' })],
+      identityProperty: 'idsap',
+      uniqueProperties: ['email'],
+    });
+
+    // Updating it would overwrite OTHER's idsap and name. The create this leads
+    // to is answered with 409 and linked by the conflict path, writing nothing.
+    expect(index.find({ idsap: 'C001', email: 'a@x.com' })).toBeNull();
+  });
+
   it('does not match on a unique property that was not declared', () => {
     const index = new CrmObjectIndex({
       records: [contact('hs-1', { idsap: 'OTHER', email: 'a@x.com' })],
@@ -118,5 +134,61 @@ describe('CrmObjectIndex unique-property tier', () => {
 
     // Companies have no HubSpot-enforced email uniqueness, so nothing is implied.
     expect(index.find({ idsap: 'C001', email: 'a@x.com' })).toBeNull();
+  });
+});
+
+// Regla de noelito (defaultFindHubspot = phone): primero idsap; si lo encuentra
+// no se busca por nada más. Si no existe por idsap, cae al teléfono, pero solo
+// a registros que no pertenecen a otro objeto de SAP.
+describe('CrmObjectIndex idsap -> phone rule', () => {
+  const contact = (id, properties) => ({ id, properties });
+  const buildPhoneIndex = (records) => new CrmObjectIndex({
+    records,
+    identityProperty: 'idsap',
+    fallbackProperty: 'phone',
+    uniqueProperties: ['email'],
+    ownershipProperties: ['idsap', 'internalcode'],
+  });
+
+  it('uses the idsap match and ignores a phone that points to another record', () => {
+    const index = buildPhoneIndex([
+      contact('hs-lead', { phone: '+50527741100' }),
+      contact('hs-bp', { idsap: 'CL00015', phone: '' }),
+    ]);
+
+    expect(index.match({ idsap: 'CL00015', phone: '+50527741100' })).toEqual({
+      record: expect.objectContaining({ id: 'hs-bp' }),
+      via: 'identity',
+    });
+  });
+
+  it('adopts a lead without SAP keys by phone when the idsap does not exist', () => {
+    const index = buildPhoneIndex([contact('hs-lead', { phone: '+50527741100' })]);
+
+    expect(index.match({ idsap: 'CL00015', phone: '+50527741100' })).toEqual({
+      record: expect.objectContaining({ id: 'hs-lead' }),
+      via: 'fallback',
+    });
+  });
+
+  it('does not adopt by phone a record that already has another idsap', () => {
+    const index = buildPhoneIndex([contact('hs-other', { idsap: 'CL00501', phone: '+50588888888' })]);
+
+    expect(index.find({ idsap: 'CL00578', phone: '+50588888888' })).toBeNull();
+  });
+
+  it('does not adopt by phone a ContactEmployee record (internalcode)', () => {
+    const index = buildPhoneIndex([contact('hs-ce', { internalcode: '123', phone: '+50588888888' })]);
+
+    expect(index.find({ idsap: 'CL00578', phone: '+50588888888' })).toBeNull();
+  });
+
+  it('skips an owned record and still finds a free lead with the same phone', () => {
+    const index = buildPhoneIndex([
+      contact('hs-other', { idsap: 'CL00501', phone: '+50588888888' }),
+      contact('hs-lead', { phone: '+50588888888' }),
+    ]);
+
+    expect(index.find({ idsap: 'CL00578', phone: '+50588888888' })?.id).toBe('hs-lead');
   });
 });

@@ -5,6 +5,7 @@ import {
 } from '#domain/sync/main-data-in-update.constants.js';
 import { applyBypassEmail } from '#application/services/bypassEmail.service.js';
 import { CrmObjectIndex, normalizeIndexKey, uniquePropertiesFor } from '#application/services/crmObjectIndex.service.js';
+import { sapOwnershipPropertiesFor } from '#domain/sync/sap-record-ownership.js';
 import { sanitizeProperties } from '#application/services/hubspotPropertyPayload.service.js';
 import {
   BATCH_CONCURRENCY,
@@ -232,9 +233,34 @@ export class ProcessCrmObjectBatches {
     const processed = [];
     // Two SAP rows that resolve to the same record must not create two records.
     const claimedKeys = new Set();
+    // HubSpot id -> how it was reached. Two rows pointing at one record put the
+    // same id twice in a batch/update, and HubSpot rejects the WHOLE chunk with
+    // "Duplicate IDs found in batch input"; the per-item fallback then created
+    // every email-less row of that chunk again (noelito, CL00015).
+    const claimedHubspotIds = new Map();
 
     for (const item of syncable) {
-      const existing = index.find(item?.properties);
+      const hit = index.match(item?.properties);
+      let existing = hit?.record ?? null;
+
+      if (existing && claimedHubspotIds.has(existing.id)) {
+        if (hit.via === 'identity') {
+          // Same SAP key twice in one run: one record, one update.
+          this.logger.warn?.(
+            `ProcessCrmObjectBatches: skipping duplicate ${objectType} row, HubSpot record ${existing.id} already claimed in this run by its ${this.identityProperty}`
+          );
+          stats.sent += 1;
+          stats.skipped += 1;
+          continue;
+        }
+        // Reached only through a secondary tier (phone/email) by a row whose own
+        // identity matched nothing: it is a different SAP record that happens to
+        // share that value, so it goes down the create path like any unmatched row.
+        this.logger.warn?.(
+          `ProcessCrmObjectBatches: ${objectType} HubSpot record ${existing.id} already claimed in this run; treating the row as unmatched instead of updating it twice`
+        );
+        existing = null;
+      }
 
       if (!existing) {
         const claimKeys = this.dedupeKeys(item?.properties, fallbackProperty, objectType);
@@ -265,6 +291,7 @@ export class ProcessCrmObjectBatches {
         continue;
       }
 
+      claimedHubspotIds.set(existing.id, hit.via);
       processed.push({ item, hubspotId: existing.id });
 
       if (shouldUpdateSapFromHubspot({ mainDataInUpdate, objectType })) {
@@ -631,10 +658,12 @@ export class ProcessCrmObjectBatches {
   async buildIndex({ objectType, fallbackProperty, clientConfig, tenantModels, handler, getToken }) {
     const searchProperties = await handler.getSearchProperties({ clientConfig, tenantModels });
     const uniqueProperties = uniquePropertiesFor(objectType);
+    const ownershipProperties = sapOwnershipPropertiesFor(objectType);
     const properties = [...new Set([
       this.identityProperty,
       fallbackProperty,
       ...uniqueProperties,
+      ...ownershipProperties,
       ...searchProperties,
     ].filter(Boolean))].filter((name) => name !== 'hs_object_id' && name !== 'associations');
 
@@ -650,6 +679,7 @@ export class ProcessCrmObjectBatches {
       identityProperty: this.identityProperty,
       fallbackProperty,
       uniqueProperties,
+      ownershipProperties,
     });
   }
 

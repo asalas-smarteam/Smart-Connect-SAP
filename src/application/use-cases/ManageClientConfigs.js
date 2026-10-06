@@ -1,8 +1,17 @@
+import { dropMaskedSecrets, maskSecretFields } from '../services/secret-fields.service.js';
+
 const clientConfigReasons = Object.freeze({
   BAD_REQUEST: 'BAD_REQUEST',
   FORBIDDEN: 'FORBIDDEN',
   NOT_FOUND: 'NOT_FOUND',
 });
+
+// Credenciales de la API/BD externa del cliente: se guardan reales, se responden enmascaradas.
+const CLIENT_CONFIG_SECRET_FIELDS = Object.freeze(['apiToken', 'externalDbPassword']);
+
+function toResponse(config) {
+  return maskSecretFields(config, CLIENT_CONFIG_SECRET_FIELDS);
+}
 
 const allowedIntegrationModeNames = Object.freeze([
   'API',
@@ -107,7 +116,7 @@ export class ManageClientConfigs {
 
       await this.syncScheduler({ tenantKey, config: data });
 
-      return { ok: true, data };
+      return { ok: true, data: toResponse(data) };
     } catch (error) {
       if (isConfigValidationError(error)) {
         return {
@@ -123,7 +132,7 @@ export class ManageClientConfigs {
 
   async listClientConfigs({ tenantModels }) {
     const data = await this.clientConfigRepository.listClientConfigs({ tenantModels });
-    return { ok: true, data };
+    return { ok: true, data: data.map(toResponse) };
   }
 
   async createIntegrationMode({ tenantModels, payload }) {
@@ -170,7 +179,7 @@ export class ManageClientConfigs {
         };
       }
 
-      const patchPayload = { ...payload };
+      const patchPayload = dropMaskedSecrets(payload, CLIENT_CONFIG_SECRET_FIELDS);
       const existingFilters = Array.isArray(config.filters) ? config.filters : [];
       const existingDefaults = existingFilters.filter((filter) => filter?.isDefault === true);
       const existingCustom = existingFilters.filter((filter) => filter?.isDefault !== true);
@@ -222,7 +231,7 @@ export class ManageClientConfigs {
 
       await this.syncScheduler({ tenantKey, config, previousConfig });
 
-      return { ok: true, data: config };
+      return { ok: true, data: toResponse(config) };
     } catch (error) {
       if (isConfigValidationError(error)) {
         return {

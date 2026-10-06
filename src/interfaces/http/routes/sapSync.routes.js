@@ -10,12 +10,14 @@ import {
   triggerSapSync,
   triggerWebHook,
 } from '../controllers/sapSync.controller.js';
+import { adminTenantAuth } from '../middlewares/adminAuth.js';
 import { internalKeyAuthOnly } from '../middlewares/internalAuth.js';
-import { tenantResolver } from '../middlewares/tenantResolver.js';
 
 export default async function routes(app) {
-  app.post('/sap-sync/run', triggerSapSync);
-  app.post('/sap-sync/runWebHook', triggerWebHook);
+  // Disparos manuales para probar tareas y webhooks. Toman el tenant del body (tenantID), no
+  // del resolver, así que alcanza con la llave interna.
+  app.post('/sap-sync/run', { preHandler: internalKeyAuthOnly }, triggerSapSync);
+  app.post('/sap-sync/runWebHook', { preHandler: internalKeyAuthOnly }, triggerWebHook);
 
   app.get('/sap-sync/jobs', { preHandler: internalKeyAuthOnly }, getSapSyncJobsSnapshot);
   app.post('/sap-sync/jobs/activate', { preHandler: internalKeyAuthOnly }, activateSapSyncConfig);
@@ -24,6 +26,6 @@ export default async function routes(app) {
   app.post('/sap-sync/jobs/resync', { preHandler: internalKeyAuthOnly }, resyncSapSyncScheduler);
   app.delete('/sap-sync/jobs/tenant/:tenantKey', { preHandler: internalKeyAuthOnly }, deleteTenantSapSyncJobs);
 
-  app.post('/sap-sync/config/:id/run', { preHandler: tenantResolver }, runTenantConfigNow);
-  app.post('/sap-sync/config/:id/sync-schedule', { preHandler: tenantResolver }, syncTenantConfigSchedule);
+  app.post('/sap-sync/config/:id/run', { preHandler: adminTenantAuth }, runTenantConfigNow);
+  app.post('/sap-sync/config/:id/sync-schedule', { preHandler: adminTenantAuth }, syncTenantConfigSchedule);
 }
