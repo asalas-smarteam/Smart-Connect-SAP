@@ -24,6 +24,10 @@ const {
   BP_ADDRESS_OBJECT_TYPE,
   BP_ADDRESS_SOURCE_CONTEXT,
 } = await import('../../../src/domain/business-partners/business-partner-creation.constants.js');
+const {
+  ADDRESS_EXTENSION_OBJECT_TYPE,
+  ADDRESS_EXTENSION_SOURCE_CONTEXT,
+} = await import('../../../src/domain/orders/address-extension.service.js');
 
 function createLeanQuery(value) {
   return {
@@ -89,5 +93,54 @@ describe('TenantWebhookRuntimeRepository.resolveRuntimeContext — Promise.all/d
     // if this count drifts, the Promise.all array and the destructuring list no longer have
     // the same length and every assertion past the drift point is suspect.
     expect(mockGetMappingsByObjectType).toHaveBeenCalledTimes(12);
+  });
+
+  // The AddressExtension rows are NOT part of resolveRuntimeContext on purpose: that context is
+  // built for every webhook event of every tenant, and only createQuotation needs these rows.
+  it('does not load the AddressExtension mappings as part of the shared runtime context', async () => {
+    const repository = new TenantWebhookRuntimeRepository();
+
+    const context = await repository.resolveRuntimeContext({
+      tenantModels: buildTenantModels(),
+      payload: {},
+      tenantId: 'tenant-1',
+      tenantKey: 'tenant-key-1',
+      portalId: '12345',
+    });
+
+    expect(context.mappings).not.toHaveProperty('addressExtensionMappings');
+    expect(mockGetMappingsByObjectType).not.toHaveBeenCalledWith(
+      expect.anything(),
+      ADDRESS_EXTENSION_OBJECT_TYPE,
+      ADDRESS_EXTENSION_SOURCE_CONTEXT,
+      expect.anything(),
+      expect.anything()
+    );
+  });
+});
+
+describe('TenantWebhookRuntimeRepository.resolveAddressExtensionMappings', () => {
+  beforeEach(() => {
+    mockGetMappingsByObjectType.mockClear();
+  });
+
+  it('loads the addressExtension rows on demand, with the businessPartner fallback off', async () => {
+    const repository = new TenantWebhookRuntimeRepository();
+    const tenantModels = buildTenantModels();
+
+    const mappings = await repository.resolveAddressExtensionMappings({
+      tenantModels,
+      hubspotCredentialId: 'hubspot-credential-1',
+    });
+
+    expect(mappings).toBe(`${ADDRESS_EXTENSION_OBJECT_TYPE}/${ADDRESS_EXTENSION_SOURCE_CONTEXT}`);
+    expect(mockGetMappingsByObjectType).toHaveBeenCalledTimes(1);
+    expect(mockGetMappingsByObjectType).toHaveBeenCalledWith(
+      'hubspot-credential-1',
+      ADDRESS_EXTENSION_OBJECT_TYPE,
+      ADDRESS_EXTENSION_SOURCE_CONTEXT,
+      tenantModels,
+      { allowBusinessPartnerFallback: false }
+    );
   });
 });

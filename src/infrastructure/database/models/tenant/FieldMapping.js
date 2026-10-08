@@ -30,6 +30,9 @@ export const fieldMappingSchema = new Schema(
         // proposito: es un documento de COMPRA, su CardCode es un proveedor y sus campos de
         // cabecera/linea no son los mismos que los de venta.
         'purchase-quotations',
+        // AddressExtension de la cabecera del documento (BillTo*/ShipTo*). Se mapea con
+        // objectType: 'addressExtension' porque llega como objeto propio en el payload.
+        'addressExtension',
       ],
       default: '',
     },

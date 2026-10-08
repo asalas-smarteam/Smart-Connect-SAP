@@ -65,6 +65,39 @@ describe('resolveEventPayload — arrays de BusinessPartner', () => {
   });
 });
 
+describe('resolveEventPayload — addressExtension', () => {
+  it('exposes the addressExtension object from payload', () => {
+    const result = resolveEventPayload({
+      payload: { addressExtension: { billing_street: 'Calle 1', zip: '01010' } },
+    });
+
+    expect(result.addressExtension).toEqual({ billing_street: 'Calle 1', zip: '01010' });
+  });
+
+  it('reads it from payload.data too', () => {
+    const result = resolveEventPayload({
+      payload: { data: { addressExtension: { shipping_street: 'Calle 2' } } },
+    });
+
+    expect(result.addressExtension).toEqual({ shipping_street: 'Calle 2' });
+  });
+
+  it('is null when the workflow does not send it (legacy payload)', () => {
+    const result = resolveEventPayload({ payload: { deal: { hs_object_id: '1' } } });
+
+    expect(result.addressExtension).toBeNull();
+  });
+
+  // Not normalized here on purpose: buildAddressExtension rejects a malformed value inside the
+  // use case's try block, where the failure keeps its audit trail. Coercing it to null here would
+  // hide the workflow bug.
+  it('passes a malformed value through untouched so the domain can reject it', () => {
+    expect(resolveEventPayload({ payload: { addressExtension: [] } }).addressExtension).toEqual([]);
+    expect(resolveEventPayload({ payload: { addressExtension: 'x' } }).addressExtension).toBe('x');
+    expect(resolveEventPayload({ payload: { addressExtension: '' } }).addressExtension).toBe('');
+  });
+});
+
 describe('resolveEventPayload — coleccion de line items', () => {
   it('acepta lineItems (camelCase), que es como la manda el workflow de conversion a orden', () => {
     const result = resolveEventPayload({

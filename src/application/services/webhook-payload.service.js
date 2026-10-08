@@ -42,6 +42,11 @@ export function resolveEventPayload(event) {
     // Direcciones que se convierten en BPAddresses de SAP. La llave es
     // singular porque así la manda el workflow de HubSpot.
     bpAddress: toObjectArray(payload?.bpAddress ?? payload?.data?.bpAddress),
+    // Header-level AddressExtension of the SAP document: one object per document, unlike the
+    // bpAddress collection. The key is camelCase because that is how the quotation workflow
+    // sends it. Returned as received (null when absent): buildAddressExtension rejects a
+    // malformed value inside the use case's try block, where the failure keeps its audit trail.
+    addressExtension: payload?.addressExtension ?? payload?.data?.addressExtension ?? null,
   };
 }
 

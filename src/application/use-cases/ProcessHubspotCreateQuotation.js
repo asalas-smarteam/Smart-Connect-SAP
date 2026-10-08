@@ -4,6 +4,7 @@ import {
   mapHubspotToSapFields,
   resolvePaymentGroupCode,
 } from '#domain/orders/order-builder.service.js';
+import { buildAddressExtension } from '#domain/orders/address-extension.service.js';
 import {
   resolveDealContactEmployeeCode,
   resolveEventPayload,
@@ -140,7 +141,16 @@ export class ProcessHubspotCreateQuotation {
   }
 
   async execute({ event, tenantModels, tenantId, tenantKey, portalId }) {
-    const { payload, deal, company, contact, lineItems, contactEmployees, bpAddress } = resolveEventPayload(event);
+    const {
+      payload,
+      deal,
+      company,
+      contact,
+      lineItems,
+      contactEmployees,
+      bpAddress,
+      addressExtension,
+    } = resolveEventPayload(event);
     const WebhookEvent = tenantModels?.WebhookEvent;
     const SapDocumentLink = tenantModels?.SapDocumentLink;
     const companyExists = Boolean(company);
@@ -242,6 +252,20 @@ export class ProcessHubspotCreateQuotation {
         division: resolveS4HeaderFieldValue(mappedDeal, salesDocumentConfig.division, 'OrganizationDivision'),
       };
 
+      // Built BEFORE the Business Partner step: a malformed object fails here, so it never
+      // leaves an orphan customer behind in SAP. The rows are read only when the workflow
+      // actually sent the object, so a tenant that does not use the feature never pays for the
+      // query. Null when there is nothing to send, and the S/4 builder ignores it.
+      const sapAddressExtension = addressExtension === null
+        ? null
+        : buildAddressExtension({
+          source: addressExtension,
+          mappings: await this.runtimeRepository.resolveAddressExtensionMappings({
+            tenantModels,
+            hubspotCredentialId: hubspotCredentials._id,
+          }),
+        });
+
       const businessPartner = await documentBusinessPartnerResolver.findOrCreateForDocument({
         sapOrderAdapter,
         WebhookEvent,
@@ -321,6 +345,7 @@ export class ProcessHubspotCreateQuotation {
         documentsOwner,
         paymentGroupCode: resolvePaymentGroupCode({ mappedDeal, groupCodeDefaults }),
         mappedDealFields: mappedDeal,
+        addressExtension: sapAddressExtension,
         // S/4
         soldToParty: cardCode,
         lineItems,

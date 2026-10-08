@@ -58,6 +58,28 @@ describe('order-builder.service buildQuotationPayload', () => {
     expect(payload).not.toHaveProperty('NumAtCard');
   });
 
+  it('adds AddressExtension to the header when the payload brought one', () => {
+    const addressExtension = { BillToStreet: 'Calle 1', ShipToStreet: 'Calle 2', ShipToCountry: 'GT' };
+    const payload = buildQuotationPayload({
+      cardCode: 'CL00129',
+      documentLines: [{ ItemCode: 'A01', Quantity: 1, UnitPrice: 10 }],
+      addressExtension,
+    });
+
+    expect(payload.AddressExtension).toEqual(addressExtension);
+  });
+
+  it('does not add AddressExtension when it is null or empty', () => {
+    const base = {
+      cardCode: 'CL00129',
+      documentLines: [{ ItemCode: 'A01', Quantity: 1, UnitPrice: 10 }],
+    };
+
+    expect(buildQuotationPayload({ ...base, addressExtension: null })).not.toHaveProperty('AddressExtension');
+    expect(buildQuotationPayload({ ...base, addressExtension: {} })).not.toHaveProperty('AddressExtension');
+    expect(buildQuotationPayload(base)).not.toHaveProperty('AddressExtension');
+  });
+
   it('uses the DocDueDate mapped from HubSpot instead of today', () => {
     const payload = buildQuotationPayload({
       cardCode: 'CL00129',
