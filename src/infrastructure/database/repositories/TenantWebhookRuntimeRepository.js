@@ -20,6 +20,10 @@ import {
   BP_ADDRESS_SOURCE_CONTEXT,
 } from '#domain/business-partners/business-partner-creation.constants.js';
 import { resolveSapFlavor } from '#infrastructure/config/SapFlavorConfigRepository.js';
+import {
+  ADDRESS_EXTENSION_OBJECT_TYPE,
+  ADDRESS_EXTENSION_SOURCE_CONTEXT,
+} from '#domain/orders/address-extension.service.js';
 
 // Key intencionalmente escrita "groupCodeDefauls" (sin la "t") — así existe en los tenants.
 const GROUP_CODE_DEFAULTS_CONFIG_KEY = 'groupCodeDefauls';
@@ -173,6 +177,20 @@ export class TenantWebhookRuntimeRepository {
       },
       sapFlavor,
     };
+  }
+
+  // Document-level AddressExtension (BillTo*/ShipTo*) rows. Loaded on demand by createQuotation
+  // instead of inside resolveRuntimeContext: that context is built for every webhook event of
+  // every tenant, and only the tenants that send the object need these rows. The businessPartner
+  // fallback stays off, so a tenant without rows gets [] and its payload stays as it is today.
+  async resolveAddressExtensionMappings({ tenantModels, hubspotCredentialId }) {
+    return mappingService.getMappingsByObjectType(
+      hubspotCredentialId,
+      ADDRESS_EXTENSION_OBJECT_TYPE,
+      ADDRESS_EXTENSION_SOURCE_CONTEXT,
+      tenantModels,
+      { allowBusinessPartnerFallback: false }
+    );
   }
 
   async findOwnerMappingByHubspotOwner({ tenantModels, hubspotCredentialId, hubspotOwnerId }) {

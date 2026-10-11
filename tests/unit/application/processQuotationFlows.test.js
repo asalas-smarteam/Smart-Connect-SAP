@@ -65,6 +65,8 @@ function buildRuntimeRepository(context = buildContext()) {
     }),
     findOwnerMappingByHubspotOwner: jest.fn().mockResolvedValue(null),
     resolveSapErrorBypassConfig: jest.fn().mockResolvedValue({ contactEmployee: false }),
+    // Loaded on demand by createQuotation, not part of resolveRuntimeContext.
+    resolveAddressExtensionMappings: jest.fn().mockResolvedValue([]),
   };
 }
 
@@ -342,6 +344,84 @@ describe('ProcessHubspotCreateQuotation', () => {
 
     const { quotationPayload } = deps.sapQuotationAdapter.createQuotation.mock.calls[0][0];
     expect(quotationPayload).not.toHaveProperty('Comments');
+  });
+
+  describe('AddressExtension', () => {
+    const addressExtensionMappings = [
+      { sourceField: 'BillToStreet', targetField: 'billing_street' },
+      { sourceField: 'ShipToStreet', targetField: 'shipping_street' },
+      { sourceField: 'ShipToCountry', targetField: 'country' },
+    ];
+
+    function buildEvent(addressExtension) {
+      return {
+        ...baseEvent,
+        payload: { ...baseEvent.payload, ...(addressExtension ? { addressExtension } : {}) },
+      };
+    }
+
+    it('sends the mapped AddressExtension in the quotation header', async () => {
+      const deps = buildDeps();
+      deps.runtimeRepository.resolveAddressExtensionMappings.mockResolvedValue(addressExtensionMappings);
+      const useCase = new ProcessHubspotCreateQuotation(deps);
+
+      await useCase.execute({
+        event: buildEvent({ billing_street: 'Calle 1', shipping_street: 'Calle 2', country: 'GT' }),
+        tenantModels,
+      });
+
+      const { quotationPayload } = deps.sapQuotationAdapter.createQuotation.mock.calls[0][0];
+      expect(quotationPayload.AddressExtension).toEqual({
+        BillToStreet: 'Calle 1',
+        ShipToStreet: 'Calle 2',
+        ShipToCountry: 'GT',
+      });
+      expect(deps.runtimeRepository.resolveAddressExtensionMappings).toHaveBeenCalledWith({
+        tenantModels,
+        hubspotCredentialId: 'cred-1',
+      });
+    });
+
+    // The query is the cost other tenants must not pay: no object in the payload, no read.
+    it('skips AddressExtension and does not query the mappings when the workflow sends no object', async () => {
+      const deps = buildDeps();
+      deps.runtimeRepository.resolveAddressExtensionMappings.mockResolvedValue(addressExtensionMappings);
+      const useCase = new ProcessHubspotCreateQuotation(deps);
+
+      await useCase.execute({ event: buildEvent(null), tenantModels });
+
+      const { quotationPayload } = deps.sapQuotationAdapter.createQuotation.mock.calls[0][0];
+      expect(quotationPayload).not.toHaveProperty('AddressExtension');
+      expect(deps.runtimeRepository.resolveAddressExtensionMappings).not.toHaveBeenCalled();
+    });
+
+    // Validated before the Business Partner step, so a malformed object never leaves an orphan
+    // customer behind in SAP. It still goes through the use case's catch, so the failure keeps
+    // its audit trail for diagnosis.
+    it('rejects a malformed addressExtension before touching SAP, keeping the audit trail', async () => {
+      const deps = buildDeps();
+      const useCase = new ProcessHubspotCreateQuotation(deps);
+
+      const error = await useCase
+        .execute({ event: buildEvent([{ billing_street: 'Calle 1' }]), tenantModels })
+        .catch((caught) => caught);
+
+      expect(error).toMatchObject({ name: 'PermanentWebhookError', permanent: true });
+      expect(error.message).toMatch(/addressExtension/);
+      expect(error.syncLogWebhookErrors).toHaveLength(1);
+      expect(deps.sapOrderAdapter.findOrCreateBusinessPartner).not.toHaveBeenCalled();
+      expect(deps.sapQuotationAdapter.createQuotation).not.toHaveBeenCalled();
+    });
+
+    it('skips AddressExtension when the tenant has no mappings, even if the payload carries it', async () => {
+      const deps = buildDeps();
+      const useCase = new ProcessHubspotCreateQuotation(deps);
+
+      await useCase.execute({ event: buildEvent({ billing_street: 'Calle 1' }), tenantModels });
+
+      const { quotationPayload } = deps.sapQuotationAdapter.createQuotation.mock.calls[0][0];
+      expect(quotationPayload).not.toHaveProperty('AddressExtension');
+    });
   });
 
   it('is idempotent: skips creation when a quotation link already exists', async () => {
