@@ -66,12 +66,18 @@ SAP B1 expone 64 campos booleanos `Properties1` .. `Properties64`. Esta clave lo
 }
 
 Detalle: requireAddress
-Compuerta de la sincronización de direcciones de SAP hacia HubSpot. Hoy siempre debe quedar en `false`: un BusinessPartner de SAP tiene N direcciones (`BPAddresses`) y una company de HubSpot un solo juego de propiedades de dirección, así que el destino correcto es un objeto personalizado de HubSpot para direcciones y eso todavía no está implementado. Si se pone en `true`, la corrida registra un warning `ADDRESS_SYNC_NOT_IMPLEMENTED` y continúa normalmente, sin sincronizar ninguna dirección. La dirección HubSpot -> SAP no usa esta clave: esa va por el array `bpAddress` del payload del webhook y se configura en `businessPartnerCreation`.
+Lleva la dirección de un BusinessPartner de SAP B1 a propiedades de la company y del contact en HubSpot (solo SAP -> HubSpot). Un BusinessPartner tiene N filas en `BPAddresses`, así que no cabe en un FieldMapping (que copia un campo de SAP a una propiedad): `addresses` es un array de reglas y **cada regla es UNA propiedad de HubSpot**. `required: true` enciende la sincronización; con `false`, o sin la clave, el tenant sigue enviando solo sus propiedades mapeadas. Cada regla trae `AddressType` (`bo_ShipTo` entrega, `bo_BillTo` fiscal) y/o `AddressName` para elegir la fila, `sourceField` (el campo de esa fila, como `Street`, `City` o `State`) y `targetField` (la propiedad de HubSpot, con su nombre interno). La fila se busca por esos criterios y se toma la primera que coincida, **nunca por posición**; varias reglas pueden compartir la misma fila (por ejemplo `Street` y `City` de la dirección de entrega, son dos reglas). Una regla sin ninguno de los dos criterios, con un `sourceField` que no sea un identificador de SAP o sin `targetField` se descarta. AMC solo lleva la calle: dos reglas, `direccion_entrega` y `direccion_fiscal`. Si se agregan `State`, llega como el código que tenga SAP (en Guatemala, el código del departamento, no el nombre). Solo se escribe lo que SAP trae con valor: un campo vacío o `null` no se envía y nunca borra lo que ya hay en HubSpot. Si una propiedad también está en un FieldMapping, gana la dirección de SAP. Una regla inválida, o que repite el `targetField` de una anterior (se queda la primera), se deja fuera y se registra una sola vez en el log sin frenar las demás; si `required` es `true` y ninguna regla sirve, cada corrida registra el warning `ADDRESS_SYNC_MISCONFIGURED` y sigue sin direcciones. Solo aplica a SAP B1: en otro flavor `addresses` se ignora. Aplica a company y a contact; el contact solo si su sync está activo.
+
+Para que SAP escriba la dirección en un registro que ya existe en HubSpot, las propiedades tienen que estar también en `hubspotUpdateFields` (`{ company: [...], contact: [...] }`). Sin eso, una actualización solo manda `idsap` e `internalcode`, y un cambio de dirección por sí solo ni siquiera dispara la actualización. Con ellas, SAP pisa en cada corrida FULL lo que se haya corregido a mano en HubSpot. Las propiedades tienen que existir en el portal antes del primer sync, y si se quieren como dropdown deben crearse como tal (ver `dropdownOptionsSync`). El `$select` pide `BPAddresses` solo; si el `.env` ya trae `COMPANY_ADD_FIELDS_URL_SAP=ContactEmployees,BPAddresses`, en company ya venía incluido y no se duplica. La dirección HubSpot -> SAP no usa esta clave: esa va por el array `bpAddress` del payload del webhook y se configura en `businessPartnerCreation`.
 
 { 
     "key": "requireAddress", 
     "value": { 
-        "required": false 
+        "required": true, 
+        "addresses": [ 
+            { "AddressType": "bo_ShipTo", "sourceField": "Street", "targetField": "direccion_entrega" }, 
+            { "AddressType": "bo_BillTo", "sourceField": "Street", "targetField": "direccion_fiscal" } 
+        ] 
     } 
 }
 
