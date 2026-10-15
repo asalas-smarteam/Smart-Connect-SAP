@@ -12,9 +12,6 @@ export const REQUIRE_ADDRESS_CONFIG_KEY = 'requireAddress';
 // to write: no addresses, every rule invalid, or a tenant that is not B1. It replaces the old "not
 // implemented" warning now that the feature exists.
 export const ADDRESS_SYNC_MISCONFIGURED = 'ADDRESS_SYNC_MISCONFIGURED';
-// Warning code the use case still emits until the wiring of the address sync lands in the next
-// change; removed there together with its last user.
-export const ADDRESS_SYNC_NOT_IMPLEMENTED = 'ADDRESS_SYNC_NOT_IMPLEMENTED';
 
 // AddressType values of a SAP B1 BusinessPartner address (BPAddresses[].AddressType).
 export const BP_ADDRESS_TYPES = Object.freeze({

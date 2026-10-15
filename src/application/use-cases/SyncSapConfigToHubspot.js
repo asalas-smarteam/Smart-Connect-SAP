@@ -3,7 +3,12 @@ import { resolveDiscount } from '#domain/products/discount-resolver.service.js';
 import { withDynamicDescriptionSelectFields } from '#domain/sync/dynamic-description.service.js';
 import { withPropertiesFlagsSelectFields } from '#domain/business-partners/sap-properties-flags.service.js';
 import { withContactEmployeesSelectField } from '#domain/business-partners/contact-employees-select.service.js';
-import { ADDRESS_SYNC_NOT_IMPLEMENTED } from '#domain/business-partners/address-sync.constants.js';
+import { withBpAddressesSelectField } from '#domain/business-partners/bp-addresses-select.service.js';
+import { isAddressSyncEnabled } from '#domain/business-partners/address-sync.service.js';
+import { ADDRESS_SYNC_MISCONFIGURED } from '#domain/business-partners/address-sync.constants.js';
+
+// A BusinessPartner is a company or a person (contact) in HubSpot; both carry BPAddresses.
+const ADDRESS_SYNC_OBJECT_TYPES = new Set(['company', 'contact']);
 
 export class SyncSapConfigToHubspot {
   constructor({
@@ -23,6 +28,7 @@ export class SyncSapConfigToHubspot {
     batchExpiryEnricher = null,
     businessPartnerCreationConfigRepository = null,
     addressSyncConfigRepository = null,
+    addressSyncEnricher = null,
     // Este constructor no tenía logger. Las tareas 6 y 9 registran warnings, así
     // que se agrega ahora con default console, igual que HandleHubspotAssociations.
     logger = console,
@@ -44,6 +50,7 @@ export class SyncSapConfigToHubspot {
     this.batchExpiryEnricher = batchExpiryEnricher;
     this.businessPartnerCreationConfigRepository = businessPartnerCreationConfigRepository;
     this.addressSyncConfigRepository = addressSyncConfigRepository;
+    this.addressSyncEnricher = addressSyncEnricher;
     this.logger = logger;
     this.dateProvider = dateProvider;
   }
@@ -110,18 +117,29 @@ export class SyncSapConfigToHubspot {
         })
         : null;
 
+      // Una sola lectura de requireAddress por corrida: la usan el $select de abajo y el aviso
+      // que va después de traer los datos.
+      const addressSyncConfig = await this.readAddressSyncConfig({
+        objectType: activeConfig.objectType,
+        tenantContext,
+      });
+
       const fetchOptions = {
         ...buildSapFetchOptions(activeConfig, this.dateProvider),
-        mappings: withContactEmployeesSelectField(
-          withPropertiesFlagsSelectFields(
-            withDynamicDescriptionSelectFields(sapMappings, dynamicDescriptionConfig, {
-              objectType: activeConfig.objectType,
-              sourceContext,
-            }),
-            propertiesFlagsConfig,
+        mappings: withBpAddressesSelectField(
+          withContactEmployeesSelectField(
+            withPropertiesFlagsSelectFields(
+              withDynamicDescriptionSelectFields(sapMappings, dynamicDescriptionConfig, {
+                objectType: activeConfig.objectType,
+                sourceContext,
+              }),
+              propertiesFlagsConfig,
+              { objectType: activeConfig.objectType, sourceContext }
+            ),
             { objectType: activeConfig.objectType, sourceContext }
           ),
-          { objectType: activeConfig.objectType, sourceContext }
+          addressSyncConfig,
+          { objectType: activeConfig.objectType }
         ),
       };
       const rawData = await this.sapDataSource.fetchData({
@@ -160,21 +178,15 @@ export class SyncSapConfigToHubspot {
 
       const objectType = activeConfig.objectType;
 
-      // La sincronización de direcciones SAP -> HubSpot no está implementada: el
-      // destino correcto es un custom object de HubSpot (spec aparte). Si un
-      // tenant la activó, que quede constancia en vez de fallar en silencio.
-      if (this.addressSyncConfigRepository && (objectType === 'company' || objectType === 'contact')) {
-        const { required } = await this.addressSyncConfigRepository.getAddressSyncConfig({
-          tenantModels: tenantContext?.tenantModels,
+      // Un tenant que pidió la sincronización de direcciones (required: true) y no dejó nada
+      // válido que escribir —sin addresses, todas las reglas inválidas o un tenant que no es
+      // B1— queda registrado en vez de fallar en silencio. La corrida sigue igual.
+      if (addressSyncConfig?.required === true && !isAddressSyncEnabled(addressSyncConfig)) {
+        this.logger?.warn?.({
+          msg: 'requireAddress esta activo pero no hay direcciones validas que escribir en addresses',
+          code: ADDRESS_SYNC_MISCONFIGURED,
+          objectType,
         });
-
-        if (required) {
-          this.logger?.warn?.({
-            msg: 'requireAddress esta activo pero la sincronizacion de direcciones no esta implementada',
-            code: ADDRESS_SYNC_NOT_IMPLEMENTED,
-            objectType,
-          });
-        }
       }
 
       const mappedRecords = await this.mappingRepository.mapRecords({
@@ -239,6 +251,18 @@ export class SyncSapConfigToHubspot {
       // que sanitizeProperties vea el valor ya resuelto.
       if (this.propertiesFlagsEnricher) {
         await this.propertiesFlagsEnricher.enrich({
+          mappedRecords: mappedRecordsWithRawSap,
+          objectType,
+          tenantModels: tenantContext?.tenantModels,
+        });
+      }
+
+      // Escribe la dirección de entrega y la fiscal de SAP en las propiedades de HubSpot que
+      // requireAddress.addresses nombra (no-op salvo en tenants con esa config; solo company y
+      // contact). Corre después de mapRecords porque necesita rawSapData, y antes de
+      // sendMappedRecords para que sanitizeProperties vea los valores ya resueltos.
+      if (this.addressSyncEnricher) {
+        await this.addressSyncEnricher.enrich({
           mappedRecords: mappedRecordsWithRawSap,
           objectType,
           tenantModels: tenantContext?.tenantModels,
@@ -312,6 +336,24 @@ export class SyncSapConfigToHubspot {
         error: error.message,
         metrics,
       };
+    }
+  }
+
+  // Lee requireAddress una vez por corrida. Solo para company y contact, que son los que traen
+  // BPAddresses. Una config que no se puede leer deja la función apagada: una corrida que muere
+  // por eso es peor que una corrida sin direcciones.
+  async readAddressSyncConfig({ objectType, tenantContext }) {
+    if (!this.addressSyncConfigRepository || !ADDRESS_SYNC_OBJECT_TYPES.has(objectType)) {
+      return null;
+    }
+
+    try {
+      return await this.addressSyncConfigRepository.getAddressSyncConfig({
+        tenantModels: tenantContext?.tenantModels,
+      });
+    } catch (error) {
+      this.logger?.error?.('requireAddress config read failed', { error: error?.message });
+      return null;
     }
   }
 

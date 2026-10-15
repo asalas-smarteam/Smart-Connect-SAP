@@ -114,6 +114,11 @@ describe('sap-sync composition', () => {
       addressSyncConfigRepository: expect.objectContaining({
         getAddressSyncConfig: expect.any(Function),
       }),
+      // Direcciones SAP -> HubSpot: el mismo hueco. Sin esta aserción, borrar el cableado del
+      // enricher dejaría la función apagada para todos los tenants sin que ningún test lo note.
+      addressSyncEnricher: expect.objectContaining({
+        enrich: expect.any(Function),
+      }),
     }));
 
     // `logger` NO se puede afirmar con objectContaining({ warn, error }): el

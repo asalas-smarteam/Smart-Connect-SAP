@@ -36,6 +36,7 @@ import MappingSyncRepository from '#infrastructure/repositories/MappingSyncRepos
 import SapSyncDataAdapter from '#infrastructure/sap/SapSyncDataAdapter.js';
 import S4ContactEnrichmentAdapter from '#infrastructure/sap/customers/S4ContactEnrichmentAdapter.js';
 import PropertiesFlagsEnrichmentAdapter from '#infrastructure/sap/customers/PropertiesFlagsEnrichmentAdapter.js';
+import AddressSyncEnrichmentAdapter from '#infrastructure/sap/customers/AddressSyncEnrichmentAdapter.js';
 import WarehouseStockEnrichmentAdapter from '#infrastructure/sap/products/WarehouseStockEnrichmentAdapter.js';
 import BatchExpiryEnrichmentAdapter from '#infrastructure/sap/products/BatchExpiryEnrichmentAdapter.js';
 import sapSyncAdminAdapter from '#infrastructure/scheduler/SapSyncAdminAdapter.js';
@@ -102,6 +103,11 @@ export function buildSyncSapConfigToHubspot() {
   // duplicada; cada consumidor sigue leyendo la config una vez por su cuenta.
   const businessPartnerCreationConfigRepository = new BusinessPartnerCreationConfigRepository();
 
+  // Misma instancia en el use-case (que lee requireAddress una vez por corrida para el $select y el
+  // aviso) y en el enricher de direcciones, que la lee otra vez al escribir. Como con PropertiesN,
+  // cada consumidor lee la config una vez por su cuenta.
+  const addressSyncConfigRepository = new AddressSyncConfigRepository();
+
   return new SyncSapConfigToHubspot({
     sapDataSource,
     mappingRepository,
@@ -143,9 +149,16 @@ export function buildSyncSapConfigToHubspot() {
       }),
       SapRecordEnricherPort
     ),
-    addressSyncConfigRepository: new AddressSyncConfigRepository(),
+    addressSyncConfigRepository,
+    addressSyncEnricher: assertPort(
+      new AddressSyncEnrichmentAdapter({
+        configRepository: addressSyncConfigRepository,
+        logger,
+      }),
+      SapRecordEnricherPort
+    ),
     // El constructor defaultea `logger` a `console`. Sin esta línea los warnings
-    // de las tareas 6 y 9 (PropertiesN sin flavor B1, ADDRESS_SYNC_NOT_IMPLEMENTED)
+    // de las tareas 6 y 9 (PropertiesN sin flavor B1, ADDRESS_SYNC_MISCONFIGURED)
     // salen por stdout crudo en vez del logger winston que revisan los operadores.
     logger,
   });
