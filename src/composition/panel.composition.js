@@ -40,6 +40,10 @@ import { OperationsReaderPort } from '#application/ports/panel/operations-reader
 import PanelOperations from '#application/use-cases/panel/PanelOperations.js';
 import { FieldMappingReaderPort } from '#application/ports/panel/field-mapping-reader.port.js';
 import PanelFieldMappings from '#application/use-cases/panel/PanelFieldMappings.js';
+import { ScheduledTaskReaderPort } from '#application/ports/panel/scheduled-task-reader.port.js';
+import { ScheduledRunReaderPort } from '#application/ports/panel/scheduled-run-reader.port.js';
+import PanelScheduledTasks from '#application/use-cases/panel/PanelScheduledTasks.js';
+import BullMqScheduledRunReader from '#infrastructure/queue/BullMqScheduledRunReader.js';
 
 // Nada se construye al importar este módulo: si falta PANEL_JWT_SECRET, el plugin del panel no
 // llama a buildPanelUseCases y el arranque del servidor no se entera.
@@ -117,6 +121,22 @@ export function buildPanelFieldMappingUseCases({
   return { fieldMappings: new PanelFieldMappings({ fieldMappingReader, tenantDirectory, logger }) };
 }
 
+// Tareas programadas (plan 7): solo lectura. TenantOperationsReader implementa la lectura de
+// ClientConfigs; las próximas ejecuciones salen de BullMQ (Redis), también solo lectura.
+export function buildPanelScheduledTaskUseCases({
+  tenantDirectory = new SaaSClientTenantDirectory(),
+  scheduledTaskReader = new TenantOperationsReader(),
+  scheduledRunReader = new BullMqScheduledRunReader(),
+  logger = defaultLogger,
+} = {}) {
+  assertPort(tenantDirectory, TenantDirectoryPort);
+  assertPort(scheduledTaskReader, ScheduledTaskReaderPort);
+  assertPort(scheduledRunReader, ScheduledRunReaderPort);
+  return {
+    scheduledTasks: new PanelScheduledTasks({ scheduledTaskReader, scheduledRunReader, tenantDirectory, logger }),
+  };
+}
+
 export function buildPanelUseCases({
   secret,
   sessionTtlSeconds = panelConfig.sessionTtlSeconds,
@@ -148,6 +168,8 @@ export function buildPanelUseCases({
   logger,
   operationsReader,
   fieldMappingReader,
+  scheduledTaskReader,
+  scheduledRunReader,
 } = {}) {
   assertPort(userRepository, PanelUserRepositoryPort);
   assertPort(tenantDirectory, TenantDirectoryPort);
@@ -193,6 +215,7 @@ export function buildPanelUseCases({
     }),
     ...buildPanelOperationUseCases({ tenantDirectory, operationsReader, logger }),
     ...buildPanelFieldMappingUseCases({ tenantDirectory, fieldMappingReader, logger }),
+    ...buildPanelScheduledTaskUseCases({ tenantDirectory, scheduledTaskReader, scheduledRunReader, logger }),
   };
 }
 

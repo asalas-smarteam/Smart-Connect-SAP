@@ -11,6 +11,8 @@ export const PANEL_PERMISSIONS = Object.freeze({
   SYNCS_READ: 'syncs.read',
   // Plan 6 (contrato 08): vista de mapeo de campos, solo lectura.
   MAPPINGS_READ: 'mappings.read',
+  // Plan 7 (contrato 09): vista de tareas programadas, solo lectura.
+  TASKS_READ: 'tasks.read',
   STAFF_TICKETS: 'staff.tickets',
   STAFF_USERS: 'staff.users',
   STAFF_EVENTS_RAW: 'staff.events.raw',
@@ -22,6 +24,7 @@ const STAFF_PERMISSIONS = Object.freeze([
   P.EVENTS_READ,
   P.SYNCS_READ,
   P.MAPPINGS_READ,
+  P.TASKS_READ,
   P.STAFF_TICKETS,
   P.STAFF_USERS,
   P.STAFF_EVENTS_RAW,
@@ -37,6 +40,7 @@ const CLIENT_PERMISSIONS_BY_ROLE = Object.freeze({
     P.EVENTS_READ,
     P.SYNCS_READ,
     P.MAPPINGS_READ,
+    P.TASKS_READ,
   ]),
   usuario: Object.freeze([
     P.TICKETS_READ,
@@ -46,6 +50,7 @@ const CLIENT_PERMISSIONS_BY_ROLE = Object.freeze({
     P.EVENTS_READ,
     P.SYNCS_READ,
     P.MAPPINGS_READ,
+    P.TASKS_READ,
   ]),
 });
 

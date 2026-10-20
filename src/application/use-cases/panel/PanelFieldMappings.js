@@ -1,5 +1,6 @@
 import { toFieldMappingView } from '#domain/panel/fieldMappingView.js';
 import { fail, panelReasons } from './panelReasons.js';
+import { resolveScopeTenant } from './tenantScope.js';
 
 const TIMEOUT_MESSAGE = 'La consulta tardó demasiado. Intenta de nuevo.';
 
@@ -14,15 +15,8 @@ export class PanelFieldMappings {
     this.logger = logger;
   }
 
-  async resolveTenant({ user, routeTenantKey } = {}) {
-    if (routeTenantKey === undefined) {
-      return user?.tenantKey ? { ok: true, tenantKey: user.tenantKey } : fail(panelReasons.NOT_FOUND);
-    }
-    if (typeof routeTenantKey !== 'string' || !routeTenantKey) {
-      return fail(panelReasons.NOT_FOUND);
-    }
-    const tenant = await this.tenantDirectory.findByKey(routeTenantKey);
-    return tenant ? { ok: true, tenantKey: tenant.tenantKey } : fail(panelReasons.NOT_FOUND);
+  async resolveTenant(scope) {
+    return resolveScopeTenant(this.tenantDirectory, scope);
   }
 
   async list({ scope }) {

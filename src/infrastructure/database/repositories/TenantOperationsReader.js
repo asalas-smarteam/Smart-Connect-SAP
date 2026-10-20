@@ -69,6 +69,31 @@ const FIELD_MAPPING_SORT = Object.freeze({ objectType: 1, sourceContext: 1, sour
 // Tope de seguridad: un tenant real tiene cientos de mapeos.
 export const MAX_FIELD_MAPPINGS = 5000;
 
+// Tareas programadas (plan 7): lista blanca con solo los campos de la vista. Nada de credenciales,
+// consultas, procedimientos ni ids internos sale de la base (contrato 09, J3).
+export const SCHEDULED_TASK_PROJECTION = Object.freeze({
+  clientName: 1,
+  taskType: 1,
+  objectType: 1,
+  serviceLayerPath: 1,
+  mode: 1,
+  intervalMinutes: 1,
+  executionTime: 1,
+  executionDays: 1,
+  startTime: 1,
+  endTime: 1,
+  hubspotBatchSize: 1,
+  associationFetchEnabled: 1,
+  requireUpdateHubspotID: 1,
+  filters: 1,
+  orderBy: 1,
+  active: 1,
+  lastRun: 1,
+  lastError: 1,
+});
+const SCHEDULED_TASK_SORT = Object.freeze({ active: -1, clientName: 1, _id: 1 });
+export const MAX_SCHEDULED_TASKS = 1000;
+
 function isObjectId(value) {
   return typeof value === 'string' && OBJECT_ID.test(value);
 }
@@ -296,6 +321,18 @@ export class TenantOperationsReader {
       .limit(MAX_FIELD_MAPPINGS + 1)
       .toArray());
     return { items: documents.slice(0, MAX_FIELD_MAPPINGS), truncated: documents.length > MAX_FIELD_MAPPINGS };
+  }
+
+  // Todas las tareas (ClientConfigs) del tenant, activas primero y por nombre. Devuelve
+  // { items, truncated }: truncated es true si había más que MAX_SCHEDULED_TASKS.
+  async listScheduledTasks(tenantKey) {
+    const tasks = await this.collection(tenantKey, 'ClientConfigs');
+    const documents = await this.run(() => tasks
+      .find({}, { projection: SCHEDULED_TASK_PROJECTION, maxTimeMS: this.maxTimeMS })
+      .sort(SCHEDULED_TASK_SORT)
+      .limit(MAX_SCHEDULED_TASKS + 1)
+      .toArray());
+    return { items: documents.slice(0, MAX_SCHEDULED_TASKS), truncated: documents.length > MAX_SCHEDULED_TASKS };
   }
 }
 

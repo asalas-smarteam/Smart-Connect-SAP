@@ -10,6 +10,7 @@ import { createPanelStaffTicketsController } from '../controllers/panelStaffTick
 import { createPanelOperationsController } from '../controllers/panelOperations.controller.js';
 import { createPanelTicketMetricsController } from '../controllers/panelTicketMetrics.controller.js';
 import { createPanelFieldMappingsController } from '../controllers/panelFieldMappings.controller.js';
+import { createPanelScheduledTasksController } from '../controllers/panelScheduledTasks.controller.js';
 import { registerPanelMultipart } from './multipartImages.js';
 import { registerPanelErrorHandlers } from './panelErrors.js';
 import { createTrustedProxyMatcher } from './clientIp.js';
@@ -113,6 +114,7 @@ export default async function panelPlugin(app, options = {}) {
   const operations = createPanelOperationsController({ useCases });
   const ticketMetrics = createPanelTicketMetricsController({ useCases });
   const fieldMappings = createPanelFieldMappingsController({ useCases });
+  const scheduledTasks = createPanelScheduledTasksController({ useCases });
   const P = PANEL_PERMISSIONS;
 
   app.route({
@@ -335,5 +337,21 @@ export default async function panelPlugin(app, options = {}) {
     url: '/staff/tenants/:tenantKey/field-mappings',
     preHandler: [requireStaffAccount, requirePermission(P.MAPPINGS_READ)],
     handler: fieldMappings.list,
+  });
+
+  // Plan 7 (contrato 09, J1): tareas programadas, solo lectura. Cliente con el tenant de la
+  // sesión; Smarteam por empresa.
+  app.route({
+    method: 'GET',
+    url: '/scheduled-tasks',
+    preHandler: [requireClientAccount, requirePermission(P.TASKS_READ)],
+    handler: scheduledTasks.list,
+  });
+
+  app.route({
+    method: 'GET',
+    url: '/staff/tenants/:tenantKey/scheduled-tasks',
+    preHandler: [requireStaffAccount, requirePermission(P.TASKS_READ)],
+    handler: scheduledTasks.list,
   });
 }

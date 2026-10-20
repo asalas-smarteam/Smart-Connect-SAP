@@ -527,6 +527,18 @@ Plan: `docs/superpowers/plans/2026-10-16-panel-mapeo-campos.md`. Contrato: `docs
 - Lee con el driver nativo y proyección explícita: `clientConfigId` y `hubspotCredentialId` no salen de la base. `includeInServiceLayerSelect` se entrega como `includeInSourceQuery`. Tope de 5000 mapeos y 5 s por consulta.
 - No hay edición: la integración, el modelo y las rutas admin de mapeos no cambian.
 
+### Tareas programadas (plan 7)
+Plan: `docs/superpowers/plans/2026-10-20-panel-tareas-programadas.md`. Contrato: `docs/contrato-backend/09-tareas-programadas.md`. Solo lectura.
+
+| Método y ruta | Acceso |
+| --- | --- |
+| `GET /panel/api/scheduled-tasks` | `tasks.read`, cuenta cliente (tenant de la sesión) |
+| `GET /panel/api/staff/tenants/:tenantKey/scheduled-tasks` | `tasks.read`, solo Smarteam |
+
+- Devuelve todas las `ClientConfigs` (activas primero, después por nombre) con nombres genéricos. Lee con una lista blanca de campos: tokens, URLs, consultas SQL, procedimientos e ids internos no salen de la base.
+- `lastError` saneado para cuentas cliente; crudo para Smarteam.
+- `nextRunAt` sale de los job schedulers de BullMQ (solo lectura). Si Redis no responde en 1,5 s, la lista sale igual con `nextRunAt: null` y un aviso en el log.
+
 El contrato con el front está en `docs/contrato-backend/`.
 
 ## 19. Guía de contribución
