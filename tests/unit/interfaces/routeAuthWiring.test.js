@@ -138,6 +138,8 @@ const panelUseCases = buildPanelUseCases({
   contextReader: new ticketFakes.FakeContextReader(),
   operationsReader: new operationFakes.FakeOperationsReader(operationFakes.sampleOperations()),
   fieldMappingReader: new operationFakes.FakeFieldMappingReader(operationFakes.sampleFieldMappings()),
+  scheduledTaskReader: new operationFakes.FakeScheduledTaskReader(operationFakes.sampleScheduledTasks()),
+  scheduledRunReader: new operationFakes.FakeScheduledRunReader(operationFakes.sampleNextRuns()),
   logger: { warn() {}, error() {}, info() {} },
 });
 const STAFF_PANEL_COOKIE = `panel_session=${panelTokens.sign({ sub: panelStaff.id, tv: 0, pwdChange: false })}`;
@@ -357,6 +359,9 @@ const PANEL_ROUTES = [
   // Plan 6: mapeo de campos (solo lectura).
   ['GET', '/panel/api/field-mappings', 'client'],
   ['GET', '/panel/api/staff/tenants/sap_integration_acme/field-mappings', 'staff account + mappings.read'],
+  // Plan 7: tareas programadas (solo lectura).
+  ['GET', '/panel/api/scheduled-tasks', 'client'],
+  ['GET', '/panel/api/staff/tenants/sap_integration_acme/scheduled-tasks', 'staff account + tasks.read'],
 ];
 
 function panelInject(method, url, cookie) {

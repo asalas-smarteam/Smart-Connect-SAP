@@ -271,3 +271,113 @@ export function sampleFieldMappings() {
     ],
   };
 }
+
+// Lectores falsos de tareas programadas (plan 7). Las tareas se devuelven tal cual, con campos
+// internos incluidos, para probar que la vista no los deja pasar.
+export class FakeScheduledTaskReader {
+  constructor(tasksByTenant = {}) {
+    this.tasksByTenant = tasksByTenant;
+    this.touchedTenants = [];
+    this.timeoutNext = false;
+  }
+
+  async listScheduledTasks(tenantKey) {
+    this.touchedTenants.push(tenantKey);
+    if (this.timeoutNext) {
+      this.timeoutNext = false;
+      throw Object.assign(new Error('timeout'), { code: 'PANEL_QUERY_TIMEOUT' });
+    }
+    return { items: clone(this.tasksByTenant[tenantKey] ?? []), truncated: false };
+  }
+}
+
+export class FakeScheduledRunReader {
+  constructor(runsByTenant = {}) {
+    this.runsByTenant = runsByTenant;
+    this.failNext = false;
+    this.touchedTenants = [];
+  }
+
+  async nextRunsFor(tenantKey) {
+    this.touchedTenants.push(tenantKey);
+    if (this.failNext) {
+      this.failNext = false;
+      throw new Error('redis down');
+    }
+    return new Map(Object.entries(this.runsByTenant[tenantKey] ?? {}).map(([id, iso]) => [id, new Date(iso)]));
+  }
+}
+
+export const TASK_IDS = {
+  products: '6a6b9490cd7c01b21aa58c3e',
+  orders: '6a6b9490cd7c01b21aa58c3f',
+  options: '6a6b9490cd7c01b21aa58c40',
+};
+
+export const NEXT_RUN = '2026-10-21T13:00:00.000Z';
+
+export function sampleScheduledTasks() {
+  return {
+    sap_integration_acme: [
+      {
+        _id: TASK_IDS.products,
+        clientName: 'Obtener Productos',
+        taskType: 'SAP_SYNC',
+        objectType: 'Product',
+        serviceLayerPath: '/Items',
+        mode: 'FULL',
+        intervalMinutes: null,
+        executionTime: ['07:00', '12:00'],
+        executionDays: ['Monday', 'Tuesday'],
+        startTime: null,
+        endTime: null,
+        hubspotBatchSize: 100,
+        associationFetchEnabled: false,
+        requireUpdateHubspotID: true,
+        filters: [
+          { property: 'ItemsGroupCode', operator: 'in', value: [101, 102], isDefault: false, isDynamic: false, dynamicType: 'datetime', editable: true },
+          { property: 'UpdateDate', operator: 'ge', value: null, isDefault: true, isDynamic: true, dynamicType: 'date', editable: false },
+        ],
+        orderBy: [{ property: 'DocDate', direction: 'desc' }],
+        active: true,
+        lastRun: new Date('2026-09-22T21:42:33.950Z'),
+        lastError: 'AxiosError: connect ECONNREFUSED 10.0.0.5:50000',
+        apiToken: 'token-secreto',
+        apiUrl: 'https://10.0.0.5:50000/b1s/v1',
+        sqlQuery: 'SELECT * FROM OITM',
+        storeProcedureName: 'sp_items',
+        updateMethod: 'SP',
+        updateSpName: 'sp_update',
+        updateTableName: 'OITM',
+        integrationModeId: '6a6b9490cd7c01b21aa58c99',
+        hubspotCredentialId: '6a6b9490cd7c01b21aa58c98',
+        associationFetchConfig: { deals: true },
+        __v: 3,
+      },
+      {
+        _id: TASK_IDS.options,
+        clientName: 'Opciones de grupos',
+        taskType: 'DROPDOWN_OPTIONS',
+        objectType: null,
+        serviceLayerPath: 'https://sap.acme.test:50000/b1s/v1/ItemGroups',
+        mode: 'INCREMENTAL',
+        intervalMinutes: 30,
+        startTime: '06:00',
+        endTime: '18:00',
+        active: true,
+      },
+      // Inactiva y vieja: sin la mayoría de los campos.
+      { _id: TASK_IDS.orders, clientName: 'Pedidos', active: false },
+    ],
+  };
+}
+
+export function sampleNextRuns() {
+  return {
+    sap_integration_acme: {
+      [TASK_IDS.products]: NEXT_RUN,
+      // Una inactiva con un programador viejo no debe mostrar próxima ejecución.
+      [TASK_IDS.orders]: NEXT_RUN,
+    },
+  };
+}

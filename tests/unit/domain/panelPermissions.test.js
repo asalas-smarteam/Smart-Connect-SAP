@@ -20,12 +20,14 @@ const CLIENT_PERMISSIONS = [
   'events.read',
   'syncs.read',
   'mappings.read',
+  'tasks.read',
 ];
 
 const STAFF_PERMISSIONS = [
   'events.read',
   'syncs.read',
   'mappings.read',
+  'tasks.read',
   'staff.tickets',
   'staff.users',
   'staff.events.raw',
@@ -38,6 +40,7 @@ describe('panel permissions', () => {
     expect(PANEL_PERMISSIONS.TICKETS_READ).toBe('tickets.read');
     expect(PANEL_PERMISSIONS.STAFF_EVENTS_RAW).toBe('staff.events.raw');
     expect(PANEL_PERMISSIONS.MAPPINGS_READ).toBe('mappings.read');
+    expect(PANEL_PERMISSIONS.TASKS_READ).toBe('tasks.read');
   });
 
   it('gives smarteam accounts the staff permissions and no client ticket permissions', () => {

@@ -61,7 +61,7 @@ describe('LoginPanelUser', () => {
       role: 'admin',
       tenantKey: 'sap_integration_acme',
       companyName: 'Acme Industrial',
-      permissions: ['tickets.read', 'tickets.create', 'tickets.reply', 'tickets.reopen', 'events.read', 'syncs.read', 'mappings.read'],
+      permissions: ['tickets.read', 'tickets.create', 'tickets.reply', 'tickets.reopen', 'events.read', 'syncs.read', 'mappings.read', 'tasks.read'],
       mustChangePassword: true,
     });
     expect(ctx.loginAttempts.failures.size).toBe(0);
