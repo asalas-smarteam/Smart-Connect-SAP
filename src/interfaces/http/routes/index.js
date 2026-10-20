@@ -10,6 +10,7 @@ import internalRoutes from './internal.routes.js';
 import webhookRoutes from './webhook.routes.js';
 import sapCredentialsRoutes from './sapCredentials.routes.js';
 import lineItemPriceRoutes from './lineItemPrice.routes.js';
+import panelPlugin from '../panel/panelPlugin.js';
 
 export default async function routes(app) {
   app.register(healthRoutes);
@@ -23,4 +24,6 @@ export default async function routes(app) {
   app.register(lineItemPriceRoutes);
   app.register(internalRoutes);
   app.register(webhookRoutes);
+  // API del panel de soporte: encapsulada y desactivada si falta PANEL_JWT_SECRET.
+  app.register(panelPlugin, { prefix: '/panel/api' });
 }

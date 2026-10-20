@@ -210,6 +210,7 @@ Todos los esquemas principales usan **Mongoose/MongoDB**; los nombres de colecci
 - `WEBHOOK_PROCESSOR_CRON_ENABLED` – Si es `true`, habilita el dispatcher cron que encola procesamiento de webhooks por tenant; por defecto permanece apagado.
 - Las credenciales de BD externa SAP se guardan por `ClientConfig` (`externalDbHost`, `externalDbPort`, `externalDbUser`, `externalDbPassword`, `externalDbName`, `externalDbDialect`) y solo aplican si se habilitan conexiones SQL externas.
 - `PORT` – Puerto del servidor HTTP (por defecto 3000).
+- `PANEL_JWT_SECRET` – Secreto de la sesión del panel de soporte (`/panel/api`); sin él el panel queda apagado (ver sección 20).
 
 ### Tabla `.env`
 | Variable | Descripción |
@@ -222,6 +223,7 @@ Todos los esquemas principales usan **Mongoose/MongoDB**; los nombres de colecci
 | `SAP_SYNC_CRON_ENABLED` | Si está en `false`, evita que el cron arranque; permite solo disparo manual. |
 | `WEBHOOK_PROCESSOR_CRON_ENABLED` | Si está en `true`, habilita el cron que encola jobs en `webhook-events`; por defecto no arranca. |
 | `PORT` | Puerto en el que se levanta Fastify (3000 por defecto). |
+| `PANEL_JWT_SECRET` | Firma la cookie de sesión del panel de soporte. Distinta de `JWT_SECRET`; sin ella `/panel/api` no se registra. |
 
 ## 14. Migraciones de base de datos (MongoDB)
 La aplicación **no ejecuta migraciones Sequelize** (se eliminaron los stubs de `src/db/migrations`). Todas las migraciones de esquema/semilla para MongoDB se administran con **migrate-mongo** en `scripts/migrations`.
@@ -399,6 +401,133 @@ Notas:
        -H "Content-Type: application/json" \
        -d '{"sapPipelineKey":"SAP_PIPE","hubspotPipelineId":"default","hubspotPipelineLabel":"Sales"}'
   ```
+
+## 20. Panel de soporte (`/panel/api`)
+
+API del panel de soporte (`smartHubPanel`, repo aparte). Spec: `docs/superpowers/specs/2026-10-12-panel-soporte-design.md`; plan del acceso: `docs/superpowers/plans/2026-10-13-panel-acceso.md`. Es un plugin de Fastify encapsulado: su parser JSON, su cookie, sus hooks y su formato de error (`{ error, message }`) no tocan ninguna otra ruta.
+
+### Configuración
+- `PANEL_JWT_SECRET` firma la cookie de sesión. **Sin ella el panel no se registra** (se loguea un `warn`) y el resto de la API arranca igual. Debe ser distinta de `JWT_SECRET`. Generarla con:
+  ```bash
+  node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+  ```
+- La sesión es la cookie `panel_session` (`HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/api`, 8 h). Por ser `Secure`, fuera de `localhost` exige HTTPS; Chrome y Firefox la aceptan en `http://localhost`, Safari no.
+- Las mutaciones exigen el header `X-Panel-Request: 1`.
+- Límite de 5 intentos de login por correo cada 15 min, en Redis. Si Redis no responde en 1 s, se usa un contador en memoria del proceso.
+- Límite de 30 intentos de login por IP cada 15 min (no se reinicia al acertar). Solo se activa con `PANEL_TRUSTED_PROXIES`: lista de IPs o rangos CIDR de los proxies propios. La IP del cliente se lee de `X-Forwarded-For` solo a través de esos proxies; sin la variable, el límite por IP queda apagado y se avisa en el log.
+- Tope global de cálculos de contraseña: 2 a la vez y 32 en espera. Pasado eso, `429 too_many_attempts` con `Retry-After: 5`, para que una ráfaga de logins no frene al resto de la API.
+- Cerrar sesión revoca solo esa sesión en el servidor (colección `PanelRevokedSessions`, se limpia sola al vencer). Cambiar o restablecer la contraseña y desactivar al usuario cortan todas sus sesiones.
+
+### Auditoría
+La colección `PanelAuditLogs` (master) registra quién creó, editó, desactivó, reactivó o restableció a cada usuario, y los logins buenos, fallidos y bloqueados, los cambios de contraseña y los logout, con la IP. Nunca guarda contraseñas, temporales, tokens ni cookies. Los eventos `auth.*` se borran solos a los 180 días; los `user.*` se conservan. Consultas de ejemplo:
+```js
+// historial de un usuario
+db.PanelAuditLogs.find({ 'target.userId': '<id>' }).sort({ at: -1 })
+// restablecimientos de contraseña desde una fecha
+db.PanelAuditLogs.find({ action: 'user.password_reset', at: { $gte: ISODate('2026-10-01') } })
+// logins bloqueados de las últimas 24 h
+db.PanelAuditLogs.find({ action: 'auth.login_blocked', at: { $gte: new Date(Date.now() - 864e5) } })
+```
+
+### Primera cuenta de Smarteam
+Las demás cuentas se crean desde el panel. La primera, con el script (imprime solo la contraseña temporal; el primer ingreso obliga a cambiarla):
+```bash
+node --env-file=.env scripts/create-panel-staff.mjs <email> "<nombre>"
+# en producción
+docker compose exec api node scripts/create-panel-staff.mjs <email> "<nombre>"
+```
+
+### Rutas (fase 1, acceso)
+| Método y ruta | Acceso |
+| --- | --- |
+| `POST /panel/api/auth/login` | Pública |
+| `POST /panel/api/auth/logout` | Pública (siempre 204) |
+| `GET /panel/api/auth/me` | Sesión (responde aunque haya cambio de contraseña pendiente) |
+| `POST /panel/api/auth/change-password` | Sesión |
+| `GET/POST /panel/api/staff/users` | `staff.users` |
+| `PATCH /panel/api/staff/users/:id` | `staff.users` |
+| `POST /panel/api/staff/users/:id/reset-password` | `staff.users` |
+| `GET /panel/api/staff/tenants` | Cualquier permiso de staff |
+
+### Rutas (fase 1, soporte)
+Plan: `docs/superpowers/plans/2026-10-13-panel-soporte.md`. Contrato: `docs/contrato-backend/02-soporte.md`.
+
+| Método y ruta | Acceso |
+| --- | --- |
+| `GET /panel/api/tickets` | `tickets.read` (tenant de la sesión) |
+| `POST /panel/api/tickets` (multipart) | `tickets.create` |
+| `GET /panel/api/tickets/:id` | `tickets.read` |
+| `POST /panel/api/tickets/:id/messages` (multipart) | `tickets.reply` |
+| `POST /panel/api/tickets/:id/reopen` | `tickets.reopen` |
+| `GET /panel/api/tickets/:id/attachments/:fileId` | `tickets.read` |
+| `GET /panel/api/staff/tickets` | `staff.tickets` (bandeja de todos los tenants) |
+| `GET /panel/api/staff/tickets/summary` | `staff.tickets` |
+| `GET /panel/api/staff/tenants/:tenantKey/tickets/:id` | `staff.tickets` |
+| `POST /panel/api/staff/tenants/:tenantKey/tickets/:id/messages` (multipart) | `staff.tickets` |
+| `POST /panel/api/staff/tenants/:tenantKey/tickets/:id/status` | `staff.tickets` |
+| `POST /panel/api/staff/tenants/:tenantKey/tickets/:id/resolve` (multipart) | `staff.tickets` |
+| `PUT /panel/api/staff/tenants/:tenantKey/tickets/:id/internal-resolution` | `staff.tickets` |
+| `GET /panel/api/staff/tenants/:tenantKey/tickets/:id/attachments/:fileId` | `staff.tickets` |
+
+- Los tickets viven en la base de cada tenant: colecciones `Tickets` y `TicketCounters`, e imágenes en el bucket GridFS `TicketAttachments`. Se crean con el primer ticket; leer (por ejemplo la bandeja) no crea colecciones ni bases.
+- El tenant del cliente sale siempre de la sesión. El `:tenantKey` de las rutas de staff se valida contra `SaaSClients` antes de abrir la base.
+- Imágenes: hasta 5 por mensaje, 5 MB cada una, PNG, JPEG o WebP validados por sus bytes. El formulario multipart (`@fastify/multipart`) se acepta solo dentro de `/panel/api`.
+- La bandeja consulta todos los tenants en paralelo, con 5 s máximo por tenant; uno caído o lento sale en `warnings`. `page × pageSize` máximo 1000.
+
+### Rutas (fase 1, eventos y syncs)
+Plan: `docs/superpowers/plans/2026-10-13-panel-eventos-syncs.md`. Contrato: `docs/contrato-backend/03-eventos-y-syncs.md`. Solo lectura.
+
+| Método y ruta | Acceso |
+| --- | --- |
+| `GET /panel/api/events`, `/events/:id` | `events.read`, cuenta cliente (tenant de la sesión) |
+| `GET /panel/api/syncs`, `/syncs/:id`, `/sync-tasks` | `syncs.read`, cuenta cliente |
+| `GET /panel/api/staff/tenants/:tenantKey/events`, `.../events/:id` | `events.read`, solo Smarteam; `payload` y `audit` con `staff.events.raw` |
+| `GET /panel/api/staff/tenants/:tenantKey/syncs`, `.../syncs/:id`, `.../sync-tasks` | `syncs.read`, solo Smarteam |
+
+- Lee `WebhookEvents`, `SyncLogs` y `ClientConfigs` con el driver nativo: no registra modelos ni crea colecciones, bases o índices. De `ClientConfigs` solo lee el nombre y el tipo de la tarea.
+- Cada consulta tiene 5 s como máximo; si se pasa, responde `400 validation_error` pidiendo acotar fechas o filtros.
+- Índices para estas listas (opcionales, se crean a mano por tenant, nunca al arrancar):
+  ```bash
+  # dry run: muestra documentos, tamaño, índices actuales y faltantes
+  node --env-file=.env scripts/create-panel-operation-indexes.mjs sap_integration_<tenant>
+  # crea solo los que faltan
+  node --env-file=.env scripts/create-panel-operation-indexes.mjs sap_integration_<tenant> --apply
+  ```
+
+### Tableros, métricas y ajustes (plan 5)
+Plan: `docs/superpowers/plans/2026-10-14-panel-tableros-y-ajustes.md`. Contratos: `docs/contrato-backend/05-tableros-y-metricas.md` y `06-ajustes-plan-5.md`.
+
+| Método y ruta | Acceso |
+| --- | --- |
+| `GET /panel/api/dashboard/integration?from=&to=&tz=` | `events.read`, cuenta cliente |
+| `GET /panel/api/staff/tenants/:tenantKey/dashboard/integration?…` | `events.read`, solo Smarteam |
+| `GET /panel/api/tickets/metrics?from=&to=&tz=` | `tickets.read`, cuenta cliente |
+| `GET /panel/api/staff/tickets/metrics?from=&to=&tz=&tenantKey=&category=` | `staff.tickets`, solo Smarteam |
+
+- El core no cambia: los datos se guardan igual. Solo cambia lo que la API del panel entrega a una **cuenta cliente**: `lastError` saneado (sin IPs, hosts, URLs ni correos) con su `cause`, `errorMessage` de corridas resumido y los errores de una corrida reducidos a `{ record, message }`. Smarteam recibe todo crudo.
+- Las corridas sin tarea (vueltas del procesador de la cola de webhooks) salen como la tarea `event_queue`; `GET /syncs?hideEmpty=true` oculta las vacías.
+- Diagnóstico de solo lectura para afinar el catálogo de causas de error (`src/domain/panel/errorCauses.js`):
+  ```bash
+  node --env-file=.env scripts/panel-operations-report.mjs sap_integration_<tenant>
+  ```
+
+### Intercambio del evento (plan 5c)
+- `GET /panel/api/events/:id` y `GET /panel/api/staff/tenants/:tenantKey/events/:id` suman `exchange: { received, sent, response }`: el payload recibido del CRM, `sapAudit.payloadSap` y `sapAudit.responseSap`. Nunca `sapCalls`.
+- A una cuenta cliente le llega saneado: sin credenciales a cualquier profundidad (`Password`, `token`, `secret`…), sin rutas ni hosts. Smarteam lo recibe crudo. Detalle en `docs/contrato-backend/07-intercambio-evento.md`.
+
+### Mapeo de campos (plan 6)
+Plan: `docs/superpowers/plans/2026-10-16-panel-mapeo-campos.md`. Contrato: `docs/contrato-backend/08-mapeo-campos.md`. Solo lectura.
+
+| Método y ruta | Acceso |
+| --- | --- |
+| `GET /panel/api/field-mappings` | `mappings.read`, cuenta cliente (tenant de la sesión) |
+| `GET /panel/api/staff/tenants/:tenantKey/field-mappings` | `mappings.read`, solo Smarteam |
+
+- Devuelve todos los mapeos de `FieldMappings` (activos e inactivos) en `{ items }`, ordenados por `objectType`, `sourceContext` y `sourceField`. Mismo contenido para cliente y Smarteam.
+- Lee con el driver nativo y proyección explícita: `clientConfigId` y `hubspotCredentialId` no salen de la base. `includeInServiceLayerSelect` se entrega como `includeInSourceQuery`. Tope de 5000 mapeos y 5 s por consulta.
+- No hay edición: la integración, el modelo y las rutas admin de mapeos no cambian.
+
+El contrato con el front está en `docs/contrato-backend/`.
 
 ## 19. Guía de contribución
 - **Estilo de código:** ES Modules; preferir async/await y logging estructurado con Winston.

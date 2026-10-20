@@ -127,3 +127,32 @@ describe('tenantResolver', () => {
     expect(reply.code).toHaveBeenCalledWith(403);
   });
 });
+
+describe('tenantResolver and the support panel session', () => {
+  it('does not resolve a tenant from a panel session token sent as bearer', async () => {
+    const { default: HmacSessionToken } = await import('../../../src/infrastructure/auth/HmacSessionToken.js');
+    const panelToken = new HmacSessionToken({ secret: 'panel-only-secret' }).sign({ sub: 'u1', tv: 0, pwdChange: false });
+    mockSaaSClientFindOne.mockResolvedValue(null);
+    const req = { headers: { authorization: `Bearer ${panelToken}` }, query: {}, body: {} };
+    const reply = buildReply();
+
+    await tenantResolver(req, reply);
+
+    // El token del panel va firmado con PANEL_JWT_SECRET y no trae tenantKey ni portalId: solo
+    // queda la búsqueda por accessToken de HubSpot, que no lo encuentra.
+    expect(mockSaaSClientFindOne).toHaveBeenCalledTimes(1);
+    expect(mockSaaSClientFindOne).toHaveBeenCalledWith({ 'hubspot.accessToken': panelToken });
+    expect(reply.code).toHaveBeenCalledWith(403);
+    expect(req.tenantModels).toBeUndefined();
+  });
+
+  it('ignores the panel_session cookie', async () => {
+    const reply = buildReply();
+    const req = { headers: { cookie: 'panel_session=abc.def.ghi' }, query: {}, body: {} };
+
+    await tenantResolver(req, reply);
+
+    expect(mockSaaSClientFindOne).not.toHaveBeenCalled();
+    expect(reply.code).toHaveBeenCalledWith(403);
+  });
+});
