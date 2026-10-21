@@ -29,6 +29,11 @@ export const sapCredentialsSchema = new Schema(
       type: String,
       default: null,
     },
+    // Fixed query params appended to every S4 Gateway request (e.g. { "sap-client": "600" }).
+    params: {
+      type: Schema.Types.Mixed,
+      default: {},
+    },
   },
   {
     timestamps: true,
