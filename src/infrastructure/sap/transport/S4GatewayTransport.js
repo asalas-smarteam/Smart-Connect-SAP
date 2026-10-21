@@ -16,19 +16,43 @@ function cleanBaseUrl(value) {
   return String(value || '').trim().replace(/\/+$/, '');
 }
 
-function buildQueryString(query = {}) {
+function buildQueryString(query = {}, { json = true } = {}) {
   // Values are passed through untouched: callers pre-encode OData options
   // (same contract as the existing serviceLayerUrlBuilder).
   const entries = Object.entries(query).filter(
     ([, value]) => value !== null && typeof value !== 'undefined'
   );
 
-  if (!entries.some(([key]) => key === '$format')) {
-    // Gateway OData v2 answers Atom XML by default; JSON must be explicit.
+  // Gateway OData v2 answers Atom XML by default; JSON must be explicit. Reads ask for it with
+  // $format=json. Writes must NOT: the Gateway rejects system query options on them (400
+  // "SystemQueryOptions not allowed for this request type"), so they use the Accept header.
+  if (json && !entries.some(([key]) => key === '$format')) {
     entries.push(['$format', 'json']);
   }
 
   return entries.map(([key, value]) => `${key}=${value}`).join('&');
+}
+
+// Defensive: a malformed credential `params` never breaks the transport, bad entries are dropped.
+// The credentials can be written straight into Mongo, so the rules ManageSapCredentials enforces
+// are repeated here: no blank values and no `$` keys (OData system options such as $top).
+function normalizeDefaultParams(params) {
+  if (!params || typeof params !== 'object' || Array.isArray(params)) {
+    return {};
+  }
+
+  const normalized = {};
+  Object.entries(params).forEach(([key, value]) => {
+    const isValidValue = typeof value === 'string'
+      || (typeof value === 'number' && Number.isFinite(value));
+    const text = isValidValue ? String(value).trim() : '';
+
+    if (key && !key.startsWith('$') && text) {
+      normalized[key] = text;
+    }
+  });
+
+  return normalized;
 }
 
 function readCsrfCookie(response) {
@@ -58,6 +82,7 @@ export class S4GatewayTransport {
       password: String(config.serviceLayerPassword || '').trim(),
     };
     this.timeoutMs = Number(config.timeoutMs) > 0 ? Number(config.timeoutMs) : DEFAULT_TIMEOUT_MS;
+    this.defaultParams = normalizeDefaultParams(config.params);
     this.csrfState = null;
 
     if (!this.baseUrl) {
@@ -65,7 +90,7 @@ export class S4GatewayTransport {
     }
   }
 
-  buildUrl(path, query) {
+  buildUrl(path, query, { forWrite = false } = {}) {
     const normalizedPath = String(path || '').trim();
     if (!normalizedPath) {
       throw new Error('path is required');
@@ -77,8 +102,31 @@ export class S4GatewayTransport {
       ? normalizedPath
       : `${this.gatewayBasePath}${normalizedPath.startsWith('/') ? '' : '/'}${normalizedPath}`;
 
-    const queryString = buildQueryString(query);
-    return `${this.baseUrl}${withPrefix}${queryString ? `?${queryString}` : ''}`;
+    const queryString = buildQueryString(query, { json: !forWrite });
+
+    return this.withDefaultParams(
+      `${this.baseUrl}${withPrefix}${queryString ? `?${queryString}` : ''}`
+    );
+  }
+
+  // Adds any missing credential param to an absolute URL (a built URL or a __next link),
+  // leaving the rest of the URL untouched. Only the FIRST "?" starts the query: a later one is
+  // part of a value and everything after it must survive.
+  withDefaultParams(url) {
+    const text = String(url);
+    const separator = text.indexOf('?');
+    const base = separator === -1 ? text : text.slice(0, separator);
+    const query = separator === -1 ? '' : text.slice(separator + 1);
+    const present = new Set(query.split('&').map((pair) => pair.split('=')[0]));
+    const missing = Object.entries(this.defaultParams)
+      .filter(([key]) => !present.has(key))
+      .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+
+    if (missing.length === 0) {
+      return url;
+    }
+
+    return `${base}?${[query, ...missing].filter(Boolean).join('&')}`;
   }
 
   async rawRequest({ method = 'get', url, headers, body }) {
@@ -126,9 +174,10 @@ export class S4GatewayTransport {
 
   async request({ method = 'get', path, query, headers, body } = {}) {
     const normalizedMethod = String(method || 'get').toLowerCase();
-    const url = this.buildUrl(path, query);
+    const isWrite = UNSAFE_METHODS.has(normalizedMethod);
+    const url = this.buildUrl(path, query, { forWrite: isWrite });
 
-    if (!UNSAFE_METHODS.has(normalizedMethod)) {
+    if (!isWrite) {
       const response = await this.rawRequest({ method: normalizedMethod, url, headers, body });
       return normalizeODataV2Response(response.data);
     }
@@ -138,6 +187,7 @@ export class S4GatewayTransport {
       url,
       body,
       headers: {
+        Accept: 'application/json',
         'x-csrf-token': csrfState.token,
         ...(csrfState.cookie ? { Cookie: csrfState.cookie } : {}),
         ...(headers || {}),
@@ -180,8 +230,9 @@ export class S4GatewayTransport {
       }
 
       // __next is an absolute URL emitted by Gateway; it already carries the
-      // skiptoken and $format, so it is followed verbatim.
-      nextUrl = extractODataV2NextLink(raw);
+      // skiptoken and $format, so it is followed as is (plus any missing credential params).
+      const next = extractODataV2NextLink(raw);
+      nextUrl = next ? this.withDefaultParams(next) : next;
     }
 
     return items;

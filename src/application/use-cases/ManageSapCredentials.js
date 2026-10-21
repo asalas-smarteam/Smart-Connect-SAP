@@ -20,6 +20,43 @@ function normalizeBaseUrl(value) {
   return String(value || '').trim().replace(/\/+$/, '');
 }
 
+// The pattern has no `$`, so OData system options ($top, $filter, ...) can never
+// be overridden through params.
+const PARAM_KEY_PATTERN = /^[A-Za-z0-9_.-]+$/;
+
+function normalizeParams(value) {
+  if (value === null || typeof value === 'undefined') {
+    return {};
+  }
+
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('params is invalid: must be an object of query parameters');
+  }
+
+  const params = {};
+  Object.entries(value).forEach(([key, paramValue]) => {
+    if (!PARAM_KEY_PATTERN.test(key)) {
+      throw new Error(`params is invalid: key "${key}" is not allowed`);
+    }
+
+    const isValidValue = typeof paramValue === 'string'
+      || (typeof paramValue === 'number' && Number.isFinite(paramValue));
+    if (!isValidValue) {
+      throw new Error(`params is invalid: value of "${key}" must be a string or number`);
+    }
+
+    // An empty value would be sent as `?key=` and SAP reads it as an empty client.
+    const normalizedValue = String(paramValue).trim();
+    if (!normalizedValue) {
+      throw new Error(`params is invalid: value of "${key}" must not be empty`);
+    }
+
+    params[key] = normalizedValue;
+  });
+
+  return params;
+}
+
 function normalizePayload(payload = {}, { partial = false } = {}) {
   const data = {};
 
@@ -29,6 +66,9 @@ function normalizePayload(payload = {}, { partial = false } = {}) {
 
   if (!partial || Object.prototype.hasOwnProperty.call(payload, 'serviceLayerBaseUrl')) {
     data.serviceLayerBaseUrl = normalizeBaseUrl(payload.serviceLayerBaseUrl);
+    if (/[?#]/.test(data.serviceLayerBaseUrl)) {
+      throw new Error('serviceLayerBaseUrl is invalid: it must not contain "?" or "#", use params instead');
+    }
   }
 
   if (!partial || Object.prototype.hasOwnProperty.call(payload, 'serviceLayerUsername')) {
@@ -54,6 +94,10 @@ function normalizePayload(payload = {}, { partial = false } = {}) {
   if (!partial || Object.prototype.hasOwnProperty.call(payload, 'serviceLayerCompanyDB')) {
     const companyDb = String(payload.serviceLayerCompanyDB || '').trim();
     data.serviceLayerCompanyDB = companyDb || null;
+  }
+
+  if (!partial || Object.prototype.hasOwnProperty.call(payload, 'params')) {
+    data.params = normalizeParams(payload.params);
   }
 
   return data;
