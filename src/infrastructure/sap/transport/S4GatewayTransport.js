@@ -16,15 +16,17 @@ function cleanBaseUrl(value) {
   return String(value || '').trim().replace(/\/+$/, '');
 }
 
-function buildQueryString(query = {}) {
+function buildQueryString(query = {}, { json = true } = {}) {
   // Values are passed through untouched: callers pre-encode OData options
   // (same contract as the existing serviceLayerUrlBuilder).
   const entries = Object.entries(query).filter(
     ([, value]) => value !== null && typeof value !== 'undefined'
   );
 
-  if (!entries.some(([key]) => key === '$format')) {
-    // Gateway OData v2 answers Atom XML by default; JSON must be explicit.
+  // Gateway OData v2 answers Atom XML by default; JSON must be explicit. Reads ask for it with
+  // $format=json. Writes must NOT: the Gateway rejects system query options on them (400
+  // "SystemQueryOptions not allowed for this request type"), so they use the Accept header.
+  if (json && !entries.some(([key]) => key === '$format')) {
     entries.push(['$format', 'json']);
   }
 
@@ -65,7 +67,7 @@ export class S4GatewayTransport {
     }
   }
 
-  buildUrl(path, query) {
+  buildUrl(path, query, { forWrite = false } = {}) {
     const normalizedPath = String(path || '').trim();
     if (!normalizedPath) {
       throw new Error('path is required');
@@ -77,7 +79,7 @@ export class S4GatewayTransport {
       ? normalizedPath
       : `${this.gatewayBasePath}${normalizedPath.startsWith('/') ? '' : '/'}${normalizedPath}`;
 
-    const queryString = buildQueryString(query);
+    const queryString = buildQueryString(query, { json: !forWrite });
     return `${this.baseUrl}${withPrefix}${queryString ? `?${queryString}` : ''}`;
   }
 
@@ -126,9 +128,10 @@ export class S4GatewayTransport {
 
   async request({ method = 'get', path, query, headers, body } = {}) {
     const normalizedMethod = String(method || 'get').toLowerCase();
-    const url = this.buildUrl(path, query);
+    const isWrite = UNSAFE_METHODS.has(normalizedMethod);
+    const url = this.buildUrl(path, query, { forWrite: isWrite });
 
-    if (!UNSAFE_METHODS.has(normalizedMethod)) {
+    if (!isWrite) {
       const response = await this.rawRequest({ method: normalizedMethod, url, headers, body });
       return normalizeODataV2Response(response.data);
     }
@@ -138,6 +141,7 @@ export class S4GatewayTransport {
       url,
       body,
       headers: {
+        Accept: 'application/json',
         'x-csrf-token': csrfState.token,
         ...(csrfState.cookie ? { Cookie: csrfState.cookie } : {}),
         ...(headers || {}),

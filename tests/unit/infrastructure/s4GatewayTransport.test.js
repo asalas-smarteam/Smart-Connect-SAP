@@ -227,3 +227,70 @@ describe('S4GatewayTransport', () => {
     expect(mockAxios).toHaveBeenCalledTimes(2);
   });
 });
+
+// The Gateway answers 400 "SystemQueryOptions not allowed for this request type" when a write
+// carries `$format`, so writes ask for JSON through the Accept header instead.
+describe('S4GatewayTransport write requests', () => {
+  const BASE = 'https://s4.example.com:44300/sap/opu/odata/sap';
+  const csrfResponse = { data: {}, headers: { 'x-csrf-token': 'token-abc', 'set-cookie': [] } };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it.each(['post', 'patch', 'put', 'delete'])(
+    'sends no $format on %s and asks for JSON through the Accept header',
+    async (method) => {
+      mockAxios
+        .mockResolvedValueOnce(csrfResponse)
+        .mockResolvedValueOnce({ data: { d: { ok: true } }, headers: {} });
+
+      const transport = new S4GatewayTransport({ config });
+      await transport.request({ method, path: '/SVC/Entity', body: {} });
+
+      const write = mockAxios.mock.calls[1][0];
+      expect(write.url).toBe(`${BASE}/SVC/Entity`);
+      expect(write.headers).toEqual(
+        expect.objectContaining({ Accept: 'application/json', 'x-csrf-token': 'token-abc' })
+      );
+    }
+  );
+
+  it('keeps the caller query options on a write, without adding $format', async () => {
+    mockAxios
+      .mockResolvedValueOnce(csrfResponse)
+      .mockResolvedValueOnce({ data: { d: { ok: true } }, headers: {} });
+
+    const transport = new S4GatewayTransport({ config });
+    await transport.request({ method: 'post', path: '/SVC/Entity', query: { $expand: 'to_Item' }, body: {} });
+
+    expect(mockAxios.mock.calls[1][0].url).toBe(`${BASE}/SVC/Entity?$expand=to_Item`);
+  });
+
+  it('lets a caller-supplied Accept header win on a write', async () => {
+    mockAxios
+      .mockResolvedValueOnce(csrfResponse)
+      .mockResolvedValueOnce({ data: { d: { ok: true } }, headers: {} });
+
+    const transport = new S4GatewayTransport({ config });
+    await transport.request({
+      method: 'post',
+      path: '/SVC/Entity',
+      body: {},
+      headers: { Accept: 'application/atom+xml' },
+    });
+
+    expect(mockAxios.mock.calls[1][0].headers.Accept).toBe('application/atom+xml');
+  });
+
+  it('keeps $format=json on the CSRF fetch GET that precedes a write', async () => {
+    mockAxios
+      .mockResolvedValueOnce(csrfResponse)
+      .mockResolvedValueOnce({ data: { d: { ok: true } }, headers: {} });
+
+    const transport = new S4GatewayTransport({ config });
+    await transport.request({ method: 'post', path: '/SVC/Entity', body: {} });
+
+    expect(mockAxios.mock.calls[0][0].url).toBe(`${BASE}/SVC/?$format=json`);
+  });
+});
