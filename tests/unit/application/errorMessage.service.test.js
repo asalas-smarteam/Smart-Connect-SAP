@@ -34,6 +34,70 @@ describe('resolveErrorMessageText', () => {
     expect(resolveErrorMessageText(error)).toBe('Already a plain string');
   });
 
+  describe('S/4 OData errordetails', () => {
+    const odataError = (message, errordetails) => ({
+      response: {
+        data: {
+          error: {
+            code: 'SLS_LORD/009',
+            message: { lang: 'es', value: message },
+            innererror: { errordetails },
+          },
+        },
+      },
+    });
+
+    it('appends the [code] message pairs that differ from the top-level message', () => {
+      const error = odataError('No se puede guardar el documento', [
+        { code: 'SLS_LORD/009', message: 'Documento incompleto', severity: 'error' },
+        { code: 'VP/011', message: 'Falta el interlocutor', severity: 'error' },
+      ]);
+
+      expect(resolveErrorMessageText(error)).toBe(
+        'No se puede guardar el documento (details: [SLS_LORD/009] Documento incompleto; [VP/011] Falta el interlocutor)'
+      );
+    });
+
+    it('does not repeat a detail that equals the top-level message', () => {
+      const error = odataError('Documento incompleto', [
+        { code: 'SLS_LORD/009', message: 'Documento incompleto' },
+      ]);
+
+      expect(resolveErrorMessageText(error)).toBe('Documento incompleto');
+    });
+
+    it('accepts details whose message is a { lang, value } object and omits a missing code', () => {
+      const error = odataError('Top level', [
+        { message: { lang: 'es', value: 'Sin codigo' } },
+      ]);
+
+      expect(resolveErrorMessageText(error)).toBe('Top level (details: Sin codigo)');
+    });
+
+    it('ignores details without a usable message and non-array errordetails', () => {
+      expect(
+        resolveErrorMessageText(odataError('Top level', [{ code: 'X/1' }, null, 'text']))
+      ).toBe('Top level');
+      expect(resolveErrorMessageText(odataError('Top level', { code: 'X/1', message: 'm' }))).toBe(
+        'Top level'
+      );
+    });
+
+    it('keeps the B1 message untouched when there is no innererror', () => {
+      const error = {
+        response: { data: { error: { message: { lang: 'en-us', value: 'B1 failure' } } } },
+      };
+
+      expect(resolveErrorMessageText(error)).toBe('B1 failure');
+    });
+
+    it('still truncates the combined text to 2000 characters', () => {
+      const error = odataError('Top level', [{ code: 'A/1', message: 'y'.repeat(3000) }]);
+
+      expect(resolveErrorMessageText(error)).toHaveLength(2000);
+    });
+  });
+
   it('falls back to error.response.data.message when it is a string', () => {
     const error = {
       response: {

@@ -18,6 +18,27 @@ function extractMessageText(candidate) {
   return null;
 }
 
+// S/4 Gateway (OData v2) puts the actionable reason (e.g. `SLS_LORD/009`) in
+// `error.innererror.errordetails[]` while the top-level message stays generic.
+// Returns `[code] message` entries that add information over `mainMessage`.
+function extractErrorDetails(data, mainMessage) {
+  const details = data?.error?.innererror?.errordetails;
+
+  if (!Array.isArray(details)) {
+    return [];
+  }
+
+  return details
+    .map((detail) => {
+      const text = extractMessageText(detail?.message);
+      if (!text || text === mainMessage) {
+        return null;
+      }
+      return detail.code ? `[${detail.code}] ${text}` : text;
+    })
+    .filter(Boolean);
+}
+
 /**
  * SAP B1 Service Layer reports failures as a nested object
  * (`{ error: { message: { lang, value } } }`) instead of a plain string. Code
@@ -37,7 +58,10 @@ export function resolveErrorMessageText(error) {
   const fromNestedMessage = extractMessageText(data?.error?.message);
 
   if (fromNestedMessage) {
-    return truncate(fromNestedMessage);
+    const details = extractErrorDetails(data, fromNestedMessage);
+    return truncate(
+      details.length ? `${fromNestedMessage} (details: ${details.join('; ')})` : fromNestedMessage
+    );
   }
 
   const fromDataMessage = extractMessageText(data?.message);
