@@ -71,6 +71,7 @@ export function buildPurchaseQuotationPayload({
   documentDefaults = {},
   documentLines,
   slpCode = null,
+  addressExtension = null,
 }) {
   if (!Array.isArray(documentLines) || !documentLines.length) {
     throw new PermanentWebhookError(
@@ -101,6 +102,12 @@ export function buildPurchaseQuotationPayload({
 
   if (Number.isInteger(slpCode)) {
     payload.SalesPersonCode = slpCode;
+  }
+
+  // Omitted when absent or empty, never sent as null: tenants without the address extension
+  // mappings keep the exact payload they send today.
+  if (addressExtension && Object.keys(addressExtension).length > 0) {
+    payload.AddressExtension = addressExtension;
   }
 
   return payload;

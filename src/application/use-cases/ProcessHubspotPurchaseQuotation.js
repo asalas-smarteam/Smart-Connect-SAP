@@ -4,6 +4,7 @@ import {
   mapPurchaseQuotationLines,
 } from '#domain/purchases/purchase-quotation-builder.service.js';
 import { mapHubspotToSapFields } from '#domain/orders/order-builder.service.js';
+import { buildAddressExtension } from '#domain/orders/address-extension.service.js';
 import { resolveEventPayload } from '../services/webhook-payload.service.js';
 import {
   buildSapDocumentLinkLines,
@@ -45,7 +46,7 @@ export class ProcessHubspotPurchaseQuotation {
   }
 
   async execute({ event, tenantModels, tenantId, tenantKey, portalId }) {
-    const { payload, deal, lineItems } = resolveEventPayload(event);
+    const { payload, deal, lineItems, addressExtension } = resolveEventPayload(event);
     const SapDocumentLink = tenantModels?.SapDocumentLink;
     const dealId = toNonEmptyString(deal?.hs_object_id);
     const sapCallRecorder = this.createSapCallRecorder();
@@ -118,11 +119,25 @@ export class ProcessHubspotPurchaseQuotation {
       const documentDefaults = await this.runtimeRepository
         .resolvePurchaseQuotationDefaults(tenantModels);
 
+      // Built before any SAP call: a malformed object fails here. The rows are read only when
+      // the workflow actually sent the object, so a tenant that does not use the feature never
+      // pays for the query. Null when there is nothing to send.
+      const sapAddressExtension = addressExtension === null
+        ? null
+        : buildAddressExtension({
+          source: addressExtension,
+          mappings: await this.runtimeRepository.resolveAddressExtensionMappings({
+            tenantModels,
+            hubspotCredentialId: hubspotCredentials._id,
+          }),
+        });
+
       const purchaseQuotationPayload = buildPurchaseQuotationPayload({
         mappedDealFields: mappedDeal,
         documentDefaults,
         documentLines,
         slpCode,
+        addressExtension: sapAddressExtension,
       });
       cardCode = purchaseQuotationPayload.CardCode;
       auditTrail.payload_SAP.purchaseQuotation = purchaseQuotationPayload;

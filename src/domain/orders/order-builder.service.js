@@ -463,6 +463,7 @@ export function buildOrderPayload({
   documentsOwner = null,
   paymentGroupCode = null,
   mappedDealFields = {},
+  addressExtension = null,
 }) {
   if (!documentLines.length) {
     throw new PermanentWebhookError('At least one line_item is required to create SAP Order');
@@ -487,6 +488,12 @@ export function buildOrderPayload({
 
   if (Number.isInteger(paymentGroupCode)) {
     payload.PaymentGroupCode = paymentGroupCode;
+  }
+
+  // Omitted when absent or empty, never sent as null: tenants without the address extension
+  // mappings keep the exact payload they send today.
+  if (addressExtension && Object.keys(addressExtension).length > 0) {
+    payload.AddressExtension = addressExtension;
   }
 
   return payload;
