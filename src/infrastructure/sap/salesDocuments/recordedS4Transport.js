@@ -7,6 +7,14 @@ export function wrapS4TransportWithRecorder(transport, sapCallRecorder) {
     return transport;
   }
 
+  // El transporte agrega los `params` de las credenciales (p. ej. sap-client) a cada URL; se
+  // graban junto con la query para que la llamada registrada muestre lo que se envió de verdad.
+  // La query de la llamada gana sobre el param por defecto, igual que en el transporte.
+  const recordedParams = (query) => {
+    const merged = { ...transport.defaultParams, ...query };
+    return Object.keys(merged).length ? merged : null;
+  };
+
   return Object.create(transport, {
     request: {
       value: function requestWithAudit(options = {}) {
@@ -14,7 +22,7 @@ export function wrapS4TransportWithRecorder(transport, sapCallRecorder) {
           {
             method: options.method,
             path: options.path,
-            params: options.query ?? null,
+            params: recordedParams(options.query),
             data: options.body ?? null,
           },
           () => transport.request(options)

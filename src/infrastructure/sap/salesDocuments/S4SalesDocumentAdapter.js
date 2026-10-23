@@ -32,13 +32,15 @@ function parseFiniteNumberOrNull(value) {
 export function normalizeS4QuotationResponse(raw) {
   const documentNumber = parseFiniteNumberOrNull(raw?.SalesQuotation);
 
+  // La entidad de SAP se queda en el nivel superior (como la de B1 en sapAudit.responseSap);
+  // los campos normalizados van después para que ganen sobre cualquier campo homónimo.
   return {
+    ...raw,
     DocEntry: documentNumber,
     DocNum: documentNumber,
     DocumentLines: readCollection(raw?.to_Item).map((item) => ({
       LineNum: parseFiniteNumberOrNull(item?.SalesQuotationItem),
     })),
-    raw,
   };
 }
 

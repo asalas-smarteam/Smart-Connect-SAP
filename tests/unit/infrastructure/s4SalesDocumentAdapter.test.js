@@ -41,14 +41,43 @@ describe('S4SalesDocumentAdapter', () => {
     const result = await new S4SalesDocumentAdapter({ transport })
       .createQuotation({ quotationPayload: {} });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       DocEntry: 20000123,
       DocNum: 20000123,
       DocumentLines: [{ LineNum: 10 }, { LineNum: 20 }],
-      raw: {
+    });
+  });
+
+  // B1 stores the SAP entity at the top level of the response (and so of
+  // sapAudit.responseSap); S/4 must keep the entity fields there too, not nested under `raw`.
+  it('conserva los campos de la entidad SAP en el nivel superior, igual que B1', async () => {
+    const transport = {
+      request: async () => ({
         SalesQuotation: '20000123',
-        to_Item: [{ SalesQuotationItem: '000010' }, { SalesQuotationItem: '000020' }],
-      },
+        SoldToParty: '101057',
+        to_Item: [{ SalesQuotationItem: '000010' }],
+      }),
+    };
+
+    const result = await new S4SalesDocumentAdapter({ transport })
+      .createQuotation({ quotationPayload: {} });
+
+    expect(result).toEqual({
+      SalesQuotation: '20000123',
+      SoldToParty: '101057',
+      to_Item: [{ SalesQuotationItem: '000010' }],
+      DocEntry: 20000123,
+      DocNum: 20000123,
+      DocumentLines: [{ LineNum: 10 }],
+    });
+    expect(result).not.toHaveProperty('raw');
+  });
+
+  it('tolera una respuesta vacia sin lanzar', () => {
+    expect(normalizeS4QuotationResponse(null)).toEqual({
+      DocEntry: null,
+      DocNum: null,
+      DocumentLines: [],
     });
   });
 });
@@ -138,6 +167,46 @@ describe('wrapS4TransportWithRecorder', () => {
 
     await expect(recorded.request({ method: 'post', path: '/X' })).rejects.toThrow('gateway 400');
     expect(recorder.calls[0]).toMatchObject({ ok: false, path: '/X' });
+  });
+
+  // The transport adds the credential `params` (e.g. sap-client) to every URL; the recorded
+  // call must show what was really sent, like the B1 audit does.
+  it('graba los params por defecto de las credenciales junto con la query', async () => {
+    const recorder = createSapCallRecorder();
+    const transport = {
+      defaultParams: { 'sap-client': '600' },
+      request: jest.fn().mockResolvedValue({ ok: true }),
+    };
+    const recorded = wrapS4TransportWithRecorder(transport, recorder);
+
+    await recorded.request({ method: 'get', path: '/X', query: { $top: 1 } });
+    await recorded.request({ method: 'post', path: '/X', body: { a: 1 } });
+
+    expect(recorder.calls[0].params).toEqual({ 'sap-client': '600', $top: 1 });
+    expect(recorder.calls[1].params).toEqual({ 'sap-client': '600' });
+  });
+
+  it('la query de la llamada gana sobre el param por defecto', async () => {
+    const recorder = createSapCallRecorder();
+    const transport = {
+      defaultParams: { 'sap-client': '600' },
+      request: jest.fn().mockResolvedValue({ ok: true }),
+    };
+    const recorded = wrapS4TransportWithRecorder(transport, recorder);
+
+    await recorded.request({ method: 'get', path: '/X', query: { 'sap-client': '800' } });
+
+    expect(recorder.calls[0].params).toEqual({ 'sap-client': '800' });
+  });
+
+  it('deja params en null cuando no hay query ni params por defecto', async () => {
+    const recorder = createSapCallRecorder();
+    const transport = { defaultParams: {}, request: jest.fn().mockResolvedValue({ ok: true }) };
+    const recorded = wrapS4TransportWithRecorder(transport, recorder);
+
+    await recorded.request({ method: 'post', path: '/X' });
+
+    expect(recorder.calls[0].params).toBeNull();
   });
 
   it('devuelve el transporte tal cual cuando no hay grabador', () => {
