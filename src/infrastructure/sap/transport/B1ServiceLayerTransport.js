@@ -2,6 +2,7 @@ import axios from 'axios';
 import https from 'https';
 import logger from '../../logger/logger.js';
 import sapSessionManager, { isSessionInvalidError } from '../sapSessionManager.js';
+import { buildGatewayAuthHeaders } from '../serviceLayerGatewayHeaders.js';
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
@@ -147,6 +148,7 @@ export class B1ServiceLayerTransport {
         url,
         data: body,
         headers: {
+          ...buildGatewayAuthHeaders(this.config),
           Cookie: cookie,
           ...(headers || {}),
         },
@@ -172,6 +174,7 @@ export class B1ServiceLayerTransport {
         rootUrl: this.baseUrl,
         initialUrl,
         headers: {
+          ...buildGatewayAuthHeaders(this.config),
           Cookie: cookie,
           Prefer: DEFAULT_PAGE_SIZE_HEADER,
           ...(headers || {}),

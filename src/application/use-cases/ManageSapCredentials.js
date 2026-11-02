@@ -10,7 +10,7 @@ const reasons = Object.freeze({
 });
 
 // La contraseña de Service Layer se guarda real (la usa la sync) y se responde enmascarada.
-const SAP_CREDENTIALS_SECRET_FIELDS = Object.freeze(['serviceLayerPassword']);
+const SAP_CREDENTIALS_SECRET_FIELDS = Object.freeze(['serviceLayerPassword', 'serviceLayerGatewayToken']);
 
 function toResponse(credentials) {
   return maskSecretFields(credentials, SAP_CREDENTIALS_SECRET_FIELDS);
@@ -77,6 +77,11 @@ function normalizePayload(payload = {}, { partial = false } = {}) {
 
   if (!partial || Object.prototype.hasOwnProperty.call(payload, 'serviceLayerPassword')) {
     data.serviceLayerPassword = String(payload.serviceLayerPassword || '').trim();
+  }
+
+  // Optional; an empty string clears it.
+  if (!partial || Object.prototype.hasOwnProperty.call(payload, 'serviceLayerGatewayToken')) {
+    data.serviceLayerGatewayToken = String(payload.serviceLayerGatewayToken || '').trim();
   }
 
   if (!partial || Object.prototype.hasOwnProperty.call(payload, 'serviceLayerTopFilter')) {

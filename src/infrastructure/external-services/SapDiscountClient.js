@@ -1,5 +1,6 @@
 import logger from '../logger/logger.js';
 import sapSessionManager, { isSessionInvalidError } from '../sap/sapSessionManager.js';
+import { buildGatewayAuthHeaders } from '../sap/serviceLayerGatewayHeaders.js';
 import { paginateODataCollection } from '../sap/transport/B1ServiceLayerTransport.js';
 import { runWithRetry } from '#shared/utils/retry.js';
 
@@ -44,6 +45,7 @@ export class SapDiscountClient {
         rootUrl: baseUrl,
         initialUrl,
         headers: {
+          ...buildGatewayAuthHeaders(sapConfig),
           Cookie: cookie,
           Prefer: `odata.maxpagesize=${PAGE_SIZE}`,
         },
