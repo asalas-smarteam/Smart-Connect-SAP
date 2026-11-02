@@ -124,10 +124,11 @@ describe('ticketMetrics (F8, F9)', () => {
       open: 2,
       openWithoutFirstResponse: 1,
       medianFirstResponseSeconds: 3600,
-      medianResolutionSeconds: 90000,
+      // Horario hábil (plan 9): 2 h y 18 h hábiles (jueves 8:00 → sábado).
+      medianResolutionSeconds: 36000,
     });
     expect(body.byWeek).toEqual([
-      { weekStart: '2026-09-28', resolved: 2, reopened: 1, medianResolutionSeconds: 90000 },
+      { weekStart: '2026-09-28', resolved: 2, reopened: 1, medianResolutionSeconds: 36000 },
       { weekStart: '2026-10-05', resolved: 0, reopened: 0, medianResolutionSeconds: null },
     ]);
     expect(body.buckets).toEqual([
@@ -138,7 +139,7 @@ describe('ticketMetrics (F8, F9)', () => {
     ]);
     expect(body.byCategory).toEqual([
       { category: 'documentos', resolved: 1, medianResolutionSeconds: 7200 },
-      { category: 'precios', resolved: 1, medianResolutionSeconds: 172800 },
+      { category: 'precios', resolved: 1, medianResolutionSeconds: 64800 },
     ]);
     expect(body).not.toHaveProperty('byTenant');
   });
@@ -152,5 +153,81 @@ describe('ticketMetrics (F8, F9)', () => {
     });
 
     expect(body.byTenant.map((row) => [row.tenantKey, row.resolved, row.open])).toEqual([['a', 2, 1], ['b', 0, 1]]);
+  });
+});
+
+// Plan 9 (contrato 11): los mismos tickets que la prueba de la API simulada del front
+// (smartHubPanel/src/mocks/handlers/metrics.test.js) deben dar los mismos números.
+describe('ticketMetrics in business hours (plan 9, L2 to L5)', () => {
+  const HOUR = 3600;
+  const period = { from: ms('2026-09-28T06:00:00.000Z'), to: ms('2026-10-12T06:00:00.000Z'), tz: TZ };
+  const at = (iso, plusHours) => new Date(ms(iso) + plusHours * HOUR * 1000);
+  const ticket = ({ opened, firstResponse = null, resolved = null, status = 'resuelto', category = 'documentos', reopenCount = 0 }) => ({
+    status,
+    category,
+    reopenCount,
+    openedAt: new Date(opened),
+    firstResponseAt: firstResponse === null ? null : at(opened, firstResponse),
+    resolvedAt: resolved === null ? null : at(opened, resolved),
+  });
+  const tickets = [
+    ticket({ opened: '2026-09-28T15:00:00.000Z', firstResponse: 1, resolved: 2 }),
+    ticket({ opened: '2026-09-29T15:00:00.000Z', firstResponse: 3, resolved: 10, reopenCount: 1 }),
+    ticket({ opened: '2026-10-01T15:00:00.000Z', firstResponse: 0.5, resolved: 48, category: 'sincronizacion' }),
+    // Viernes 9:00 → jueves siguiente 15:00: 8 + 9 + 9 + 9 + 7 = 42 h hábiles.
+    ticket({ opened: '2026-10-02T15:00:00.000Z', firstResponse: 2, resolved: 150, category: 'precios' }),
+    ticket({ opened: '2026-09-20T15:00:00.000Z', firstResponse: 1, resolved: 2 }),
+    ticket({ opened: '2026-10-08T15:00:00.000Z', firstResponse: 1, status: 'en_progreso' }),
+    ticket({ opened: '2026-10-10T15:00:00.000Z', status: 'abierto', category: 'acceso' }),
+    // Domingo: su primera respuesta da 0 s hábiles.
+    ticket({ opened: '2026-10-11T15:00:00.000Z', firstResponse: 1, resolved: 19 }),
+    ticket({ opened: '2026-09-15T15:00:00.000Z', firstResponse: 1, resolved: 22 * 24, status: 'abierto', category: 'mapeos', reopenCount: 1 }),
+  ];
+
+  it('gives the same totals, weeks, buckets and categories as the front mock', () => {
+    const body = ticketMetrics(tickets, period, {
+      tenants: [{ tenantKey: 'TESTCO', companyName: 'Empresa de prueba', tickets }],
+    });
+
+    expect(body.totals).toEqual({
+      resolved: 4,
+      resolvedPreviousPeriod: 1,
+      reopened: 1,
+      open: 3,
+      openWithoutFirstResponse: 1,
+      medianFirstResponseSeconds: 3600,
+      medianResolutionSeconds: 12.5 * HOUR,
+    });
+    expect(body.byWeek).toEqual([
+      { weekStart: '2026-09-28', resolved: 3, reopened: 1, medianResolutionSeconds: 8 * HOUR },
+      { weekStart: '2026-10-05', resolved: 1, reopened: 0, medianResolutionSeconds: 42 * HOUR },
+    ]);
+    expect(body.buckets).toEqual([
+      { key: 'lt4h', count: 1 },
+      { key: '4h_24h', count: 1 },
+      { key: '1d_3d', count: 1 },
+      { key: 'gt3d', count: 1 },
+    ]);
+    expect(body.byCategory).toEqual([
+      { category: 'documentos', resolved: 2, medianResolutionSeconds: 5 * HOUR },
+      { category: 'precios', resolved: 1, medianResolutionSeconds: 42 * HOUR },
+      { category: 'sincronizacion', resolved: 1, medianResolutionSeconds: 17 * HOUR },
+    ]);
+    expect(body.byTenant).toEqual([{
+      tenantKey: 'TESTCO',
+      companyName: 'Empresa de prueba',
+      resolved: 4,
+      medianFirstResponseSeconds: 3600,
+      medianResolutionSeconds: 12.5 * HOUR,
+      reopened: 1,
+      open: 3,
+    }]);
+  });
+
+  it('counts a first response on a Sunday as zero', () => {
+    const sunday = ticket({ opened: '2026-10-11T15:00:00.000Z', firstResponse: 1, resolved: 19 });
+    const body = ticketMetrics([sunday], period);
+
+    expect(body.totals.medianFirstResponseSeconds).toBe(0);
   });
 });

@@ -1,19 +1,22 @@
 import { addDays, localDate, median, mondayOf, toMs } from './period.js';
 import { TICKET_STATUSES } from './tickets.js';
+import { BUSINESS_DAY_SECONDS, businessSeconds } from './businessTime.js';
 
 // Métricas de soporte (contrato 05, F8 y F9), a partir de los tickets (sin mensajes ni nota
-// interna). Tiempo corrido, en segundos. Misma lógica que la API simulada del front.
+// interna). Tiempos en horario hábil (contrato 11): lunes a viernes de 8:00 a 17:00, hora de Costa
+// Rica, en segundos. Misma lógica que la API simulada del front.
 
 const HOUR = 3600;
+// Rangos de resolución en tiempo hábil, con días hábiles de 9 h (L3).
 const BUCKETS = Object.freeze([
   ['lt4h', 4 * HOUR],
-  ['4h_24h', 24 * HOUR],
-  ['1d_3d', 72 * HOUR],
+  ['4h_24h', BUSINESS_DAY_SECONDS],
+  ['1d_3d', 3 * BUSINESS_DAY_SECONDS],
   ['gt3d', Infinity],
 ]);
 
-const resolutionSeconds = (ticket) => (toMs(ticket.resolvedAt) - toMs(ticket.openedAt)) / 1000;
-const firstResponseSeconds = (ticket) => (toMs(ticket.firstResponseAt) - toMs(ticket.openedAt)) / 1000;
+const resolutionSeconds = (ticket) => businessSeconds(toMs(ticket.openedAt), toMs(ticket.resolvedAt));
+const firstResponseSeconds = (ticket) => businessSeconds(toMs(ticket.openedAt), toMs(ticket.firstResponseAt));
 const isOpen = (ticket) => ticket.status !== TICKET_STATUSES.RESUELTO;
 
 // F9: resueltos HOY cuya última resolución cae en [from, to).

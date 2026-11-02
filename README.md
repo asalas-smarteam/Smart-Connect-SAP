@@ -539,6 +539,11 @@ Plan: `docs/superpowers/plans/2026-10-20-panel-tareas-programadas.md`. Contrato:
 - `lastError` saneado para cuentas cliente; crudo para Smarteam.
 - `nextRunAt` sale de los job schedulers de BullMQ (solo lectura). Si Redis no responde en 1,5 s, la lista sale igual con `nextRunAt: null` y un aviso en el log.
 
+### Métricas de soporte en horario hábil (plan 9)
+Plan: `docs/superpowers/plans/2026-11-02-panel-metricas-horario-habil.md`. Contrato: `docs/contrato-backend/11-metricas-horario-habil.md`.
+
+- Los tiempos de `/tickets/metrics` y `/staff/tickets/metrics` (primera respuesta, resolución y sus medianas) cuentan solo de lunes a viernes, de 8:00 a 17:00, hora de Costa Rica, sin feriados. Los rangos de resolución usan días hábiles de 9 h. La forma de la respuesta no cambia.
+
 El contrato con el front está en `docs/contrato-backend/`.
 
 ## 19. Guía de contribución
