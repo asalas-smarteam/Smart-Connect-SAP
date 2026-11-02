@@ -21,6 +21,11 @@ export const sapCredentialsSchema = new Schema(
       type: String,
       required: true,
     },
+    // Optional bearer token that a reverse proxy in front of the Service Layer validates.
+    serviceLayerGatewayToken: {
+      type: String,
+      default: '',
+    },
     serviceLayerTopFilter: {
       type: Number,
       default: null,

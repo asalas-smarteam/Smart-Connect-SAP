@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import https from 'https';
 import logger from '../logger/logger.js';
 import { getRedisClient } from '../cache/redisClient.js';
+import { buildGatewayAuthHeaders } from './serviceLayerGatewayHeaders.js';
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 const LOCK_PREFIX = 'sap:lock:';
@@ -100,7 +101,10 @@ async function loginAndStoreSession(redis, config, tenantKey) {
   const baseUrl = String(config?.serviceLayerBaseUrl || '').trim().replace(/\/+$/, '');
   const loginUrl = `${baseUrl}/b1s/v2/Login`;
 
-  const loginResponse = await axios.post(loginUrl, buildAuthPayload(config), { httpsAgent });
+  const loginResponse = await axios.post(loginUrl, buildAuthPayload(config), {
+    httpsAgent,
+    headers: buildGatewayAuthHeaders(config),
+  });
   const cookie = readSessionCookie(loginResponse);
   if (!cookie) {
     throw new Error('Unable to establish SAP Service Layer session');

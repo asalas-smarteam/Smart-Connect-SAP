@@ -1,6 +1,7 @@
 import axios from 'axios';
 import https from 'https';
 import sapSessionManager, { isSessionInvalidError } from './sapSessionManager.js';
+import { buildGatewayAuthHeaders } from './serviceLayerGatewayHeaders.js';
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
@@ -23,7 +24,7 @@ async function serviceLayerRequest(sapConfig, { method, path, data }) {
       method,
       url,
       data,
-      headers: { Cookie: cookie },
+      headers: { ...buildGatewayAuthHeaders(sapConfig), Cookie: cookie },
       httpsAgent,
     });
 

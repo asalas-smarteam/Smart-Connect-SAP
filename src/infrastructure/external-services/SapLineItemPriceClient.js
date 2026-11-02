@@ -2,6 +2,7 @@ import axios from 'axios';
 import https from 'https';
 import logger from '../logger/logger.js';
 import sapSessionManager, { isSessionInvalidError } from '../sap/sapSessionManager.js';
+import { buildGatewayAuthHeaders } from '../sap/serviceLayerGatewayHeaders.js';
 import { runWithRetry } from '#shared/utils/retry.js';
 
 const httpsAgent = new https.Agent({
@@ -68,6 +69,7 @@ export class SapLineItemPriceClient {
         httpsAgent,
         timeout: EXTERNAL_TIMEOUT_MS,
         headers: {
+          ...buildGatewayAuthHeaders(sapConfig),
           Cookie: cookie,
         },
       });
@@ -128,6 +130,7 @@ export class SapLineItemPriceClient {
         httpsAgent,
         timeout: EXTERNAL_TIMEOUT_MS,
         headers: {
+          ...buildGatewayAuthHeaders(sapConfig),
           Cookie: cookie,
         },
       });
