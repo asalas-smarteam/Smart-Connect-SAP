@@ -134,17 +134,20 @@ export function buildS4BusinessPartnerCreatePayload({
     customer.to_CustomerCompany = [{ ...defaults.CustomerCompany }];
   }
 
-  // Tres fuentes, de menor a mayor precedencia: lo mapeado desde la empresa (moneda, condición
-  // de pago, lista de precios...), el default de la config y el área de ventas del DOCUMENTO.
-  // Este último gana: el cliente tiene que quedar registrado en el área donde se le va a crear
-  // la oferta, o SAP rechaza el documento con "cliente no existe en el área de ventas".
+  // Tres fuentes, de menor a mayor precedencia: el default de la config (relleno), lo mapeado
+  // desde la empresa (moneda, condición de pago, lista de precios...) y el área de ventas del
+  // DOCUMENTO. Acá el dato de la empresa gana al default, a diferencia del resto del maestro:
+  // así un tenant fija un valor para todos y un cliente puntual lo cambia con una propiedad. Un
+  // campo vacío en HubSpot lo descarta el mapeo, y entonces rellena la config. El DOCUMENTO
+  // gana siempre: el cliente tiene que quedar registrado en el área donde se le va a crear la
+  // oferta, o SAP rechaza el documento con "cliente no existe en el área de ventas".
   const mappedSalesArea = Array.isArray(mappedCustomer?.to_CustomerSalesArea)
     ? mappedCustomer.to_CustomerSalesArea[0]
     : null;
 
   customer.to_CustomerSalesArea = [{
-    ...(mappedSalesArea && typeof mappedSalesArea === 'object' ? mappedSalesArea : {}),
     ...defaults.CustomerSalesArea,
+    ...(mappedSalesArea && typeof mappedSalesArea === 'object' ? mappedSalesArea : {}),
     SalesOrganization: salesArea?.salesOrganization,
     DistributionChannel: salesArea?.distributionChannel,
     Division: salesArea?.division,

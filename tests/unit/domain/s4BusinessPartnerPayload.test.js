@@ -133,12 +133,24 @@ describe('buildS4BusinessPartnerCreatePayload', () => {
     }]);
   });
 
-  it('el default de la config gana sobre el campo del área de ventas mapeado', () => {
+  // En el área de ventas el default de la config es el relleno: si la empresa trae el valor,
+  // gana el de la empresa; si no lo trae, el mapeo lo descarta por vacío y rellena la config.
+  it('el campo del área de ventas mapeado gana sobre el default de la config', () => {
     const payload = buildS4BusinessPartnerCreatePayload({
       mappedCompany: {
         BusinessPartnerFullName: 'ACME',
         'to_Customer.to_CustomerSalesArea.Currency': 'DOP',
       },
+      creationConfig: CREATION_CONFIG,
+      salesArea: SALES_AREA,
+    });
+
+    expect(payload.to_Customer.to_CustomerSalesArea[0].Currency).toBe('DOP');
+  });
+
+  it('el default de la config rellena el campo del área de ventas que la empresa no trae', () => {
+    const payload = buildS4BusinessPartnerCreatePayload({
+      mappedCompany: { BusinessPartnerFullName: 'ACME' },
       creationConfig: CREATION_CONFIG,
       salesArea: SALES_AREA,
     });
