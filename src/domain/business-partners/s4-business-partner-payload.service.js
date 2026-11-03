@@ -134,10 +134,16 @@ export function buildS4BusinessPartnerCreatePayload({
     customer.to_CustomerCompany = [{ ...defaults.CustomerCompany }];
   }
 
-  // El área de ventas del DOCUMENTO gana sobre la de la config: el cliente tiene que quedar
-  // registrado en el área donde se le va a crear la oferta, o SAP rechaza el documento con
-  // "cliente no existe en el área de ventas".
+  // Tres fuentes, de menor a mayor precedencia: lo mapeado desde la empresa (moneda, condición
+  // de pago, lista de precios...), el default de la config y el área de ventas del DOCUMENTO.
+  // Este último gana: el cliente tiene que quedar registrado en el área donde se le va a crear
+  // la oferta, o SAP rechaza el documento con "cliente no existe en el área de ventas".
+  const mappedSalesArea = Array.isArray(mappedCustomer?.to_CustomerSalesArea)
+    ? mappedCustomer.to_CustomerSalesArea[0]
+    : null;
+
   customer.to_CustomerSalesArea = [{
+    ...(mappedSalesArea && typeof mappedSalesArea === 'object' ? mappedSalesArea : {}),
     ...defaults.CustomerSalesArea,
     SalesOrganization: salesArea?.salesOrganization,
     DistributionChannel: salesArea?.distributionChannel,

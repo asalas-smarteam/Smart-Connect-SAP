@@ -106,6 +106,59 @@ describe('buildS4BusinessPartnerCreatePayload', () => {
     expect(payload.to_Customer.to_CustomerSalesArea[0].SalesOrganization).toBe('MQGT');
   });
 
+  // El área de ventas se arma desde tres fuentes. Antes solo contaban la config y el documento,
+  // y los campos mapeados desde la empresa (moneda, condición de pago, lista de precios) se
+  // descartaban en silencio aunque el tenant los tuviera mapeados.
+  it('conserva los campos del área de ventas que vienen mapeados desde la empresa', () => {
+    const payload = buildS4BusinessPartnerCreatePayload({
+      mappedCompany: {
+        BusinessPartnerFullName: 'ACME',
+        'to_Customer.to_CustomerSalesArea.Currency': 'DOP',
+        'to_Customer.to_CustomerSalesArea.CustomerPaymentTerms': 'ZV23',
+      },
+      creationConfig: {
+        ...CREATION_CONFIG,
+        defaults: { ...CREATION_CONFIG.defaults, CustomerSalesArea: { ShippingCondition: '01' } },
+      },
+      salesArea: SALES_AREA,
+    });
+
+    expect(payload.to_Customer.to_CustomerSalesArea).toEqual([{
+      Currency: 'DOP',
+      CustomerPaymentTerms: 'ZV23',
+      ShippingCondition: '01',
+      SalesOrganization: 'MQGT',
+      DistributionChannel: '01',
+      Division: '00',
+    }]);
+  });
+
+  it('el default de la config gana sobre el campo del área de ventas mapeado', () => {
+    const payload = buildS4BusinessPartnerCreatePayload({
+      mappedCompany: {
+        BusinessPartnerFullName: 'ACME',
+        'to_Customer.to_CustomerSalesArea.Currency': 'DOP',
+      },
+      creationConfig: CREATION_CONFIG,
+      salesArea: SALES_AREA,
+    });
+
+    expect(payload.to_Customer.to_CustomerSalesArea[0].Currency).toBe('GTQ');
+  });
+
+  it('el área de ventas del documento gana sobre la mapeada desde la empresa', () => {
+    const payload = buildS4BusinessPartnerCreatePayload({
+      mappedCompany: {
+        BusinessPartnerFullName: 'ACME',
+        'to_Customer.to_CustomerSalesArea.SalesOrganization': 'OTRA',
+      },
+      creationConfig: CREATION_CONFIG,
+      salesArea: SALES_AREA,
+    });
+
+    expect(payload.to_Customer.to_CustomerSalesArea[0].SalesOrganization).toBe('MQGT');
+  });
+
   it('omite to_BusinessPartnerRole cuando la config no declara roles', () => {
     const payload = buildS4BusinessPartnerCreatePayload({
       mappedCompany: { BusinessPartnerFullName: 'ACME' },
