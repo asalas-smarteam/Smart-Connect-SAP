@@ -104,4 +104,63 @@ describe('syncLog.service', () => {
       { reason: 'order_link_not_found', count: 4 },
     ]);
   });
+
+  // A run with thousands of failures built a $set larger than 17 MiB; Mongo
+  // rejected it and the use case's catch rewrote the log blank, hiding the real
+  // error.
+  describe('errors list cap', () => {
+    it('keeps the first entries and records how many were dropped', async () => {
+      const { doc, updateOne } = buildSyncLogDoc();
+      const errors = Array.from({ length: 20850 }, (_unused, index) => ({ index }));
+
+      await finishSyncLog(doc, { status: 'completed', failed: 20850, errors });
+
+      const saved = updateOne.mock.calls[0][1].$set.errors;
+      expect(saved).toHaveLength(51);
+      expect(saved[0]).toEqual({ index: 0 });
+      expect(saved[49]).toEqual({ index: 49 });
+      expect(saved[50]).toEqual({ truncated: true, kept: 50, total: 20850 });
+    });
+
+    it('leaves a short list untouched', async () => {
+      const { doc, updateOne } = buildSyncLogDoc();
+
+      await finishSyncLog(doc, { status: 'completed', errors: [{ a: 1 }, { b: 2 }] });
+
+      expect(updateOne.mock.calls[0][1].$set.errors).toEqual([{ a: 1 }, { b: 2 }]);
+    });
+
+    it('shrinks a single oversized entry instead of storing it whole', async () => {
+      const { doc, updateOne } = buildSyncLogDoc();
+      const huge = { response: 'x'.repeat(500000) };
+
+      await finishSyncLog(doc, { status: 'completed', errors: [huge] });
+
+      const [saved] = updateOne.mock.calls[0][1].$set.errors;
+      expect(saved.truncated).toBe(true);
+      expect(JSON.stringify(saved).length).toBeLessThan(10000);
+    });
+
+    it('still saves the status and counters when the full write is rejected', async () => {
+      const updateOne = jest.fn()
+        .mockRejectedValueOnce(new Error('offset out of range'))
+        .mockResolvedValueOnce({ acknowledged: true });
+      const doc = { _id: 'log-1', constructor: { updateOne } };
+
+      await finishSyncLog(doc, {
+        status: 'completed',
+        recordsProcessed: 7,
+        sent: 7,
+        errors: [{ a: 1 }],
+      });
+
+      expect(updateOne).toHaveBeenCalledTimes(2);
+      expect(updateOne.mock.calls[1][1].$set).toEqual(expect.objectContaining({
+        status: 'completed',
+        recordsProcessed: 7,
+        sent: 7,
+        errors: [],
+      }));
+    });
+  });
 });
