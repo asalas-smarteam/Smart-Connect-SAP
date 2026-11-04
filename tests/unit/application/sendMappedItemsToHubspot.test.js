@@ -435,6 +435,7 @@ describe('SendMappedItemsToHubspot product batch sync via batch read', () => {
     expect(buildPreprocessContext).toHaveBeenCalledWith({
       clientConfig,
       tenantModels,
+      getToken: expect.any(Function),
     });
     expect(preprocessCalls).toHaveLength(3);
     for (const call of preprocessCalls) {
@@ -649,5 +650,181 @@ describe('CRM batch gate', () => {
     });
 
     expect(handler.create).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SendMappedItemsToHubspot unknown product properties warning', () => {
+  const clientConfig = { _id: 'cfg-1', hubspotCredentialId: 'cred-1', hubspotBatchSize: 30 };
+  const tenantModels = {};
+  const KNOWN = new Set(['hs_sku', 'name']);
+
+  // Mimics the product handler contract: the context carries the known set and
+  // preprocess drops unknown keys, recording them on the shared context.
+  function buildHandler({ known = KNOWN } = {}) {
+    return {
+      find: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({ id: 'hs-seq' }),
+      update: jest.fn().mockResolvedValue(null),
+      buildPreprocessContext: jest.fn().mockImplementation(async () => ({
+        knownProperties: known,
+        omittedProperties: new Set(),
+      })),
+      preprocess: jest.fn().mockImplementation(async ({ item, preprocessContext }) => {
+        for (const key of Object.keys(item.properties)) {
+          if (preprocessContext.knownProperties && !preprocessContext.knownProperties.has(key)) {
+            delete item.properties[key];
+            preprocessContext.omittedProperties.add(key);
+          }
+        }
+      }),
+    };
+  }
+
+  function build({ handler, readResults = [], syncWarningRepository } = {}) {
+    const productBatchClient = {
+      batchReadProductsBySku: jest.fn().mockResolvedValue({ results: readResults }),
+      batchCreateProducts: jest.fn().mockResolvedValue({ results: [] }),
+      batchUpdateProducts: jest.fn().mockResolvedValue({ results: [] }),
+    };
+    const useCase = buildUseCase({
+      productBatchClient,
+      handlers: { product: handler },
+      syncWarningRepository,
+      sleeper: jest.fn().mockResolvedValue(undefined),
+    });
+
+    return { useCase, productBatchClient };
+  }
+
+  const run = (useCase, mappedItems, config = clientConfig) => useCase.execute({
+    mappedItems,
+    clientConfig: config,
+    objectType: 'product',
+    tenantModels,
+    credentials: { _id: 'cred-1' },
+    syncLogId: 'log-1',
+  });
+
+  const items = () => [
+    { properties: { hs_sku: 'SKU-A', name: 'A', gone_one: 1, gone_two: 2 } },
+    { properties: { hs_sku: 'SKU-B', name: 'B', gone_one: 1 } },
+    { properties: { hs_sku: 'SKU-C', name: 'C', gone_three: 3 } },
+  ];
+
+  it('passes getToken to buildPreprocessContext in the batch path', async () => {
+    const handler = buildHandler();
+    const { useCase } = build({ handler });
+
+    await run(useCase, items());
+
+    expect(handler.buildPreprocessContext).toHaveBeenCalledTimes(1);
+    expect(typeof handler.buildPreprocessContext.mock.calls[0][0].getToken).toBe('function');
+  });
+
+  it('sends batch create and update payloads without the unknown keys', async () => {
+    const handler = buildHandler();
+    const { useCase, productBatchClient } = build({
+      handler,
+      readResults: [{ id: '2', properties: { hs_sku: 'SKU-B', name: 'OLD' } }],
+    });
+
+    await run(useCase, items());
+
+    const created = productBatchClient.batchCreateProducts.mock.calls[0][1].inputs;
+    const updated = productBatchClient.batchUpdateProducts.mock.calls[0][1].inputs;
+
+    expect(created.map((item) => item.properties)).toEqual([
+      { hs_sku: 'SKU-A', name: 'A' },
+      { hs_sku: 'SKU-C', name: 'C' },
+    ]);
+    expect(updated).toEqual([{ id: '2', properties: { hs_sku: 'SKU-B', name: 'B' } }]);
+  });
+
+  it('records exactly one informational warning for many products', async () => {
+    const handler = buildHandler();
+    const syncWarningRepository = { record: jest.fn().mockResolvedValue(null) };
+    const { useCase } = build({ handler, syncWarningRepository });
+
+    const result = await run(useCase, items());
+
+    expect(syncWarningRepository.record).toHaveBeenCalledTimes(1);
+    const payload = syncWarningRepository.record.mock.calls[0][0];
+
+    expect(payload).toEqual({
+      tenantModels,
+      clientConfigId: 'cfg-1',
+      syncLogId: 'log-1',
+      objectType: 'product',
+      sapId: null,
+      code: 'product_properties_missing_in_hubspot',
+      message: expect.stringMatching(/do not exist in HubSpot.*skipped/i),
+      details: {
+        count: 3,
+        properties: expect.arrayContaining(['gone_one', 'gone_two', 'gone_three']),
+      },
+    });
+    expect(result.failed).toBe(0);
+    expect(result.errors).toEqual([]);
+  });
+
+  it('records no warning when nothing is omitted', async () => {
+    const handler = buildHandler({ known: null });
+    const syncWarningRepository = { record: jest.fn().mockResolvedValue(null) };
+    const { useCase } = build({ handler, syncWarningRepository });
+
+    await run(useCase, items());
+
+    expect(syncWarningRepository.record).not.toHaveBeenCalled();
+  });
+
+  it('records one warning when the batch read fails and the sequential fallback runs', async () => {
+    const handler = buildHandler();
+    const syncWarningRepository = { record: jest.fn().mockResolvedValue(null) };
+    const { useCase, productBatchClient } = build({ handler, syncWarningRepository });
+    productBatchClient.batchReadProductsBySku.mockRejectedValue(new Error('boom'));
+
+    const result = await run(useCase, items());
+
+    expect(handler.buildPreprocessContext).toHaveBeenCalledTimes(1);
+    expect(syncWarningRepository.record).toHaveBeenCalledTimes(1);
+    expect(result.failed).toBe(0);
+  });
+
+  it('records one warning when a batch write fails and chunks fall back sequentially', async () => {
+    const handler = buildHandler();
+    const syncWarningRepository = { record: jest.fn().mockResolvedValue(null) };
+    const { useCase, productBatchClient } = build({ handler, syncWarningRepository });
+    productBatchClient.batchCreateProducts.mockRejectedValue(new Error('batch failed'));
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    await run(useCase, items());
+
+    expect(handler.buildPreprocessContext).toHaveBeenCalledTimes(1);
+    expect(syncWarningRepository.record).toHaveBeenCalledTimes(1);
+    console.error.mockRestore();
+  });
+
+  it('passes getToken and records one warning in the sequential path', async () => {
+    const handler = buildHandler();
+    const syncWarningRepository = { record: jest.fn().mockResolvedValue(null) };
+    const { useCase } = build({ handler, syncWarningRepository });
+
+    const result = await run(useCase, items(), { _id: 'cfg-1', hubspotCredentialId: 'cred-1' });
+
+    expect(handler.buildPreprocessContext).toHaveBeenCalledTimes(1);
+    expect(typeof handler.buildPreprocessContext.mock.calls[0][0].getToken).toBe('function');
+    expect(syncWarningRepository.record).toHaveBeenCalledTimes(1);
+    expect(result.failed).toBe(0);
+  });
+
+  it('does not break the run when recording the warning fails', async () => {
+    const handler = buildHandler();
+    const syncWarningRepository = { record: jest.fn().mockRejectedValue(new Error('db down')) };
+    const { useCase } = build({ handler, syncWarningRepository });
+
+    const result = await run(useCase, items());
+
+    expect(result.ok).toBe(true);
+    expect(result.failed).toBe(0);
   });
 });

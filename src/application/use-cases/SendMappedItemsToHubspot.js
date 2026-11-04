@@ -127,6 +127,7 @@ export class SendMappedItemsToHubspot {
         tenantModels,
         handler,
         getToken,
+        syncLogId,
       });
     }
 
@@ -435,8 +436,10 @@ export class SendMappedItemsToHubspot {
         ? await context.handler.buildPreprocessContext({
           clientConfig: context.clientConfig,
           tenantModels: context.tenantModels,
+          getToken: context.getToken,
         })
         : null);
+    const ownsPreprocessContext = !context.preprocessContext;
 
     for (const item of items) {
       const result = await this.processSingleItem({ ...context, preprocessContext, item });
@@ -457,7 +460,39 @@ export class SendMappedItemsToHubspot {
       }
     }
 
+    if (ownsPreprocessContext) {
+      await this.recordOmittedProductProperties({
+        preprocessContext,
+        clientConfig: context.clientConfig,
+        tenantModels: context.tenantModels,
+        syncLogId: context.syncLogId ?? null,
+      });
+    }
+
     return { sent, failed, created, updated, errors };
+  }
+
+  // One informational warning per run: the tenant configuration asks for product
+  // properties the portal no longer has, and they were left out of every payload.
+  // Only the code that created the preprocess context calls this, so fallbacks that
+  // share the context never repeat it.
+  async recordOmittedProductProperties({ preprocessContext, clientConfig, tenantModels, syncLogId }) {
+    const omitted = preprocessContext?.omittedProperties;
+
+    if (!omitted || omitted.size === 0) {
+      return;
+    }
+
+    await this.recordWarning({
+      tenantModels,
+      clientConfigId: clientConfig?._id ?? null,
+      syncLogId,
+      objectType: 'product',
+      sapId: null,
+      code: 'product_properties_missing_in_hubspot',
+      message: 'Some product properties do not exist in HubSpot and were skipped',
+      details: { count: omitted.size, properties: [...omitted] },
+    });
   }
 
   async processInvoiceItems({ mappedItems, clientConfig, tenantModels, handler, getToken }) {
@@ -581,14 +616,21 @@ export class SendMappedItemsToHubspot {
     }
   }
 
-  async processProductBatches({ mappedItems, clientConfig, tenantModels, handler, getToken }) {
+  async processProductBatches({
+    mappedItems,
+    clientConfig,
+    tenantModels,
+    handler,
+    getToken,
+    syncLogId = null,
+  }) {
     const stats = { sent: 0, failed: 0, created: 0, updated: 0, skipped: 0, errors: [] };
     const preprocessed = [];
 
     // Tenant configuration is constant during the run: resolve it once instead of
     // letting every preprocess() hit the database per item.
     const preprocessContext = handler.buildPreprocessContext
-      ? await handler.buildPreprocessContext({ clientConfig, tenantModels })
+      ? await handler.buildPreprocessContext({ clientConfig, tenantModels, getToken })
       : null;
 
     for (const item of mappedItems) {
@@ -625,6 +667,12 @@ export class SendMappedItemsToHubspot {
         preprocessContext,
       });
       this.mergeProductStats(stats, fallbackResult);
+      await this.recordOmittedProductProperties({
+        preprocessContext,
+        clientConfig,
+        tenantModels,
+        syncLogId,
+      });
       return { ok: true, ...stats };
     }
 
@@ -712,6 +760,13 @@ export class SendMappedItemsToHubspot {
     for (const result of [...createResults, ...updateResults]) {
       this.mergeProductStats(stats, result);
     }
+
+    await this.recordOmittedProductProperties({
+      preprocessContext,
+      clientConfig,
+      tenantModels,
+      syncLogId,
+    });
 
     return { ok: true, ...stats };
   }
