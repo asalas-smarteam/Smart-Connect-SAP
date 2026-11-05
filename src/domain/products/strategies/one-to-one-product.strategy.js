@@ -110,6 +110,7 @@ export class OneToOneProductStrategy {
     credentials,
     tenantId,
     strategyConfig = {},
+    syncLogId = null,
   }) {
     const records = Array.isArray(mappedRecords) ? mappedRecords : [];
     const totalProducts = records.length;
@@ -190,6 +191,7 @@ export class OneToOneProductStrategy {
         objectType,
         tenantContext,
         credentials,
+        syncLogId,
       });
 
       this.logger.info?.({
