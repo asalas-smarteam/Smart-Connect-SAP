@@ -375,6 +375,37 @@ function sanitizeSkippedReasons(skippedReasons) {
     }));
 }
 
+// The whole SyncLog update is one $set, and Mongo rejects a document over ~17 MiB.
+// A run with thousands of failed records used to push every error into it, the
+// write threw, and the caller's catch rewrote the log blank (0 processed, no
+// errors), hiding the real failure. Keep a bounded sample plus the total instead.
+const MAX_LOGGED_ERRORS = 50;
+const MAX_LOGGED_ERROR_CHARS = 5000;
+
+function capErrorEntry(entry) {
+  const text = JSON.stringify(entry);
+
+  if (!text || text.length <= MAX_LOGGED_ERROR_CHARS) {
+    return entry;
+  }
+
+  return { truncated: true, preview: text.slice(0, MAX_LOGGED_ERROR_CHARS) };
+}
+
+function capErrors(errors) {
+  if (!Array.isArray(errors)) {
+    return [];
+  }
+
+  const kept = errors.slice(0, MAX_LOGGED_ERRORS).map(capErrorEntry);
+
+  if (errors.length > MAX_LOGGED_ERRORS) {
+    kept.push({ truncated: true, kept: MAX_LOGGED_ERRORS, total: errors.length });
+  }
+
+  return kept;
+}
+
 export async function finishSyncLog(syncLog, {
   status,
   recordsProcessed = 0,
@@ -409,13 +440,20 @@ export async function finishSyncLog(syncLog, {
       : 0,
     skippedReasons: sanitizeSkippedReasons(skippedReasons),
     errorMessage: errorMessage ?? null,
-    errors: Array.isArray(errors) ? serializeLogValue(errors) ?? [] : [],
+    errors: capErrors(serializeLogValue(Array.isArray(errors) ? errors : [])),
     finishedAt,
   };
 
   nextValues.status = status;
 
-  await syncLog.constructor.updateOne({ _id: syncLog._id }, { $set: nextValues });
+  try {
+    await syncLog.constructor.updateOne({ _id: syncLog._id }, { $set: nextValues });
+  } catch (_error) {
+    // Last resort: never lose the status and counters because the detail list
+    // could not be stored.
+    nextValues.errors = [];
+    await syncLog.constructor.updateOne({ _id: syncLog._id }, { $set: nextValues });
+  }
 
   return {
     _id: syncLog._id,
