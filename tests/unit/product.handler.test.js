@@ -14,6 +14,15 @@ jest.unstable_mockModule('../../src/infrastructure/hubspot/warehouseStock.js', (
   resolveHubspotAvailableFormula: mockResolveHubspotAvailableFormula,
 }));
 
+const mockFetchProductPropertyNames = jest.fn();
+
+jest.unstable_mockModule('../../src/infrastructure/hubspot/hubspotClient.js', () => ({
+  fetchProductPropertyNames: mockFetchProductPropertyNames,
+  findProductBySKU: jest.fn(),
+  createProduct: jest.fn(),
+  updateProduct: jest.fn(),
+}));
+
 const {
   preprocess,
   buildPreprocessContext,
@@ -463,5 +472,161 @@ describe('product.handler + lotes de caducidad', () => {
 
     expect(item.properties.lotes_detalle).toBe('');
     expect(item.properties.cantidad_vencida).toBe('');
+  });
+});
+
+describe('product.handler unknown HubSpot properties', () => {
+  const tenantModels = {};
+  const baseContext = () => ({
+    warehouseFields: [{ warehouseCode: 'A01', propertyName: 'a01_stock' }],
+    priceFields: ['hs_price_usd'],
+    availableFormula: { add: ['InStock'], subtract: [] },
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockResolveHubspotWarehouseFields.mockResolvedValue(baseContext().warehouseFields);
+    mockResolveHubspotAvailableFormula.mockResolvedValue(baseContext().availableFormula);
+    mockBuildHubspotWarehouseStockProperties.mockReturnValue({});
+    tenantModels.Configuration = {
+      findOne: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue({ key: 'fieldsPricesHS', value: ['hs_price_usd'] }),
+      }),
+    };
+  });
+
+  describe('buildPreprocessContext', () => {
+    it('resolves the known property names once when getToken is a function', async () => {
+      mockFetchProductPropertyNames.mockResolvedValue(['hs_sku', 'name']);
+      const getToken = jest.fn().mockResolvedValue('token-1');
+
+      const context = await buildPreprocessContext({ tenantModels, getToken });
+
+      expect(mockFetchProductPropertyNames).toHaveBeenCalledTimes(1);
+      expect(mockFetchProductPropertyNames).toHaveBeenCalledWith('token-1');
+      expect(context.knownProperties).toEqual(new Set(['hs_sku', 'name']));
+      expect(context.omittedProperties).toEqual(new Set());
+    });
+
+    it('does not read the property list without getToken', async () => {
+      const context = await buildPreprocessContext({ tenantModels });
+
+      expect(mockFetchProductPropertyNames).not.toHaveBeenCalled();
+      expect(context.knownProperties ?? null).toBeNull();
+    });
+
+    it('fails open when the property list cannot be read', async () => {
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      mockFetchProductPropertyNames.mockRejectedValue(new Error('hubspot down'));
+
+      const context = await buildPreprocessContext({
+        tenantModels,
+        getToken: jest.fn().mockResolvedValue('token-1'),
+      });
+
+      expect(context.knownProperties).toBeNull();
+      expect(errorSpy).toHaveBeenCalled();
+      errorSpy.mockRestore();
+    });
+
+    it('fails open when the token cannot be obtained', async () => {
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+      const context = await buildPreprocessContext({
+        tenantModels,
+        getToken: jest.fn().mockRejectedValue(new Error('no token')),
+      });
+
+      expect(context.knownProperties).toBeNull();
+      expect(mockFetchProductPropertyNames).not.toHaveBeenCalled();
+      errorSpy.mockRestore();
+    });
+  });
+
+  describe('preprocess', () => {
+    function contextWith(known) {
+      return {
+        ...baseContext(),
+        knownProperties: known,
+        omittedProperties: new Set(),
+      };
+    }
+
+    it('drops unknown keys, keeps known ones and records the omitted names', async () => {
+      mockBuildHubspotWarehouseStockProperties.mockReturnValue({
+        a01_stock: 5,
+        gone_stock: 7,
+      });
+      const preprocessContext = contextWith(new Set([
+        'hs_sku', 'name', 'description', 'a01_stock', 'hs_price_usd',
+      ]));
+      const item = {
+        properties: { hs_sku: 'S1', name: 'N', description: 'D' },
+        rawSapData: { ItemWarehouseInfoCollection: [] },
+      };
+
+      await preprocess({ item, tenantModels, preprocessContext });
+
+      expect(item.properties).toEqual({
+        hs_sku: 'S1',
+        name: 'N',
+        description: 'D',
+        a01_stock: 5,
+        hs_price_usd: 0,
+      });
+      expect([...preprocessContext.omittedProperties]).toEqual(['gone_stock']);
+    });
+
+    it('drops unknown keys on the resolved-price early return', async () => {
+      const preprocessContext = contextWith(new Set(['hs_sku', 'hs_price_usd']));
+      const item = {
+        properties: { hs_sku: 'S1', legacy_a: 1 },
+        rawSapData: { _resolvedProductPrice: 12.5 },
+      };
+
+      await preprocess({ item, tenantModels, preprocessContext });
+
+      expect(item.properties).toEqual({ hs_sku: 'S1', hs_price_usd: 12.5 });
+      expect([...preprocessContext.omittedProperties]).toEqual(['legacy_a']);
+    });
+
+    it('drops unknown keys on the selected-price early return', async () => {
+      const preprocessContext = contextWith(new Set(['hs_sku']));
+      const item = {
+        properties: { hs_sku: 'S1', legacy_b: 1 },
+        rawSapData: { selectedPrice: { Price: 3 } },
+      };
+
+      await preprocess({ item, tenantModels, preprocessContext });
+
+      expect(item.properties).toEqual({ hs_sku: 'S1' });
+      expect([...preprocessContext.omittedProperties]).toEqual(['legacy_b']);
+    });
+
+    it('does not drop anything when knownProperties is null (fail open)', async () => {
+      const preprocessContext = contextWith(null);
+      const item = {
+        properties: { hs_sku: 'S1', legacy_c: 1 },
+        rawSapData: { selectedPrice: { Price: 3 } },
+      };
+
+      await preprocess({ item, tenantModels, preprocessContext });
+
+      expect(item.properties).toEqual({ hs_sku: 'S1', legacy_c: 1 });
+      expect(preprocessContext.omittedProperties.size).toBe(0);
+    });
+
+    it('never drops hs_object_id', async () => {
+      const preprocessContext = contextWith(new Set(['hs_sku']));
+      const item = {
+        properties: { hs_sku: 'S1', hs_object_id: '99' },
+        rawSapData: { selectedPrice: { Price: 3 } },
+      };
+
+      await preprocess({ item, tenantModels, preprocessContext });
+
+      expect(item.properties.hs_object_id).toBe('99');
+      expect(preprocessContext.omittedProperties.size).toBe(0);
+    });
   });
 });

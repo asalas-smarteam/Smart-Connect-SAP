@@ -466,6 +466,18 @@ export async function fetchDealStages(token, pipelineId) {
   }));
 }
 
+// Names of the product properties that currently exist in the portal. The
+// endpoint omits archived properties by default, which is what callers need:
+// HubSpot rejects a whole write when it references a property that is not there.
+export async function fetchProductPropertyNames(token) {
+  const response = await hubspotGet(token, '/crm/v3/properties/products');
+  const results = Array.isArray(response?.results) ? response.results : [];
+
+  return results
+    .map((property) => property?.name)
+    .filter((name) => typeof name === 'string' && name !== '');
+}
+
 export async function fetchOwners(token) {
   const owners = await fetchPaginatedResults(token, '/crm/v3/owners');
 

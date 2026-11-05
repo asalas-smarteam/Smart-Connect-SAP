@@ -44,17 +44,64 @@ export async function resolveHubspotPriceFields(tenantModels) {
 // Resolves the tenant configuration preprocess() depends on. Callers processing many
 // items should call this once per run and pass the result as `preprocessContext` to
 // every preprocess() call — otherwise each item pays two Configuration reads.
-export async function buildPreprocessContext({ tenantModels }) {
+//
+// With `getToken` it also resolves, once, the names of the product properties that exist
+// in HubSpot. HubSpot rejects a whole write when it references a missing property, so
+// preprocess() drops the unknown ones and records them in `omittedProperties`. When the
+// list cannot be read, `knownProperties` stays null and nothing is dropped (fail open).
+export async function buildPreprocessContext({ tenantModels, getToken }) {
   const [warehouseFields, priceFields, availableFormula] = await Promise.all([
     resolveHubspotWarehouseFields(tenantModels),
     resolveHubspotPriceFields(tenantModels),
     resolveHubspotAvailableFormula(tenantModels),
   ]);
 
-  return { warehouseFields, priceFields, availableFormula };
+  const context = { warehouseFields, priceFields, availableFormula };
+
+  if (typeof getToken === 'function') {
+    context.knownProperties = await resolveKnownProperties(getToken);
+    context.omittedProperties = new Set();
+  }
+
+  return context;
+}
+
+async function resolveKnownProperties(getToken) {
+  try {
+    const token = await getToken();
+    const names = await hubspotClient.fetchProductPropertyNames(token);
+
+    return new Set(names);
+  } catch (error) {
+    console.error('product known properties read error:', error);
+    return null;
+  }
+}
+
+// Properties HubSpot manages itself and that are never part of the portal's list.
+const ALWAYS_KEPT_PROPERTIES = new Set(['hs_object_id']);
+
+function dropUnknownProperties(item, preprocessContext) {
+  const known = preprocessContext?.knownProperties;
+
+  if (!known || !item?.properties) {
+    return;
+  }
+
+  for (const key of Object.keys(item.properties)) {
+    if (!known.has(key) && !ALWAYS_KEPT_PROPERTIES.has(key)) {
+      delete item.properties[key];
+      preprocessContext.omittedProperties?.add(key);
+    }
+  }
 }
 
 export async function preprocess({ item, tenantModels, preprocessContext }) {
+  await applyProductPreprocessing({ item, tenantModels, preprocessContext });
+  dropUnknownProperties(item, preprocessContext);
+}
+
+async function applyProductPreprocessing({ item, tenantModels, preprocessContext }) {
   const rawSapData = item?.rawSapData ?? {};
   // WarehouseStockEnrichmentAdapter (SyncSapConfigToHubspot) already resolves
   // this via whichever WarehouseStockStrategy the tenant is configured for

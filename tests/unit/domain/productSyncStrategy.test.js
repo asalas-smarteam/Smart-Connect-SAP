@@ -126,6 +126,61 @@ describe('OneToManyProductStrategy', () => {
   });
 });
 
+describe('product strategies forward the sync log id', () => {
+  const baseArgs = {
+    config: { hubspotCredentialId: 'cred-1' },
+    objectType: 'product',
+    tenantContext: {},
+    credentials: { _id: 'cred-1' },
+    tenantId: 'tenant-1',
+  };
+  const record = {
+    properties: { hs_sku: 'SKU-1', name: 'One' },
+    rawSapData: {
+      ItemCode: 'SKU-1',
+      ItemName: 'One',
+      ItemPrices: [{ Price: 10, Currency: 'USD', PriceList: 1 }],
+    },
+  };
+
+  it('passes syncLogId to the target from the one-to-one strategy', async () => {
+    const hubspotSyncTarget = { send: jest.fn().mockResolvedValue({ sent: 1, failed: 0 }) };
+    const strategy = new OneToOneProductStrategy({
+      hubspotSyncTarget,
+      logger: { info: jest.fn(), error: jest.fn() },
+    });
+
+    await strategy.execute({
+      ...baseArgs,
+      mappedRecords: [record],
+      syncLogId: 'log-1',
+      strategyConfig: { strategy: PRODUCT_SYNC_STRATEGIES.ONE_TO_ONE_PRODUCT },
+    });
+
+    expect(hubspotSyncTarget.send).toHaveBeenCalledWith(expect.objectContaining({ syncLogId: 'log-1' }));
+  });
+
+  it('passes syncLogId to the target from the one-to-many strategy', async () => {
+    const hubspotSyncTarget = { send: jest.fn().mockResolvedValue({ sent: 1, failed: 0 }) };
+    const strategy = new OneToManyProductStrategy({
+      hubspotSyncTarget,
+      logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+    });
+
+    await strategy.execute({
+      ...baseArgs,
+      mappedRecords: [record],
+      syncLogId: 'log-1',
+      strategyConfig: {
+        strategy: PRODUCT_SYNC_STRATEGIES.ONE_TO_MANY_PRODUCT,
+        priceLists: [{ name: 'VIP', value: '1' }],
+      },
+    });
+
+    expect(hubspotSyncTarget.send).toHaveBeenCalledWith(expect.objectContaining({ syncLogId: 'log-1' }));
+  });
+});
+
 describe('OneToOneProductStrategy', () => {
   function buildStrategy() {
     const hubspotSyncTarget = {

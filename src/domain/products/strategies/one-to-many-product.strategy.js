@@ -76,6 +76,7 @@ export class OneToManyProductStrategy {
     tenantId,
     tenantKey,
     strategyConfig = {},
+    syncLogId = null,
   }) {
     const products = Array.isArray(mappedRecords) ? mappedRecords : [];
     const configuredPriceListNames = new Map(
@@ -135,6 +136,7 @@ export class OneToManyProductStrategy {
         objectType,
         tenantContext,
         credentials,
+        syncLogId,
       });
 
       return {

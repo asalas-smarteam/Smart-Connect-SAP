@@ -499,6 +499,7 @@ export class SyncSapConfigToHubspot {
         tenantId: config?.tenantId ?? config?.tenantKey ?? null,
         tenantKey: config?.tenantKey ?? null,
         strategyConfig,
+        syncLogId,
       });
     }
 
