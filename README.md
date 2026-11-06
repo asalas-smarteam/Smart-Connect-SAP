@@ -544,6 +544,22 @@ Plan: `docs/superpowers/plans/2026-11-02-panel-metricas-horario-habil.md`. Contr
 
 - Los tiempos de `/tickets/metrics` y `/staff/tickets/metrics` (primera respuesta, resolución y sus medianas) cuentan solo de lunes a viernes, de 8:00 a 17:00, hora de Costa Rica, sin feriados. Los rangos de resolución usan días hábiles de 9 h. La forma de la respuesta no cambia.
 
+### Registro de trabajo desde Claude (plan 10)
+Plan: `docs/superpowers/plans/2026-11-04-panel-registro-trabajo.md`. Contrato: `docs/contrato-backend/12-registro-trabajo.md`.
+
+| Método y ruta | Acceso |
+| --- | --- |
+| `GET /panel/api/account/api-tokens` | `staff.tickets`, solo Smarteam, solo cookie |
+| `POST /panel/api/account/api-tokens` | `staff.tickets`, solo Smarteam, solo cookie (pide `currentPassword`) |
+| `DELETE /panel/api/account/api-tokens/:id` | `staff.tickets`, solo Smarteam, solo cookie |
+| `GET /panel/api/staff/tickets/by-code/:code` | `staff.tickets`, solo Smarteam; `Bearer spn_…` o cookie |
+| `POST /panel/api/staff/tickets/by-code/:code/work-log` | `staff.tickets`, solo Smarteam; `Bearer spn_…` o cookie |
+
+- Token personal `spn_…`: el token en claro sale una sola vez al crearlo; en `PanelApiTokens` solo quedan su SHA-256 y el prefijo. Dura 90 días y cada usuario tiene como máximo 5 activos. Desactivar la cuenta o restablecer su contraseña los revoca.
+- Solo las dos rutas `by-code` aceptan `Authorization: Bearer`; con ese header no se exige cookie ni `X-Panel-Request`. En el resto del panel el header se ignora.
+- Límites (Redis, con `Retry-After`): 30 pedidos por minuto por token; 5 contraseñas incorrectas cada 15 min al crear un token; 20 tokens inválidos cada 15 min por IP (solo con proxies de confianza).
+- La publicación deja un mensaje público y una entrada de horas (`workLog`, solo visible para Smarteam). Con `Idempotency-Key` la misma clave se recuerda 24 h en `PanelIdempotencyKeys` (sin el resumen ni la nota) y no duplica la entrada.
+
 El contrato con el front está en `docs/contrato-backend/`.
 
 ## 19. Guía de contribución

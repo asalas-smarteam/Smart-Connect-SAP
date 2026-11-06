@@ -107,7 +107,41 @@ function toTicket(document) {
     lastPublicAuthorType: document.lastPublicAuthorType ?? null,
     clientLastSeenAt: document.clientLastSeenAt ?? null,
     staffLastSeenAt: document.staffLastSeenAt ?? null,
+    workLog: (document.workLog ?? []).map(toWorkLogEntry),
   };
+}
+
+function toWorkLogEntry(entry) {
+  return {
+    id: idOf(entry._id),
+    authorId: entry.authorId,
+    authorName: entry.authorName ?? null,
+    hours: entry.hours,
+    internalNote: entry.internalNote ?? null,
+    crmProjectId: entry.crmProjectId ?? null,
+    messageId: idOf(entry.messageId),
+    resolved: Boolean(entry.resolved),
+    statusAfter: entry.statusAfter,
+    via: entry.via,
+    tokenId: entry.tokenId ?? null,
+    idempotencyKey: entry.idempotencyKey ?? null,
+    idempotencyFingerprint: entry.idempotencyFingerprint ?? null,
+    createdAt: entry.createdAt,
+  };
+}
+
+// Entrada del registro de trabajo → subdocumento: id pasa a _id y messageId a ObjectId.
+function toWorkLogDocument(entry) {
+  const { id, messageId, ...rest } = entry;
+  return {
+    _id: isObjectId(id) ? new mongoose.Types.ObjectId(id) : id,
+    messageId: isObjectId(messageId) ? new mongoose.Types.ObjectId(messageId) : messageId,
+    ...rest,
+  };
+}
+
+function isPositiveInteger(value) {
+  return Number.isSafeInteger(value) && value > 0;
 }
 
 function toMessageDocument(message) {
@@ -179,6 +213,15 @@ export class MongooseTicketRepository {
     return toTicket(await Ticket.findById(id).lean());
   }
 
+  // Por el correlativo del tenant (índice único en number). Para buscar por código (M4).
+  async findByNumber(tenantKey, number) {
+    if (!isPositiveInteger(number)) {
+      return null;
+    }
+    const { Ticket } = await this.getModels(tenantKey);
+    return toTicket(await Ticket.findOne({ number }).lean());
+  }
+
   async list(tenantKey, { status, category, skip = 0, limit = 25 } = {}) {
     const { Ticket } = await this.getModels(tenantKey);
     const filter = listFilter({ status, category });
@@ -200,9 +243,11 @@ export class MongooseTicketRepository {
     return Object.fromEntries(rows.map((row) => [row._id, row.count]));
   }
 
-  // change: { expectedStatus, set, inc, pushMessage, pushHistory, setIfNull }.
+  // change: { expectedStatus, set, inc, pushMessage, pushHistory, pushWorkLog, idempotencyGuard,
+  // setIfNull }.
   // El estado esperado funciona como compare-and-set: si otro request cambió el estado en el
-  // medio, no se escribe nada y se devuelve null.
+  // medio, no se escribe nada y se devuelve null. Con idempotencyGuard tampoco se escribe si
+  // alguna entrada de workLog ya tiene ese idempotencyKey (red de seguridad de M5).
   async update(tenantKey, id, change) {
     if (!isObjectId(id)) {
       return null;
@@ -222,12 +267,20 @@ export class MongooseTicketRepository {
     if (change.pushHistory?.length) {
       push.statusHistory = { $each: change.pushHistory };
     }
+    if (change.pushWorkLog) {
+      push.workLog = toWorkLogDocument(change.pushWorkLog);
+    }
     if (Object.keys(push).length > 0) {
       operations.$push = push;
     }
 
+    const filter = { _id: id, status: change.expectedStatus };
+    if (change.idempotencyGuard !== undefined && change.idempotencyGuard !== null) {
+      filter['workLog.idempotencyKey'] = { $ne: String(change.idempotencyGuard) };
+    }
+
     const updated = await Ticket.findOneAndUpdate(
-      { _id: id, status: change.expectedStatus },
+      filter,
       operations,
       { new: true, lean: true, runValidators: true }
     );

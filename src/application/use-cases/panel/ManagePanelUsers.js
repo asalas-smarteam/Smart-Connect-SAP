@@ -9,6 +9,14 @@ import { parsePagination } from './pagination.js';
 import { toPublicUser } from './panelUserView.js';
 import { AUDIT_ACTIONS, AUDIT_SOURCES } from '#domain/panel/auditActions.js';
 import { NO_AUDIT_LOG, recordAudit, actorOf, buildAuditEntry, targetOf } from './panelAudit.js';
+import { API_TOKEN_REVOKE_REASONS } from '#domain/panel/apiTokens.js';
+
+// Sin tokens personales (casos de uso construidos sin ellos, por ejemplo en tests).
+export const NO_API_TOKENS = Object.freeze({
+  async revokeAllForUser() {
+    return [];
+  },
+});
 
 const NAME_MAX_LENGTH = 100;
 const EDITABLE_FIELDS = ['name', 'role', 'active'];
@@ -66,6 +74,10 @@ export class ManagePanelUsers {
     passwordHasher,
     temporaryPasswordGenerator,
     auditLog = NO_AUDIT_LOG,
+    // ManageApiTokens (o algo con revokeAllForUser): revoca los tokens personales al desactivar
+    // o restablecer la contraseña (contrato 12, M7).
+    apiTokens = NO_API_TOKENS,
+    logger = null,
     now = () => new Date(),
   }) {
     this.userRepository = userRepository;
@@ -73,6 +85,8 @@ export class ManagePanelUsers {
     this.passwordHasher = passwordHasher;
     this.temporaryPasswordGenerator = temporaryPasswordGenerator;
     this.auditLog = auditLog;
+    this.apiTokens = apiTokens;
+    this.logger = logger;
     this.now = now;
   }
 
@@ -246,6 +260,18 @@ export class ManagePanelUsers {
 
     await this.#auditUpdate({ actor, ip, before: user, after: updated });
 
+    // Después de guardar: revocarlos evita que una reactivación los reviva. Si falla, el error
+    // sube (500) y el admin reintenta; mientras tanto el estado del usuario ya corta el token.
+    if (deactivating) {
+      await this.apiTokens.revokeAllForUser({
+        userId: updated.id,
+        reason: API_TOKEN_REVOKE_REASONS.USER_DEACTIVATED,
+        actor,
+        target: updated,
+        ip,
+      });
+    }
+
     const companies = await this.#companyNames([updated.tenantKey]);
     return { ok: true, data: { user: toPublicUser(updated, companies.get(updated.tenantKey)) } };
   }
@@ -272,6 +298,21 @@ export class ManagePanelUsers {
     }
 
     await this.#audit(AUDIT_ACTIONS.USER_PASSWORD_RESET, { actor, target: updated, ip });
+
+    // Restablecer es el camino de recuperación de una cuenta: se revocan los tokens (M7). Si
+    // la revocación falla, la contraseña ya cambió: se registra el error y se devuelve igual la
+    // temporal (si no, se perdería). El admin puede restablecer de nuevo para reintentar.
+    try {
+      await this.apiTokens.revokeAllForUser({
+        userId: updated.id,
+        reason: API_TOKEN_REVOKE_REASONS.PASSWORD_RESET,
+        actor,
+        target: updated,
+        ip,
+      });
+    } catch {
+      this.logger?.error?.({ msg: 'Panel API tokens: revoke on password reset failed', userId: updated.id });
+    }
 
     return { ok: true, data: { temporaryPassword } };
   }

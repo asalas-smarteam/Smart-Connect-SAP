@@ -65,6 +65,16 @@ export class InMemoryTicketRepository {
     return found ? clone(found) : null;
   }
 
+  // Como el adaptador: solo enteros positivos; si no, null sin abrir el tenant.
+  async findByNumber(tenantKey, number) {
+    if (!Number.isSafeInteger(number) || number <= 0) {
+      return null;
+    }
+    await this.touch(tenantKey);
+    const found = this.tickets(tenantKey).find((ticket) => ticket.number === number);
+    return found ? clone(found) : null;
+  }
+
   async list(tenantKey, { status, category, skip = 0, limit = 25 } = {}) {
     await this.touch(tenantKey);
     const all = this.tickets(tenantKey)
@@ -93,7 +103,10 @@ export class InMemoryTicketRepository {
       throw new Error('update failed');
     }
     const ticket = this.tickets(tenantKey).find((candidate) => candidate.id === id);
-    if (!ticket || ticket.status !== change.expectedStatus || this.conflictNextUpdate) {
+    // idempotencyGuard: como el filtro 'workLog.idempotencyKey': { $ne: guard } del adaptador.
+    const guarded = change.idempotencyGuard !== undefined && change.idempotencyGuard !== null
+      && (ticket?.workLog ?? []).some((entry) => entry.idempotencyKey === change.idempotencyGuard);
+    if (!ticket || ticket.status !== change.expectedStatus || this.conflictNextUpdate || guarded) {
       this.conflictNextUpdate = false;
       return null;
     }
@@ -106,6 +119,10 @@ export class InMemoryTicketRepository {
     }
     for (const entry of change.pushHistory ?? []) {
       ticket.statusHistory.push(clone(entry));
+    }
+    if (change.pushWorkLog) {
+      ticket.workLog = ticket.workLog ?? [];
+      ticket.workLog.push(clone(change.pushWorkLog));
     }
     for (const [field, value] of Object.entries(change.setIfNull ?? {})) {
       if (ticket[field] === null || ticket[field] === undefined) {

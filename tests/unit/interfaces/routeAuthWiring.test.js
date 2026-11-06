@@ -118,6 +118,7 @@ const { default: HmacSessionToken } = await import('../../../src/infrastructure/
 const panelFakes = await import('../application/panel/panelFakes.js');
 const ticketFakes = await import('../application/panel/ticketFakes.js');
 const operationFakes = await import('../application/panel/operationFakes.js');
+const apiTokenFakes = await import('../application/panel/apiTokenFakes.js');
 
 const panelStaff = panelFakes.staffUser();
 const panelClient = panelFakes.clientUser();
@@ -140,6 +141,11 @@ const panelUseCases = buildPanelUseCases({
   fieldMappingReader: new operationFakes.FakeFieldMappingReader(operationFakes.sampleFieldMappings()),
   scheduledTaskReader: new operationFakes.FakeScheduledTaskReader(operationFakes.sampleScheduledTasks()),
   scheduledRunReader: new operationFakes.FakeScheduledRunReader(operationFakes.sampleNextRuns()),
+  apiTokenRepository: new apiTokenFakes.InMemoryApiTokenRepository(),
+  apiTokenCodec: new apiTokenFakes.FakeApiTokenCodec(),
+  idempotencyStore: new apiTokenFakes.InMemoryIdempotencyStore(),
+  passwordAttempts: new panelFakes.FakeLoginAttempts(),
+  apiTokenAttempts: new panelFakes.FakeLoginAttempts(30),
   logger: { warn() {}, error() {}, info() {} },
 });
 const STAFF_PANEL_COOKIE = `panel_session=${panelTokens.sign({ sub: panelStaff.id, tv: 0, pwdChange: false })}`;
@@ -362,6 +368,12 @@ const PANEL_ROUTES = [
   // Plan 7: tareas programadas (solo lectura).
   ['GET', '/panel/api/scheduled-tasks', 'client'],
   ['GET', '/panel/api/staff/tenants/sap_integration_acme/scheduled-tasks', 'staff account + tasks.read'],
+  // Contrato 12: tokens personales (solo cookie) y registro de trabajo (token o cookie).
+  ['GET', '/panel/api/account/api-tokens', 'staff account + staff.tickets'],
+  ['POST', '/panel/api/account/api-tokens', 'staff account + staff.tickets'],
+  ['DELETE', '/panel/api/account/api-tokens/ffffffffffffffffffffffff', 'staff account + staff.tickets'],
+  ['GET', '/panel/api/staff/tickets/by-code/ACME-0001', 'staff account + staff.tickets'],
+  ['POST', '/panel/api/staff/tickets/by-code/ACME-0001/work-log', 'staff account + staff.tickets'],
 ];
 
 function panelInject(method, url, cookie) {

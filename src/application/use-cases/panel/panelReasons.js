@@ -16,10 +16,22 @@ export const panelReasons = Object.freeze({
   PAGE_WINDOW_EXCEEDED: 'PAGE_WINDOW_EXCEEDED',
   // Eventos y syncs: la consulta pasó su tiempo máximo (se responde 400 con mensaje).
   QUERY_TIMEOUT: 'QUERY_TIMEOUT',
+  // Tokens personales y registro de trabajo (contrato 12).
+  INVALID_TOKEN: 'INVALID_TOKEN',
+  TOKEN_LIMIT: 'TOKEN_LIMIT',
+  AMBIGUOUS_CODE: 'AMBIGUOUS_CODE',
+  REQUEST_IN_PROGRESS: 'REQUEST_IN_PROGRESS',
+  IDEMPOTENCY_KEY_REUSED: 'IDEMPOTENCY_KEY_REUSED',
 });
 
-export function fail(reason, message) {
-  return message ? { ok: false, reason, message } : { ok: false, reason };
+// extra.retryAfterSeconds (opcional): sendFailure lo pone como header Retry-After. Solo se
+// agrega al resultado si viene, así las llamadas de siempre devuelven lo mismo de antes.
+export function fail(reason, message, extra) {
+  const result = message ? { ok: false, reason, message } : { ok: false, reason };
+  if (typeof extra?.retryAfterSeconds === 'number') {
+    result.retryAfterSeconds = extra.retryAfterSeconds;
+  }
+  return result;
 }
 
 export function validationError(message) {

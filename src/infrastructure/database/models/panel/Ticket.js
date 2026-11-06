@@ -39,6 +39,29 @@ const statusHistorySchema = new Schema(
   { _id: false }
 );
 
+// Registro de trabajo de Smarteam (contrato 12, M5 y M6). Va embebido en el ticket para que
+// mensaje, estado, resolución y horas queden en el mismo findOneAndUpdate. El cliente nunca lo ve.
+const workLogSchema = new Schema(
+  {
+    authorId: { type: String, required: true },
+    authorName: { type: String, default: null },
+    hours: { type: Number, required: true, min: 0.25, max: 24 },
+    internalNote: { type: String, default: null },
+    crmProjectId: { type: String, default: null },
+    messageId: { type: Schema.Types.ObjectId, required: true },
+    resolved: { type: Boolean, default: false },
+    statusAfter: { type: String, required: true }, // para rearmar la misma respuesta (M5)
+    via: { type: String, enum: ['token', 'session'], required: true },
+    tokenId: { type: String, default: null },
+    idempotencyKey: { type: String, default: null }, // "<ownerKey>:<key>"
+    // Huella del cuerpo con esa clave: la misma clave con otro cuerpo da 422 aunque el registro
+    // de claves ya haya vencido. Nunca sale en las vistas.
+    idempotencyFingerprint: { type: String, default: null },
+    createdAt: { type: Date, required: true },
+  },
+  { _id: true }
+);
+
 export const ticketSchema = new Schema(
   {
     number: { type: Number, required: true },
@@ -84,6 +107,7 @@ export const ticketSchema = new Schema(
       default: null,
     },
     statusHistory: { type: [statusHistorySchema], default: [] },
+    workLog: { type: [workLogSchema], default: [] },
     openedAt: { type: Date, required: true },
     firstResponseAt: { type: Date, default: null },
     resolvedAt: { type: Date, default: null },

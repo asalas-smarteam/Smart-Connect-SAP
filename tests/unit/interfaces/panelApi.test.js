@@ -15,6 +15,11 @@ import {
   clientUser,
   staffUser,
 } from '../application/panel/panelFakes.js';
+import {
+  FakeApiTokenCodec,
+  InMemoryApiTokenRepository,
+  InMemoryIdempotencyStore,
+} from '../application/panel/apiTokenFakes.js';
 
 const SECRET = 'panel-api-test-secret-with-32-chars-min';
 const PANEL = { 'x-panel-request': '1' };
@@ -42,6 +47,12 @@ async function buildApp({
     auditLog,
     revokedSessions,
     sessionToken: new HmacSessionToken({ secret }),
+    // Tokens personales en memoria: desactivar o restablecer revoca tokens (contrato 12, M7).
+    apiTokenRepository: new InMemoryApiTokenRepository(),
+    apiTokenCodec: new FakeApiTokenCodec(),
+    idempotencyStore: new InMemoryIdempotencyStore(),
+    passwordAttempts: new FakeLoginAttempts(),
+    apiTokenAttempts: new FakeLoginAttempts(30),
   });
 
   const app = Fastify();

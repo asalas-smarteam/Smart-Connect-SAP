@@ -10,6 +10,10 @@ export const AUDIT_ACTIONS = Object.freeze({
   LOGIN_BLOCKED: 'auth.login_blocked',
   PASSWORD_CHANGED: 'auth.password_changed',
   LOGOUT: 'auth.logout',
+  // Tokens personales y registro de trabajo (contrato 12, M7). No son auth.*: se conservan.
+  API_TOKEN_CREATED: 'api_token.created',
+  API_TOKEN_REVOKED: 'api_token.revoked',
+  TICKET_WORK_LOGGED: 'ticket.work_logged',
 });
 
 export const AUDIT_SOURCES = Object.freeze({
@@ -37,4 +41,17 @@ export const AUDIT_DETAIL_KEYS = Object.freeze({
   [AUDIT_ACTIONS.USER_UPDATED]: Object.freeze(['changes']),
   [AUDIT_ACTIONS.LOGIN_FAILED]: Object.freeze(['reason']),
   [AUDIT_ACTIONS.LOGIN_BLOCKED]: Object.freeze(['reason']),
+  // Ni el token, ni su hash, ni la nota interna: solo el prefix y los ids.
+  [AUDIT_ACTIONS.API_TOKEN_CREATED]: Object.freeze(['tokenId', 'prefix', 'name', 'expiresAt']),
+  [AUDIT_ACTIONS.API_TOKEN_REVOKED]: Object.freeze(['tokenId', 'prefix', 'reason']),
+  [AUDIT_ACTIONS.TICKET_WORK_LOGGED]: Object.freeze([
+    'tenantKey',
+    'ticketId',
+    'ticketCode',
+    'entryId',
+    'hours',
+    'resolved',
+    'via',
+    'tokenPrefix',
+  ]),
 });

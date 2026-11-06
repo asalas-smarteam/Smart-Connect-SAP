@@ -73,6 +73,18 @@ export class RedisLoginAttempts {
     return { blocked: count > this.maxAttempts, firstBlocked: count === this.maxAttempts + 1 };
   }
 
+  // Lee el contador sin sumar (GET, con el mismo timeout y respaldo en memoria): true si ya
+  // pasó de maxAttempts en la ventana vigente. Lo usa el guard de tokens antes de ir a la base.
+  async isBlocked(email) {
+    const key = this.#key(email);
+    const count = await this.#run(
+      async (client) => Number(await client.get(key) ?? 0),
+      () => this.#memoryCount(key)
+    );
+
+    return count > this.maxAttempts;
+  }
+
   async reset(email) {
     const key = this.#key(email);
     this.memory.delete(key);

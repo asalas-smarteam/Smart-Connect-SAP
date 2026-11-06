@@ -163,6 +163,11 @@ export class FakeLoginAttempts {
   async reset(email) {
     this.failures.delete(email);
   }
+
+  // Como RedisLoginAttempts.isBlocked: lee el conteo sin sumar.
+  async isBlocked(key) {
+    return (this.failures.get(key) ?? 0) > this.maxAttempts;
+  }
 }
 
 export class SequenceTemporaryPassword {

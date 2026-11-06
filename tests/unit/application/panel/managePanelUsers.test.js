@@ -1,9 +1,14 @@
+import { jest } from '@jest/globals';
 import ManagePanelUsers from '../../../../src/application/use-cases/panel/ManagePanelUsers.js';
 import { panelReasons } from '../../../../src/application/use-cases/panel/panelReasons.js';
+import ManageApiTokens from '../../../../src/application/use-cases/panel/ManageApiTokens.js';
+import { FakeApiTokenCodec, InMemoryApiTokenRepository } from './apiTokenFakes.js';
 import {
+  FakeLoginAttempts,
   FakePasswordHasher,
   FakeTenantDirectory,
   InMemoryPanelUserRepository,
+  RecordingAuditLog,
   SequenceTemporaryPassword,
   TENANTS,
   clientUser,
@@ -277,5 +282,139 @@ describe('ManagePanelUsers.resetPassword', () => {
       ok: false,
       reason: panelReasons.NOT_FOUND,
     });
+  });
+});
+
+describe('ManagePanelUsers — personal API tokens (contrato 12, M7)', () => {
+  const NOW = new Date('2026-11-04T15:00:00.000Z');
+
+  async function setupWithTokens(users, { logger } = {}) {
+    const userRepository = new InMemoryPanelUserRepository(users);
+    const apiTokenRepository = new InMemoryApiTokenRepository();
+    const apiTokenCodec = new FakeApiTokenCodec();
+    const auditLog = new RecordingAuditLog();
+    const apiTokens = new ManageApiTokens({
+      apiTokenRepository,
+      apiTokenCodec,
+      userRepository,
+      passwordHasher: new FakePasswordHasher(),
+      passwordAttempts: new FakeLoginAttempts(),
+      auditLog,
+      now: () => NOW,
+    });
+    const useCase = new ManagePanelUsers({
+      userRepository,
+      tenantDirectory: new FakeTenantDirectory(TENANTS),
+      passwordHasher: new FakePasswordHasher(),
+      temporaryPasswordGenerator: new SequenceTemporaryPassword(),
+      auditLog,
+      apiTokens,
+      ...(logger === undefined ? {} : { logger }),
+      now: () => NOW,
+    });
+    const seed = async (userId) => {
+      const { hash, prefix } = apiTokenCodec.generate();
+      return apiTokenRepository.create({ userId, name: 'Laptop', tokenHash: hash, prefix, createdAt: NOW, expiresAt: new Date('2027-02-02T15:00:00.000Z') });
+    };
+    return { userRepository, apiTokenRepository, auditLog, useCase, seed };
+  }
+
+  it('deactivating a user revokes all their tokens (user_deactivated) with one audit entry per token', async () => {
+    const owner = staffUser();
+    const admin = staffUser({ email: 'admin@smarteam.test' });
+    const ctx = await setupWithTokens([owner, admin]);
+    await ctx.seed(owner.id);
+    await ctx.seed(owner.id);
+    await ctx.seed(admin.id);
+
+    const result = await ctx.useCase.update({ actor: { id: admin.id, email: admin.email, accountType: 'smarteam' }, ip: '10.0.0.1', id: owner.id, patch: { active: false } });
+
+    expect(result.ok).toBe(true);
+    const ownerTokens = ctx.apiTokenRepository.records.filter((record) => record.userId === owner.id);
+    expect(ownerTokens.every((record) => record.revokedReason === 'user_deactivated')).toBe(true);
+    expect(ctx.apiTokenRepository.records.find((record) => record.userId === admin.id).revokedAt).toBeNull();
+    const revokedAudits = ctx.auditLog.entries.filter((entry) => entry.action === 'api_token.revoked');
+    expect(revokedAudits).toHaveLength(2);
+    revokedAudits.forEach((entry) => expect(entry).toEqual(expect.objectContaining({
+      actor: expect.objectContaining({ userId: admin.id }),
+      target: expect.objectContaining({ userId: owner.id }),
+      details: expect.objectContaining({ reason: 'user_deactivated' }),
+      ip: '10.0.0.1',
+    })));
+  });
+
+  it('reactivating does not revive the revoked tokens', async () => {
+    const owner = staffUser();
+    const ctx = await setupWithTokens([owner]);
+    await ctx.seed(owner.id);
+    await ctx.useCase.update({ actor: { id: 'x' }, id: owner.id, patch: { active: false } });
+
+    await ctx.useCase.update({ actor: { id: 'x' }, id: owner.id, patch: { active: true } });
+
+    expect(ctx.apiTokenRepository.records[0]).toEqual(expect.objectContaining({ revokedReason: 'user_deactivated' }));
+    expect(await ctx.apiTokenRepository.listActiveByUser(owner.id, NOW)).toEqual([]);
+  });
+
+  it('renaming or deactivating an already inactive user does not touch tokens', async () => {
+    const owner = staffUser();
+    const inactive = staffUser({ email: 'inactivo@smarteam.test', active: false });
+    const ctx = await setupWithTokens([owner, inactive]);
+    await ctx.seed(owner.id);
+    await ctx.seed(inactive.id);
+
+    await ctx.useCase.update({ actor: { id: 'x' }, id: owner.id, patch: { name: 'Otro nombre' } });
+    await ctx.useCase.update({ actor: { id: 'x' }, id: inactive.id, patch: { active: false } });
+
+    expect(ctx.apiTokenRepository.records.every((record) => record.revokedAt === null)).toBe(true);
+  });
+
+  it('resetting the password revokes all tokens (password_reset)', async () => {
+    const owner = staffUser();
+    const ctx = await setupWithTokens([owner]);
+    await ctx.seed(owner.id);
+
+    const result = await ctx.useCase.resetPassword({ actor: { id: 'x' }, id: owner.id });
+
+    expect(result.ok).toBe(true);
+    expect(ctx.apiTokenRepository.records[0]).toEqual(expect.objectContaining({ revokedAt: NOW, revokedReason: 'password_reset' }));
+  });
+
+  it('a revocation failure on reset is logged and the temporary password is still returned', async () => {
+    const owner = staffUser();
+    const logger = { error: jest.fn() };
+    const ctx = await setupWithTokens([owner], { logger });
+    await ctx.seed(owner.id);
+    ctx.apiTokenRepository.failNextRevokeAll = true;
+
+    const result = await ctx.useCase.resetPassword({ actor: { id: 'x' }, id: owner.id });
+
+    expect(result).toEqual({ ok: true, data: { temporaryPassword: expect.any(String) } });
+    const saved = await ctx.userRepository.findById(owner.id);
+    expect(saved.mustChangePassword).toBe(true);
+    expect(saved.passwordHash).toBe(`hash:${result.data.temporaryPassword}`);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledWith({ msg: 'Panel API tokens: revoke on password reset failed', userId: owner.id });
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain(result.data.temporaryPassword);
+  });
+
+  it('a revocation failure on reset without logger still returns the temporary password', async () => {
+    const owner = staffUser();
+    const ctx = await setupWithTokens([owner]);
+    ctx.apiTokenRepository.failNextRevokeAll = true;
+
+    const result = await ctx.useCase.resetPassword({ actor: { id: 'x' }, id: owner.id });
+
+    expect(result.ok).toBe(true);
+    expect(result.data.temporaryPassword).toEqual(expect.any(String));
+  });
+
+  it('propagates a revocation failure after saving the change (decisión 4)', async () => {
+    const owner = staffUser();
+    const ctx = await setupWithTokens([owner]);
+    await ctx.seed(owner.id);
+    ctx.apiTokenRepository.failNextRevokeAll = true;
+
+    await expect(ctx.useCase.update({ actor: { id: 'x' }, id: owner.id, patch: { active: false } })).rejects.toThrow('api token revoke failed');
+    expect((await ctx.userRepository.findById(owner.id)).active).toBe(false);
   });
 });

@@ -11,6 +11,8 @@ import { ticketCounterSchema } from '../../../src/infrastructure/database/models
 const TENANT = 'sap_integration_acme';
 const TICKET_ID = '6711b2c3d4e5f60123456789';
 const FILE_ID = '6711c9aaaaaaaaaaaaaaaaaa';
+const ENTRY_ID = '6729b0aa1b2c3d4e5f607182';
+const MESSAGE_ID = '6729b0aa1b2c3d4e5f607181';
 
 function query(result) {
   const chain = {
@@ -68,6 +70,23 @@ describe('panel ticket schemas', () => {
       [{ lastActivityAt: -1 }, false],
       [{ category: 1, lastActivityAt: -1 }, false],
     ]));
+  });
+
+  it('embeds the workLog sub-schema with its own ids and limits', async () => {
+    const workLog = ticketSchema.path('workLog');
+    expect(workLog).toBeDefined();
+    const entrySchema = workLog.schema;
+    expect(entrySchema.options._id).toBe(true);
+    expect(entrySchema.path('hours').options).toEqual(expect.objectContaining({ required: true, min: 0.25, max: 24 }));
+    expect(entrySchema.path('via').enumValues).toEqual(['token', 'session']);
+    expect(entrySchema.path('messageId').instance).toBe('ObjectId');
+    for (const field of ['authorId', 'statusAfter', 'createdAt']) {
+      expect(entrySchema.path(field).isRequired).toBe(true);
+    }
+    for (const field of ['authorName', 'internalNote', 'crmProjectId', 'tokenId', 'idempotencyKey', 'idempotencyFingerprint']) {
+      expect(entrySchema.path(field).options.default).toBeNull();
+    }
+    expect(entrySchema.path('resolved').options.default).toBe(false);
   });
 
   it('registers the panel models once per connection without the tenant registry', async () => {
@@ -227,6 +246,170 @@ describe('MongooseTicketRepository', () => {
     const { repository } = build(Ticket);
 
     expect(await repository.countByStatus(TENANT)).toEqual({ abierto: 2, resuelto: 5 });
+  });
+
+  it('finds a ticket by its number and rejects non-positive or non-integer numbers without opening the tenant', async () => {
+    const Ticket = { findOne: jest.fn(() => query(ticketDocument())) };
+    const { repository, getModels } = build(Ticket);
+
+    for (const invalid of [0, -1, 1.5, '7', NaN, null, undefined, { $gt: 0 }]) {
+      expect(await repository.findByNumber(TENANT, invalid)).toBeNull();
+    }
+    expect(getModels).not.toHaveBeenCalled();
+
+    const ticket = await repository.findByNumber(TENANT, 7);
+    expect(Ticket.findOne).toHaveBeenCalledWith({ number: 7 });
+    expect(ticket.id).toBe(TICKET_ID);
+    expect(ticket.code).toBe('ACME-0007');
+    expect(ticket.workLog).toEqual([]);
+  });
+
+  it('returns null when no ticket has that number', async () => {
+    const Ticket = { findOne: jest.fn(() => query(null)) };
+    const { repository } = build(Ticket);
+
+    expect(await repository.findByNumber(TENANT, 99)).toBeNull();
+  });
+
+  it('maps workLog entries with string ids', async () => {
+    const createdAt = new Date('2026-11-04T21:10:00.000Z');
+    const Ticket = {
+      findById: jest.fn(() => query(ticketDocument({
+        workLog: [{
+          _id: new mongoose.Types.ObjectId(ENTRY_ID),
+          authorId: 'u9',
+          authorName: 'Ana Mora',
+          hours: 2.5,
+          internalNote: 'Se cambió el mapeo.',
+          crmProjectId: '123456789',
+          messageId: new mongoose.Types.ObjectId(MESSAGE_ID),
+          resolved: false,
+          statusAfter: 'en_progreso',
+          via: 'token',
+          tokenId: 'tok1',
+          idempotencyKey: 'token:tok1:k1',
+          idempotencyFingerprint: 'f'.repeat(64),
+          createdAt,
+        }, {
+          _id: new mongoose.Types.ObjectId(MESSAGE_ID),
+          authorId: 'u9',
+          hours: 0.25,
+          messageId: new mongoose.Types.ObjectId(ENTRY_ID),
+          statusAfter: 'resuelto',
+          via: 'session',
+          createdAt,
+        }],
+      }))),
+    };
+    const { repository } = build(Ticket);
+
+    const ticket = await repository.findById(TENANT, TICKET_ID);
+
+    expect(ticket.workLog).toEqual([
+      {
+        id: ENTRY_ID,
+        authorId: 'u9',
+        authorName: 'Ana Mora',
+        hours: 2.5,
+        internalNote: 'Se cambió el mapeo.',
+        crmProjectId: '123456789',
+        messageId: MESSAGE_ID,
+        resolved: false,
+        statusAfter: 'en_progreso',
+        via: 'token',
+        tokenId: 'tok1',
+        idempotencyKey: 'token:tok1:k1',
+        idempotencyFingerprint: 'f'.repeat(64),
+        createdAt,
+      },
+      {
+        id: MESSAGE_ID,
+        authorId: 'u9',
+        authorName: null,
+        hours: 0.25,
+        internalNote: null,
+        crmProjectId: null,
+        messageId: ENTRY_ID,
+        resolved: false,
+        statusAfter: 'resuelto',
+        via: 'session',
+        tokenId: null,
+        idempotencyKey: null,
+        idempotencyFingerprint: null,
+        createdAt,
+      },
+    ]);
+  });
+
+  it('pushes a workLog entry in the same update, with _id and messageId as ObjectIds', async () => {
+    const Ticket = { findOneAndUpdate: jest.fn().mockResolvedValue(ticketDocument({ status: 'en_progreso' })) };
+    const { repository } = build(Ticket);
+    const at = new Date('2026-11-04T21:10:00.000Z');
+
+    await repository.update(TENANT, TICKET_ID, {
+      expectedStatus: 'abierto',
+      set: { status: 'en_progreso' },
+      pushMessage: { id: MESSAGE_ID, authorType: 'smarteam', body: 'Listo', attachments: [], createdAt: at },
+      pushWorkLog: {
+        id: ENTRY_ID,
+        authorId: 'u9',
+        authorName: 'Ana Mora',
+        hours: 2.5,
+        internalNote: null,
+        crmProjectId: null,
+        messageId: MESSAGE_ID,
+        resolved: false,
+        statusAfter: 'en_progreso',
+        via: 'token',
+        tokenId: 'tok1',
+        idempotencyKey: 'token:tok1:k1',
+        idempotencyFingerprint: 'f'.repeat(64),
+        createdAt: at,
+      },
+      idempotencyGuard: 'token:tok1:k1',
+    });
+
+    const [filter, operations] = Ticket.findOneAndUpdate.mock.calls[0];
+    expect(filter).toEqual({ _id: TICKET_ID, status: 'abierto', 'workLog.idempotencyKey': { $ne: 'token:tok1:k1' } });
+    const entry = operations.$push.workLog;
+    expect(entry).not.toHaveProperty('id');
+    expect(entry._id).toBeInstanceOf(mongoose.Types.ObjectId);
+    expect(String(entry._id)).toBe(ENTRY_ID);
+    expect(entry.messageId).toBeInstanceOf(mongoose.Types.ObjectId);
+    expect(String(entry.messageId)).toBe(MESSAGE_ID);
+    expect(entry).toEqual(expect.objectContaining({ hours: 2.5, statusAfter: 'en_progreso', via: 'token', idempotencyKey: 'token:tok1:k1', idempotencyFingerprint: 'f'.repeat(64) }));
+    expect(operations.$push.messages).toEqual(expect.objectContaining({ _id: MESSAGE_ID }));
+  });
+
+  it('keeps the filter unchanged without idempotencyGuard and returns null when the guard blocks the write', async () => {
+    const Ticket = { findOneAndUpdate: jest.fn().mockResolvedValue(null) };
+    const { repository } = build(Ticket);
+
+    await repository.update(TENANT, TICKET_ID, { expectedStatus: 'abierto', set: { status: 'en_progreso' } });
+    const blocked = await repository.update(TENANT, TICKET_ID, {
+      expectedStatus: 'en_progreso',
+      set: { status: 'resuelto' },
+      idempotencyGuard: 'user:u1:k2',
+    });
+
+    expect(Ticket.findOneAndUpdate.mock.calls[0][0]).toEqual({ _id: TICKET_ID, status: 'abierto' });
+    expect(Ticket.findOneAndUpdate.mock.calls[0][1]).not.toHaveProperty('$push');
+    expect(Ticket.findOneAndUpdate.mock.calls[1][0]).toEqual({
+      _id: TICKET_ID,
+      status: 'en_progreso',
+      'workLog.idempotencyKey': { $ne: 'user:u1:k2' },
+    });
+    expect(blocked).toBeNull();
+  });
+
+  it('never projects workLog in the list', async () => {
+    const find = query([ticketDocument()]);
+    const Ticket = { find: jest.fn(() => find), countDocuments: jest.fn().mockResolvedValue(1) };
+    const { repository } = build(Ticket);
+
+    await repository.list(TENANT, {});
+
+    expect(find.select.mock.calls[0][0]).not.toHaveProperty('workLog');
   });
 });
 

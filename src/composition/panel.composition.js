@@ -9,7 +9,7 @@ import LoginPanelUser from '#application/use-cases/panel/LoginPanelUser.js';
 import ResolvePanelSession from '#application/use-cases/panel/ResolvePanelSession.js';
 import GetPanelSession from '#application/use-cases/panel/GetPanelSession.js';
 import ChangePanelPassword from '#application/use-cases/panel/ChangePanelPassword.js';
-import ManagePanelUsers from '#application/use-cases/panel/ManagePanelUsers.js';
+import ManagePanelUsers, { NO_API_TOKENS } from '#application/use-cases/panel/ManagePanelUsers.js';
 import ListPanelTenants from '#application/use-cases/panel/ListPanelTenants.js';
 import MongoosePanelUserRepository from '#infrastructure/database/repositories/MongoosePanelUserRepository.js';
 import SaaSClientTenantDirectory from '#infrastructure/database/repositories/SaaSClientTenantDirectory.js';
@@ -44,6 +44,15 @@ import { ScheduledTaskReaderPort } from '#application/ports/panel/scheduled-task
 import { ScheduledRunReaderPort } from '#application/ports/panel/scheduled-run-reader.port.js';
 import PanelScheduledTasks from '#application/use-cases/panel/PanelScheduledTasks.js';
 import BullMqScheduledRunReader from '#infrastructure/queue/BullMqScheduledRunReader.js';
+import { ApiTokenRepositoryPort } from '#application/ports/panel/api-token-repository.port.js';
+import { ApiTokenCodecPort } from '#application/ports/panel/api-token-codec.port.js';
+import { IdempotencyStorePort } from '#application/ports/panel/idempotency-store.port.js';
+import ManageApiTokens from '#application/use-cases/panel/ManageApiTokens.js';
+import ResolveApiToken from '#application/use-cases/panel/ResolveApiToken.js';
+import StaffWorkLog from '#application/use-cases/panel/StaffWorkLog.js';
+import MongoosePanelApiTokenRepository from '#infrastructure/database/repositories/MongoosePanelApiTokenRepository.js';
+import MongooseIdempotencyStore from '#infrastructure/database/repositories/MongooseIdempotencyStore.js';
+import RandomApiToken from '#infrastructure/auth/RandomApiToken.js';
 
 // Nada se construye al importar este módulo: si falta PANEL_JWT_SECRET, el plugin del panel no
 // llama a buildPanelUseCases y el arranque del servidor no se entera.
@@ -55,6 +64,10 @@ export function buildManagePanelUsers({
   passwordHasher = new ScryptPasswordHasher(),
   temporaryPasswordGenerator = new RandomTemporaryPassword(),
   auditLog = new MongoosePanelAuditLog(),
+  // ManageApiTokens: revoca los tokens personales al desactivar o restablecer (contrato 12, M7).
+  // Sin él (el script de alta), no-op.
+  apiTokens = NO_API_TOKENS,
+  logger = defaultLogger,
 } = {}) {
   return new ManagePanelUsers({
     userRepository: assertPort(userRepository, PanelUserRepositoryPort),
@@ -62,7 +75,84 @@ export function buildManagePanelUsers({
     passwordHasher: assertPort(passwordHasher, PasswordHasherPort),
     temporaryPasswordGenerator: assertPort(temporaryPasswordGenerator, TemporaryPasswordGeneratorPort),
     auditLog: assertPort(auditLog, PanelAuditLogPort),
+    apiTokens,
+    logger,
   });
+}
+
+// Tokens personales (contrato 12, M2, M3 y M7). Los adaptadores reales no abren conexiones al
+// construirse: Mongoose y Redis se usan en el primer request.
+export function buildPanelApiTokenUseCases({
+  userRepository = new MongoosePanelUserRepository(),
+  passwordHasher = new ScryptPasswordHasher(),
+  auditLog = new MongoosePanelAuditLog(),
+  apiTokenRepository = new MongoosePanelApiTokenRepository(),
+  apiTokenCodec = new RandomApiToken(),
+  // 5 contraseñas incorrectas cada 15 min por usuario al crear un token.
+  passwordAttempts = new RedisLoginAttempts({ keyPrefix: 'panel:pwdcheck:', maxAttempts: 5, windowSeconds: 900 }),
+  // 30 pedidos por minuto por token (clave: id del token, nunca el token).
+  apiTokenAttempts = new RedisLoginAttempts({ keyPrefix: 'panel:apitoken:', maxAttempts: 30, windowSeconds: 60 }),
+  // 20 tokens inválidos cada 15 min por IP: solo con proxies de confianza (como el login).
+  ipLimitEnabled = false,
+  invalidTokenIpAttempts = ipLimitEnabled
+    ? new RedisLoginAttempts({ keyPrefix: 'panel:apitoken:ip:', maxAttempts: 20, windowSeconds: 900 })
+    : null,
+  logger = defaultLogger,
+} = {}) {
+  assertPort(userRepository, PanelUserRepositoryPort);
+  assertPort(passwordHasher, PasswordHasherPort);
+  assertPort(auditLog, PanelAuditLogPort);
+  assertPort(apiTokenRepository, ApiTokenRepositoryPort);
+  assertPort(apiTokenCodec, ApiTokenCodecPort);
+  assertPort(passwordAttempts, LoginAttemptsPort);
+  assertPort(apiTokenAttempts, LoginAttemptsPort);
+  if (invalidTokenIpAttempts) {
+    assertPort(invalidTokenIpAttempts, LoginAttemptsPort);
+  }
+
+  return {
+    manageApiTokens: new ManageApiTokens({
+      apiTokenRepository,
+      apiTokenCodec,
+      userRepository,
+      passwordHasher,
+      passwordAttempts,
+      auditLog,
+    }),
+    resolveApiToken: new ResolveApiToken({ apiTokenRepository, apiTokenCodec, userRepository, logger }),
+    apiTokenAttempts,
+    invalidTokenIpAttempts,
+  };
+}
+
+// Registro de trabajo (contrato 12, M4 y M5). Comparte con los tickets el repositorio, el
+// directorio de empresas y el prefijo de las bases de tenant (el código del ticket sale de él).
+export function buildPanelWorkLogUseCases({
+  tenantDirectory = new SaaSClientTenantDirectory(),
+  ticketRepository = new MongooseTicketRepository(),
+  idempotencyStore = new MongooseIdempotencyStore(),
+  apiTokenCodec = new RandomApiToken(),
+  tenantDbPrefix = mongoConfig.tenantDbPrefix,
+  auditLog = new MongoosePanelAuditLog(),
+  logger = defaultLogger,
+} = {}) {
+  assertPort(tenantDirectory, TenantDirectoryPort);
+  assertPort(ticketRepository, TicketRepositoryPort);
+  assertPort(idempotencyStore, IdempotencyStorePort);
+  assertPort(apiTokenCodec, ApiTokenCodecPort);
+  assertPort(auditLog, PanelAuditLogPort);
+
+  return {
+    staffWorkLog: new StaffWorkLog({
+      ticketRepository,
+      tenantDirectory,
+      idempotencyStore,
+      apiTokenCodec,
+      tenantDbPrefix,
+      auditLog,
+      logger,
+    }),
+  };
 }
 
 // Soporte: tickets de cliente, acciones de Smarteam y bandeja. Los adaptadores reales no abren
@@ -160,12 +250,20 @@ export function buildPanelUseCases({
     })
     : null,
   sessionToken = new HmacSessionToken({ secret, ttlSeconds: sessionTtlSeconds }),
-  ticketRepository,
+  // Compartidos por los tickets y el registro de trabajo.
+  ticketRepository = new MongooseTicketRepository(),
   attachmentStore,
   contextReader,
-  tenantDbPrefix,
+  tenantDbPrefix = mongoConfig.tenantDbPrefix,
   inboxTenantTimeoutMs,
-  logger,
+  logger = defaultLogger,
+  // Tokens personales y registro de trabajo (contrato 12).
+  apiTokenRepository,
+  apiTokenCodec = new RandomApiToken(),
+  idempotencyStore,
+  passwordAttempts,
+  apiTokenAttempts,
+  invalidTokenIpAttempts,
   operationsReader,
   fieldMappingReader,
   scheduledTaskReader,
@@ -181,6 +279,20 @@ export function buildPanelUseCases({
   if (ipLoginAttempts) {
     assertPort(ipLoginAttempts, LoginAttemptsPort);
   }
+
+  const apiTokenUseCases = buildPanelApiTokenUseCases({
+    userRepository,
+    passwordHasher,
+    auditLog,
+    apiTokenRepository,
+    apiTokenCodec,
+    passwordAttempts,
+    apiTokenAttempts,
+    ipLimitEnabled,
+    // undefined deja que el constructor decida por ipLimitEnabled; null lo desactiva.
+    invalidTokenIpAttempts,
+    logger,
+  });
 
   return {
     login: new LoginPanelUser({
@@ -202,7 +314,10 @@ export function buildPanelUseCases({
       passwordHasher,
       temporaryPasswordGenerator,
       auditLog,
+      apiTokens: apiTokenUseCases.manageApiTokens,
+      logger,
     }),
+    ...apiTokenUseCases,
     listTenants: new ListPanelTenants({ tenantDirectory }),
     ...buildPanelTicketUseCases({
       tenantDirectory,
@@ -211,6 +326,15 @@ export function buildPanelUseCases({
       contextReader,
       tenantDbPrefix,
       inboxTenantTimeoutMs,
+      logger,
+    }),
+    ...buildPanelWorkLogUseCases({
+      tenantDirectory,
+      ticketRepository,
+      idempotencyStore,
+      apiTokenCodec,
+      tenantDbPrefix,
+      auditLog,
       logger,
     }),
     ...buildPanelOperationUseCases({ tenantDirectory, operationsReader, logger }),

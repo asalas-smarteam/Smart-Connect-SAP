@@ -165,6 +165,7 @@ describe('RedisLoginAttempts', () => {
         ttl.delete(key);
         return store.delete(key);
       }),
+      get: jest.fn(async (key) => (store.has(key) ? String(store.get(key)) : null)),
     };
   }
 
@@ -309,6 +310,83 @@ describe('RedisLoginAttempts', () => {
     now += 30 * 1000;
     await attempts.consume('ana@acme.test');
     expect(redis.eval).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('RedisLoginAttempts.isBlocked', () => {
+  function fakeRedis() {
+    const store = new Map();
+    return {
+      store,
+      eval: jest.fn(async (script, { keys: [key] }) => {
+        const value = (store.get(key) ?? 0) + 1;
+        store.set(key, value);
+        return value;
+      }),
+      del: jest.fn(async (key) => store.delete(key)),
+      get: jest.fn(async (key) => (store.has(key) ? String(store.get(key)) : null)),
+    };
+  }
+
+  function quietLogger() {
+    return { warn: jest.fn() };
+  }
+
+  it('reads the counter with GET on the same key and never increments it', async () => {
+    const redis = fakeRedis();
+    const attempts = new RedisLoginAttempts({
+      getClient: async () => redis,
+      logger: quietLogger(),
+      keyPrefix: 'panel:apitoken:invalid:ip:',
+      maxAttempts: 3,
+    });
+
+    await expect(attempts.isBlocked('203.0.113.7')).resolves.toBe(false);
+    for (let index = 0; index < 3; index += 1) {
+      await attempts.consume('203.0.113.7');
+    }
+    await expect(attempts.isBlocked('203.0.113.7')).resolves.toBe(false);
+    await attempts.consume('203.0.113.7');
+    await expect(attempts.isBlocked('203.0.113.7')).resolves.toBe(true);
+    await expect(attempts.isBlocked('203.0.113.7')).resolves.toBe(true);
+
+    const [key] = [...redis.store.keys()];
+    expect(key).toMatch(/^panel:apitoken:invalid:ip:[0-9a-f]{64}$/);
+    expect(redis.get).toHaveBeenCalledWith(key);
+    expect(redis.store.get(key)).toBe(4);
+    expect(redis.eval).toHaveBeenCalledTimes(4);
+    await expect(attempts.isBlocked('198.51.100.1')).resolves.toBe(false);
+  });
+
+  it('falls back to the in-memory count when Redis throws, without incrementing it', async () => {
+    let now = 0;
+    const attempts = new RedisLoginAttempts({
+      getClient: async () => { throw new Error('ECONNREFUSED'); },
+      logger: quietLogger(),
+      maxAttempts: 2,
+      now: () => now,
+    });
+
+    await attempts.consume('203.0.113.7');
+    await attempts.consume('203.0.113.7');
+    await expect(attempts.isBlocked('203.0.113.7')).resolves.toBe(false);
+    await expect(attempts.isBlocked('203.0.113.7')).resolves.toBe(false);
+    await expect(attempts.consume('203.0.113.7')).resolves.toEqual({ blocked: true, firstBlocked: true });
+    await expect(attempts.isBlocked('203.0.113.7')).resolves.toBe(true);
+    await expect(attempts.isBlocked('198.51.100.1')).resolves.toBe(false);
+
+    // Vencida la ventana, el conteo vigente es 0.
+    now += 15 * 60 * 1000;
+    await expect(attempts.isBlocked('203.0.113.7')).resolves.toBe(false);
+  });
+
+  it('does not hang when GET never answers', async () => {
+    const redis = { eval: jest.fn(), del: jest.fn(), get: () => new Promise(() => {}) };
+    const attempts = new RedisLoginAttempts({ getClient: async () => redis, logger: quietLogger(), timeoutMs: 50 });
+
+    const started = Date.now();
+    await expect(attempts.isBlocked('203.0.113.7')).resolves.toBe(false);
+    expect(Date.now() - started).toBeLessThan(1000);
   });
 });
 

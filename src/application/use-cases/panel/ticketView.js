@@ -1,6 +1,7 @@
 import { TICKET_SIDES, hasNewsFor } from '#domain/panel/tickets.js';
 import { clientSyncErrorMessage } from '#domain/panel/operationViews.js';
 import { clientErrorText } from '#domain/panel/errorText.js';
+import { toWorkLogView } from '#domain/panel/workLog.js';
 
 // Snapshot del contexto para un cliente: se vuelve a sanear al leer, porque los tickets creados
 // antes del plan 5 guardaron el texto crudo (lastError con IPs, errorMessage con payloads).
@@ -113,7 +114,8 @@ export function toStaffListItem(ticket, tenant) {
   };
 }
 
-// D3: detalle de Smarteam, con la nota interna.
+// D3: detalle de Smarteam, con la nota interna y el registro de horas (contrato 12, M6). El
+// cliente nunca recibe workLog: sus vistas no lo copian.
 export function toStaffDetail(ticket, tenant) {
   const internal = ticket.internalResolution;
   return {
@@ -127,5 +129,6 @@ export function toStaffDetail(ticket, tenant) {
         updatedBy: { name: internal.updatedBy?.name ?? null },
       }
       : null,
+    workLog: toWorkLogView(ticket.workLog ?? []),
   };
 }

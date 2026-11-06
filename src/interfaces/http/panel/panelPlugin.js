@@ -11,8 +11,10 @@ import { createPanelOperationsController } from '../controllers/panelOperations.
 import { createPanelTicketMetricsController } from '../controllers/panelTicketMetrics.controller.js';
 import { createPanelFieldMappingsController } from '../controllers/panelFieldMappings.controller.js';
 import { createPanelScheduledTasksController } from '../controllers/panelScheduledTasks.controller.js';
+import { createPanelApiTokensController } from '../controllers/panelApiTokens.controller.js';
+import { createPanelWorkLogController } from '../controllers/panelWorkLog.controller.js';
 import { registerPanelMultipart } from './multipartImages.js';
-import { registerPanelErrorHandlers } from './panelErrors.js';
+import { createJsonOnlyErrorHandler, registerPanelErrorHandlers } from './panelErrors.js';
 import { createTrustedProxyMatcher } from './clientIp.js';
 import {
   createPanelRequestGuard,
@@ -103,6 +105,10 @@ export default async function panelPlugin(app, options = {}) {
     resolveSession: useCases.resolveSession,
     cookie: cookieSettings,
     proxyMatcher,
+    // Tokens personales (contrato 12, M3): solo en las rutas con config.panelTokenAuth.
+    resolveApiToken: useCases.resolveApiToken ?? null,
+    tokenAttempts: useCases.apiTokenAttempts ?? null,
+    invalidTokenIpAttempts: useCases.invalidTokenIpAttempts ?? null,
   }));
 
   registerPanelErrorHandlers(app, { logger });
@@ -115,6 +121,8 @@ export default async function panelPlugin(app, options = {}) {
   const ticketMetrics = createPanelTicketMetricsController({ useCases });
   const fieldMappings = createPanelFieldMappingsController({ useCases });
   const scheduledTasks = createPanelScheduledTasksController({ useCases });
+  const apiTokens = createPanelApiTokensController({ useCases });
+  const workLog = createPanelWorkLogController({ useCases });
   const P = PANEL_PERMISSIONS;
 
   app.route({
@@ -353,5 +361,48 @@ export default async function panelPlugin(app, options = {}) {
     url: '/staff/tenants/:tenantKey/scheduled-tasks',
     preHandler: [requireStaffAccount, requirePermission(P.TASKS_READ)],
     handler: scheduledTasks.list,
+  });
+
+  // Contrato 12, M2: tokens personales de Mi cuenta. Solo con cookie (sin panelTokenAuth: un
+  // token no sirve para administrar tokens), cuenta smarteam y staff.tickets.
+  app.route({
+    method: 'GET',
+    url: '/account/api-tokens',
+    preHandler: [requireStaffAccount, requirePermission(P.STAFF_TICKETS)],
+    handler: apiTokens.list,
+  });
+
+  app.route({
+    method: 'POST',
+    url: '/account/api-tokens',
+    preHandler: [requireStaffAccount, requirePermission(P.STAFF_TICKETS)],
+    handler: apiTokens.create,
+  });
+
+  app.route({
+    method: 'DELETE',
+    url: '/account/api-tokens/:id',
+    preHandler: [requireStaffAccount, requirePermission(P.STAFF_TICKETS)],
+    handler: apiTokens.revoke,
+  });
+
+  // Contrato 12, M3 a M5: las dos únicas rutas que aceptan token personal (además de la cookie).
+  // "by-code" es un segmento estático: no choca con /staff/tickets/summary ni /metrics.
+  app.route({
+    method: 'GET',
+    url: '/staff/tickets/by-code/:code',
+    config: { panelTokenAuth: true },
+    preHandler: [requireStaffAccount, requirePermission(P.STAFF_TICKETS)],
+    handler: workLog.findByCode,
+  });
+
+  app.route({
+    method: 'POST',
+    url: '/staff/tickets/by-code/:code/work-log',
+    config: { panelTokenAuth: true },
+    // Solo JSON: un Content-Type sin parser es 400 validation_error, no 415.
+    errorHandler: createJsonOnlyErrorHandler({ logger }),
+    preHandler: [requireStaffAccount, requirePermission(P.STAFF_TICKETS)],
+    handler: workLog.publish,
   });
 }

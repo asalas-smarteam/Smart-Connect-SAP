@@ -266,3 +266,99 @@ describe('full support flow', () => {
     expect(JSON.stringify(reopened.data)).not.toContain('Causa');
   });
 });
+
+describe('workLog in the ticket views (contrato 12, M6)', () => {
+  const WORK_LOG = [
+    {
+      id: '6728f1aa1b2c3d4e5f607100',
+      authorId: 'u-luis',
+      authorName: 'Luis Vargas',
+      hours: 1.75,
+      internalNote: null,
+      crmProjectId: null,
+      messageId: '6728f1aa1b2c3d4e5f6070ff',
+      resolved: false,
+      statusAfter: 'en_progreso',
+      via: 'session',
+      tokenId: null,
+      idempotencyKey: null,
+      createdAt: new Date('2026-11-03T16:00:00.000Z'),
+    },
+    {
+      id: '6729b0aa1b2c3d4e5f607182',
+      authorId: 'u-ana',
+      authorName: 'Ana Mora',
+      hours: 2.5,
+      internalNote: 'Nota interna secreta',
+      crmProjectId: 'CRM-998877',
+      messageId: '6729b0aa1b2c3d4e5f607181',
+      resolved: false,
+      statusAfter: 'en_progreso',
+      via: 'token',
+      tokenId: 'a00000000000000000000001',
+      idempotencyKey: 'token:a00000000000000000000001:k',
+      createdAt: new Date('2026-11-04T21:10:00.000Z'),
+    },
+  ];
+
+  it('the staff detail always has workLog: empty without entries', async () => {
+    const ctx = build();
+    const ticket = await openTicket(ctx);
+
+    const result = await ctx.staff.get({ tenantKey: ACME, id: ticket.id });
+
+    expect(result.data.workLog).toEqual({ totalHours: 0, entries: [] });
+  });
+
+  it('the staff detail lists entries newest first with the total (2.5 + 1.75 = 4.25), also in mutation responses', async () => {
+    const ctx = build();
+    const ticket = await openTicket(ctx);
+    stored(ctx).workLog = structuredClone(WORK_LOG);
+
+    const detail = await ctx.staff.get({ tenantKey: ACME, id: ticket.id });
+    const replied = await ctx.staff.reply({ user: dev, tenantKey: ACME, id: ticket.id, fields: { body: 'Hola' } });
+
+    expect(detail.data.workLog).toEqual({
+      totalHours: 4.25,
+      entries: [
+        {
+          id: '6729b0aa1b2c3d4e5f607182',
+          author: { name: 'Ana Mora' },
+          hours: 2.5,
+          internalNote: 'Nota interna secreta',
+          crmProjectId: 'CRM-998877',
+          createdAt: '2026-11-04T21:10:00.000Z',
+          messageId: '6729b0aa1b2c3d4e5f607181',
+        },
+        {
+          id: '6728f1aa1b2c3d4e5f607100',
+          author: { name: 'Luis Vargas' },
+          hours: 1.75,
+          internalNote: null,
+          crmProjectId: null,
+          createdAt: '2026-11-03T16:00:00.000Z',
+          messageId: '6728f1aa1b2c3d4e5f6070ff',
+        },
+      ],
+    });
+    expect(replied.data.workLog.totalHours).toBe(4.25);
+    expect(JSON.stringify(detail.data.workLog)).not.toContain('idempotencyKey');
+    expect(JSON.stringify(detail.data.workLog)).not.toContain('tokenId');
+  });
+
+  it('client detail and client list never contain workLog, hours, internalNote or crmProjectId', async () => {
+    const ctx = build();
+    const ticket = await openTicket(ctx);
+    stored(ctx).workLog = structuredClone(WORK_LOG);
+
+    const detail = await ctx.client.get({ user: ana, id: ticket.id });
+    const list = await ctx.client.list({ user: ana, query: {} });
+
+    for (const body of [detail.data, list.data]) {
+      const serialized = JSON.stringify(body);
+      ['"workLog"', '"hours"', '"internalNote"', '"crmProjectId"', 'Nota interna secreta', 'CRM-998877'].forEach((needle) => {
+        expect(serialized).not.toContain(needle);
+      });
+    }
+  });
+});

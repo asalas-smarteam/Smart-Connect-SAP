@@ -134,6 +134,23 @@ export function ticketCode(tenantKey, number, tenantDbPrefix) {
   return `${ticketCodePrefix(tenantKey, tenantDbPrefix)}-${String(number).padStart(4, '0')}`;
 }
 
+// Código que llega de afuera (búsqueda por código, contrato 12 M4): se recorta, se pasa a
+// mayúsculas y se separa por el ÚLTIMO guion (el prefijo puede tener guiones). Devuelve
+// { code, prefix, number } o null si no tiene la forma PREFIJO-NÚMERO.
+const TICKET_CODE_PATTERN = /^(.+)-(\d{1,9})$/;
+
+export function parseTicketCode(code) {
+  if (typeof code !== 'string') {
+    return null;
+  }
+  const normalized = code.trim().toUpperCase();
+  const match = TICKET_CODE_PATTERN.exec(normalized);
+  if (!match) {
+    return null;
+  }
+  return { code: normalized, prefix: match[1], number: Number(match[2]) };
+}
+
 // ---------- Textos ----------
 // Texto obligatorio con largo máximo, recortado. Devuelve { text } o { message } para el usuario.
 export function checkRequiredText(value, { label, max }) {
