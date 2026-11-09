@@ -26,6 +26,32 @@ function toStringList(value) {
     : [];
 }
 
+function normalizeCreationDefaults(rawDefaults) {
+  return {
+    BusinessPartner: toPlainObject(rawDefaults.BusinessPartner),
+    BusinessPartnerRole: toStringList(rawDefaults.BusinessPartnerRole),
+    Customer: toPlainObject(rawDefaults.Customer),
+    CustomerCompany: toPlainObject(rawDefaults.CustomerCompany),
+    CustomerSalesArea: toPlainObject(rawDefaults.CustomerSalesArea),
+  };
+}
+
+// Person partners (category 1) may override each sub-key of the company defaults. A sub-key
+// that is absent from `personDefaults` falls back to the company value; one that is present
+// (even empty) wins, so a tenant can drop e.g. the company-code data for persons.
+function resolvePersonDefaults(rawPersonDefaults, companyDefaults) {
+  const person = normalizeCreationDefaults(rawPersonDefaults);
+  const resolved = {};
+
+  for (const key of Object.keys(companyDefaults)) {
+    resolved[key] = Object.hasOwn(rawPersonDefaults, key)
+      ? person[key]
+      : structuredClone(companyDefaults[key]);
+  }
+
+  return resolved;
+}
+
 export function buildS4SalesDocumentDefaults() {
   return {
     quotationType: null,
@@ -41,6 +67,13 @@ export function buildS4BusinessPartnerCreationDefaults() {
   return {
     findFallbackField: null,
     defaults: {
+      BusinessPartner: {},
+      BusinessPartnerRole: [],
+      Customer: {},
+      CustomerCompany: {},
+      CustomerSalesArea: {},
+    },
+    personDefaults: {
       BusinessPartner: {},
       BusinessPartnerRole: [],
       Customer: {},
@@ -85,17 +118,12 @@ export class S4SalesDocumentConfigRepository {
         return buildS4BusinessPartnerCreationDefaults();
       }
 
-      const rawDefaults = toPlainObject(raw.defaults);
+      const defaults = normalizeCreationDefaults(toPlainObject(raw.defaults));
 
       return {
         findFallbackField: toNonEmptyString(raw.findFallbackField),
-        defaults: {
-          BusinessPartner: toPlainObject(rawDefaults.BusinessPartner),
-          BusinessPartnerRole: toStringList(rawDefaults.BusinessPartnerRole),
-          Customer: toPlainObject(rawDefaults.Customer),
-          CustomerCompany: toPlainObject(rawDefaults.CustomerCompany),
-          CustomerSalesArea: toPlainObject(rawDefaults.CustomerSalesArea),
-        },
+        defaults,
+        personDefaults: resolvePersonDefaults(toPlainObject(raw.personDefaults), defaults),
       };
     } catch (error) {
       console.error('s4BusinessPartnerCreation config read error:', error);

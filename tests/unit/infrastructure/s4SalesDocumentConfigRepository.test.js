@@ -92,7 +92,59 @@ describe('S4SalesDocumentConfigRepository', () => {
         CustomerCompany: { CompanyCode: '1000', ReconciliationAccount: '0012100000' },
         CustomerSalesArea: { Currency: 'GTQ', PriceListType: 'ZC' },
       },
+      personDefaults: {
+        BusinessPartner: { BusinessPartnerCategory: '2', BusinessPartnerGrouping: 'ZC01' },
+        BusinessPartnerRole: ['FLCU00', 'FLCU01'],
+        Customer: { CustomerAccountGroup: 'ZC01' },
+        CustomerCompany: { CompanyCode: '1000', ReconciliationAccount: '0012100000' },
+        CustomerSalesArea: { Currency: 'GTQ', PriceListType: 'ZC' },
+      },
     });
+  });
+
+  it('applies personDefaults per sub-key and falls back to the company defaults for the rest', async () => {
+    const tenantModels = buildTenantModels({
+      [S4_BUSINESS_PARTNER_CREATION_CONFIG_KEY]: {
+        value: {
+          defaults: {
+            BusinessPartner: { BusinessPartnerGrouping: 'ZC01' },
+            BusinessPartnerRole: ['FLCU00', 'FLCU01'],
+            Customer: { CustomerAccountGroup: 'ZC01' },
+            CustomerCompany: { CompanyCode: '1000' },
+            CustomerSalesArea: { Currency: 'GTQ' },
+          },
+          personDefaults: {
+            BusinessPartner: { BusinessPartnerGrouping: 'ZP01' },
+            BusinessPartnerRole: ['FLCU01'],
+            CustomerCompany: {},
+          },
+        },
+      },
+    });
+
+    const config = await repository.getBusinessPartnerCreationConfig({ tenantModels });
+
+    expect(config.personDefaults).toEqual({
+      BusinessPartner: { BusinessPartnerGrouping: 'ZP01' },
+      BusinessPartnerRole: ['FLCU01'],
+      Customer: { CustomerAccountGroup: 'ZC01' },
+      CustomerCompany: {},
+      CustomerSalesArea: { Currency: 'GTQ' },
+    });
+    expect(config.defaults.BusinessPartner).toEqual({ BusinessPartnerGrouping: 'ZC01' });
+  });
+
+  it('does not share object references between defaults and the fallback personDefaults', async () => {
+    const tenantModels = buildTenantModels({
+      [S4_BUSINESS_PARTNER_CREATION_CONFIG_KEY]: {
+        value: { defaults: { Customer: { CustomerAccountGroup: 'ZC01' } } },
+      },
+    });
+
+    const config = await repository.getBusinessPartnerCreationConfig({ tenantModels });
+    config.personDefaults.Customer.CustomerAccountGroup = 'CHANGED';
+
+    expect(config.defaults.Customer.CustomerAccountGroup).toBe('ZC01');
   });
 
   it('devuelve defaults vacíos cuando la llave de creación no existe', async () => {
@@ -101,6 +153,13 @@ describe('S4SalesDocumentConfigRepository', () => {
     ).resolves.toEqual({
       findFallbackField: null,
       defaults: {
+        BusinessPartner: {},
+        BusinessPartnerRole: [],
+        Customer: {},
+        CustomerCompany: {},
+        CustomerSalesArea: {},
+      },
+      personDefaults: {
         BusinessPartner: {},
         BusinessPartnerRole: [],
         Customer: {},
@@ -139,6 +198,13 @@ describe('S4SalesDocumentConfigRepository', () => {
     expect(config).toEqual({
       findFallbackField: null,
       defaults: {
+        BusinessPartner: {},
+        BusinessPartnerRole: [],
+        Customer: {},
+        CustomerCompany: {},
+        CustomerSalesArea: {},
+      },
+      personDefaults: {
         BusinessPartner: {},
         BusinessPartnerRole: [],
         Customer: {},
