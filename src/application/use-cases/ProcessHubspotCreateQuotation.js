@@ -288,6 +288,7 @@ export class ProcessHubspotCreateQuotation {
         contactEmployeeFailures,
         hubspotToken,
         dealContactIsContactEmployee,
+        contactIsBusinessPartner,
       } = businessPartner;
 
       // En S/4 las posiciones las arma el propio builder desde los lineItems crudos; mapDocumentLines
@@ -420,7 +421,9 @@ export class ProcessHubspotCreateQuotation {
         orderResponse: quotationResponse,
         cardCode,
         syncCompany: false,
-        syncContact: contactExists && contactEmployeeResult.created,
+        // A contact is written back when a ContactEmployee was created for it (B1) or when it
+        // IS the customer business partner (S/4 contact-only deal): its idsap is the BP code.
+        syncContact: contactExists && (contactEmployeeResult.created || Boolean(contactIsBusinessPartner)),
         contactEmployeeCode: resolveDealContactEmployeeCode({
           dealContactIsContactEmployee,
           internalCodes: contactEmployeeResult.internalCodes,

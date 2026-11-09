@@ -1625,6 +1625,89 @@ describe('ProcessHubspotCreateQuotation con sapFlavor S4', () => {
     }));
   });
 
+  describe('contact-only deal (person business partner)', () => {
+    async function runS4Quotation({ event, resolverResult }) {
+      const updateAfterSap = jest.fn().mockResolvedValue({});
+      const useCase = new ProcessHubspotCreateQuotation({
+        runtimeRepository: buildRuntimeRepository(buildContext({ sapFlavor: 'S4' })),
+        sapOrderAdapter: {},
+        sapQuotationAdapter: {},
+        hubspotWebhookAdapter: { updateAfterSap },
+        webhookReferenceRepository: { persistReferences: jest.fn() },
+        sapDocumentLinkRepository: {
+          findByDeal: jest.fn().mockResolvedValue(null),
+          create: jest.fn().mockResolvedValue({}),
+        },
+        salesDocumentConfigRepository: { getSalesDocumentConfig: async () => S4_SALES_DOCUMENT_CONFIG },
+        salesDocumentStrategyFactory: () => ({
+          documentBusinessPartnerResolver: {
+            findOrCreateForDocument: jest.fn().mockResolvedValue({
+              cardCode: '100400',
+              businessPartnerResult: { created: true, matchedBy: null },
+              contactEmployeeResult: {
+                created: false, internalCode: null, internalCodes: [], requestPayload: null,
+                responsePayload: null, updateResults: [],
+              },
+              contactEmployeeFailures: [],
+              hubspotToken: 'token-1',
+              dealContactIsContactEmployee: false,
+              ...resolverResult,
+            }),
+          },
+          salesDocumentBuilder: {
+            buildQuotationPayload: jest.fn().mockReturnValue({ SoldToParty: '100400', to_Item: [] }),
+          },
+          salesDocumentAdapter: {
+            createQuotation: jest.fn().mockResolvedValue({ DocEntry: 1, DocNum: 1, DocumentLines: [] }),
+          },
+        }),
+        buildWebhookSyncErrorEntry: jest.fn(),
+        buildErrorResponseSnapshot: jest.fn(),
+        buildWebhookSapAudit: jest.fn().mockReturnValue({}),
+        logger: { warn: jest.fn(), info: jest.fn() },
+      });
+
+      await useCase.execute({ event, tenantModels });
+      return updateAfterSap;
+    }
+
+    const contactOnlyEvent = {
+      ...baseEvent,
+      payload: {
+        ...baseEvent.payload,
+        company: undefined,
+        contact: { hs_object_id: 'ct1', firstname: 'Maria', lastname: 'Lopez' },
+      },
+    };
+
+    it('writes the contact idsap back when the contact is the business partner', async () => {
+      const updateAfterSap = await runS4Quotation({
+        event: contactOnlyEvent,
+        resolverResult: { contactIsBusinessPartner: true },
+      });
+
+      expect(updateAfterSap).toHaveBeenCalledWith(expect.objectContaining({
+        cardCode: '100400',
+        syncCompany: false,
+        syncContact: true,
+      }));
+      // S/4 has no ContactEmployee code: it must not be written to the contact.
+      expect(updateAfterSap.mock.calls[0][0].contactEmployeeCode).toBeUndefined();
+    });
+
+    it('does not write the contact when it hangs off a company and no contact employee was created', async () => {
+      const updateAfterSap = await runS4Quotation({
+        event: {
+          ...baseEvent,
+          payload: { ...baseEvent.payload, contact: { hs_object_id: 'ct1', firstname: 'Maria' } },
+        },
+        resolverResult: { contactIsBusinessPartner: false },
+      });
+
+      expect(updateAfterSap).toHaveBeenCalledWith(expect.objectContaining({ syncContact: false }));
+    });
+  });
+
   // Fix round 1 (hallazgo 2): la version anterior de este test solo comprobaba que la factory
   // fue llamada con cierto sabor, sin asserter nada de la CONDUCTA de B1 -- un `objectContaining`
   // no hubiera detectado que a las deps les faltara alguna clave. Ahora se comprueba que el
