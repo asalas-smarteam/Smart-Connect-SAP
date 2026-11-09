@@ -20,6 +20,30 @@ const SALES_AREA_FIELDS = [
   { key: 'division', label: 'Division' },
 ];
 
+const PERSON_CATEGORY = '1';
+
+// Person partners (category 1) carry FirstName/LastName instead of OrganizationBPName1. When
+// the mapping only produced a full name, the first word is the FirstName and the remainder is
+// the LastName; a single word goes to LastName alone (LastName is the one SAP always accepts).
+function resolvePersonNames(rest, readOnlyName) {
+  const firstName = toNonEmptyString(rest.FirstName);
+  const lastName = toNonEmptyString(rest.LastName);
+
+  if (firstName || lastName) {
+    return { firstName, lastName };
+  }
+
+  const fullName = toNonEmptyString(rest[WRITABLE_NAME_FIELD]) || toNonEmptyString(readOnlyName);
+  if (!fullName) {
+    return { firstName: null, lastName: null };
+  }
+
+  const [first, ...others] = fullName.split(/\s+/);
+  return others.length > 0
+    ? { firstName: first, lastName: others.join(' ') }
+    : { firstName: null, lastName: first };
+}
+
 function hasEntries(value) {
   return Boolean(value) && Object.keys(value).length > 0;
 }
@@ -44,28 +68,57 @@ export function buildS4BusinessPartnerCreatePayload({
   creationConfig,
   salesArea,
   logger = null,
+  category = 'organization',
 }) {
   assertSalesAreaIsComplete(salesArea);
 
-  const defaults = creationConfig?.defaults ?? {};
+  const isPerson = category === 'person';
+  const defaults = (isPerson ? creationConfig?.personDefaults : null) ?? creationConfig?.defaults ?? {};
   const expanded = expandS4ODataKeys(mappedCompany || {}, { logger });
 
   const { [READ_ONLY_NAME_FIELD]: readOnlyName, to_Customer: mappedCustomer, ...rest } = expanded;
-  const name = toNonEmptyString(rest[WRITABLE_NAME_FIELD]) || toNonEmptyString(readOnlyName);
+  let payload;
 
-  if (!name) {
-    throw new PermanentWebhookError(
-      'El nombre de la empresa es requerido para crear el cliente en S/4: el mapeo company/businessPartner no produjo BusinessPartnerFullName ni OrganizationBPName1'
-    );
+  if (isPerson) {
+    const { firstName, lastName } = resolvePersonNames(rest, readOnlyName);
+
+    if (!firstName && !lastName) {
+      throw new PermanentWebhookError(
+        'El nombre de la persona es requerido para crear el cliente en S/4: el mapeo contact/businessPartner no produjo FirstName, LastName ni un nombre completo'
+      );
+    }
+
+    const { [WRITABLE_NAME_FIELD]: _organizationName, ...personRest } = rest;
+    payload = {
+      ...personRest,
+      ...defaults.BusinessPartner,
+      BusinessPartnerCategory: PERSON_CATEGORY,
+      ...(firstName ? { FirstName: firstName } : {}),
+      ...(lastName ? { LastName: lastName } : {}),
+    };
+    if (!firstName) {
+      delete payload.FirstName;
+    }
+    if (!lastName) {
+      delete payload.LastName;
+    }
+  } else {
+    const name = toNonEmptyString(rest[WRITABLE_NAME_FIELD]) || toNonEmptyString(readOnlyName);
+
+    if (!name) {
+      throw new PermanentWebhookError(
+        'El nombre de la empresa es requerido para crear el cliente en S/4: el mapeo company/businessPartner no produjo BusinessPartnerFullName ni OrganizationBPName1'
+      );
+    }
+
+    // Precedencia: el mapeo llena, el default configurado pisa. Mismo orden que B1, donde el
+    // default del tenant es la política y el dato de HubSpot es solo el relleno.
+    payload = {
+      ...rest,
+      ...defaults.BusinessPartner,
+      [WRITABLE_NAME_FIELD]: name,
+    };
   }
-
-  // Precedencia: el mapeo llena, el default configurado pisa. Mismo orden que B1, donde el
-  // default del tenant es la política y el dato de HubSpot es solo el relleno.
-  const payload = {
-    ...rest,
-    ...defaults.BusinessPartner,
-    [WRITABLE_NAME_FIELD]: name,
-  };
 
   const roles = Array.isArray(defaults.BusinessPartnerRole) ? defaults.BusinessPartnerRole : [];
   if (roles.length > 0) {
