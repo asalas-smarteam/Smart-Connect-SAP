@@ -1,6 +1,7 @@
 import { mapHubspotToSapFields } from '#domain/orders/order-builder.service.js';
 import { buildS4BusinessPartnerCreatePayload } from '#domain/business-partners/s4-business-partner-payload.service.js';
 import { resolveBusinessPartnerSyncPlan } from '#application/use-cases/webhookQuotationSupport.js';
+import { PermanentWebhookError } from '#shared/errors/index.js';
 import { escapeODataString, toNonEmptyString } from '#shared/utils/string.utils.js';
 
 const BUSINESS_PARTNER_PATH = '/API_BUSINESS_PARTNER/A_BusinessPartner';
@@ -99,14 +100,31 @@ export class S4DocumentBusinessPartnerResolver {
     company,
     contact,
     companyExists,
+    contactExists,
     context,
     auditTrail,
     salesArea,
   }) {
     const { mappings, tenantModels, hubspotCredentials } = context;
-    const mappedCompany = mapHubspotToSapFields(company || {}, mappings.companyMappings, {
-      logger: this.logger,
-    });
+
+    // A deal with a contact but no company (B2C): the contact itself becomes the customer, a
+    // category 1 (person) BusinessPartner mapped with the contact/businessPartner mappings.
+    const contactHasRecord = Boolean(contactExists ?? contact);
+    const contactIsBusinessPartner = !companyExists && contactHasRecord;
+
+    if (!companyExists && !contactHasRecord) {
+      throw new PermanentWebhookError(
+        'A company or a contact is required to resolve the S/4 business partner: the deal has neither'
+      );
+    }
+
+    const mappedSource = contactIsBusinessPartner
+      ? mapHubspotToSapFields(contact || {}, mappings.contactBusinessPartnerMappings, {
+        logger: this.logger,
+      })
+      : mapHubspotToSapFields(company || {}, mappings.companyMappings, {
+        logger: this.logger,
+      });
 
     const [defaultFindSAP, creationConfig] = await Promise.all([
       this.runtimeRepository.resolveDefaultFindSAP(tenantModels),
@@ -114,10 +132,11 @@ export class S4DocumentBusinessPartnerResolver {
     ]);
 
     const businessPartnerResult = await this.resolveBusinessPartner({
-      mappedCompany,
+      mappedCompany: mappedSource,
       defaultFindSAP,
       creationConfig,
       salesArea,
+      category: contactIsBusinessPartner ? 'person' : 'organization',
     });
 
     auditTrail.payload_SAP.businessPartner = businessPartnerResult.requestPayload;
@@ -129,9 +148,9 @@ export class S4DocumentBusinessPartnerResolver {
       company,
       contact,
       companyExists,
-      // Sin ContactEmployees no hay nada que escribirle al contacto, así que nunca se
-      // sincroniza su idsap por esta vía.
-      contactExists: false,
+      // Sin ContactEmployees no hay nada que escribirle a un contacto que cuelga de una
+      // empresa; solo cuando el contacto ES el cliente se sincroniza su idsap.
+      contactExists: contactIsBusinessPartner,
     });
 
     let hubspotToken = null;
@@ -146,7 +165,7 @@ export class S4DocumentBusinessPartnerResolver {
         payload,
         cardCode,
         syncCompany: syncPlan.shouldSyncCompanySapId,
-        syncContact: false,
+        syncContact: syncPlan.shouldSyncContactSapId,
       });
     }
 
@@ -157,10 +176,17 @@ export class S4DocumentBusinessPartnerResolver {
       contactEmployeeFailures: [],
       hubspotToken,
       dealContactIsContactEmployee: false,
+      contactIsBusinessPartner,
     };
   }
 
-  async resolveBusinessPartner({ mappedCompany, defaultFindSAP, creationConfig, salesArea }) {
+  async resolveBusinessPartner({
+    mappedCompany,
+    defaultFindSAP,
+    creationConfig,
+    salesArea,
+    category = 'organization',
+  }) {
     const primaryField = toNonEmptyString(defaultFindSAP) || BUSINESS_PARTNER_KEY_FIELD;
     const primaryValue = toNonEmptyString(mappedCompany?.[primaryField]);
 
@@ -214,6 +240,7 @@ export class S4DocumentBusinessPartnerResolver {
       mappedCompany,
       creationConfig,
       salesArea,
+      category,
       logger: this.logger,
     });
 

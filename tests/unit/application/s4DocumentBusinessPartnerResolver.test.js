@@ -36,19 +36,58 @@ function buildArgs(overrides = {}) {
   };
 }
 
-function buildResolver({ transport, defaultFindSAP = 'BusinessPartner' }) {
+const CONTACT_MAPPINGS = [
+  { sourceField: 'BusinessPartner', targetField: 'idsap', isActive: true },
+  { sourceField: 'FirstName', targetField: 'firstname', isActive: true },
+  { sourceField: 'LastName', targetField: 'lastname', isActive: true },
+  { sourceField: 'to_Customer.BPTaxLongNumber', targetField: 'cedula', isActive: true },
+];
+
+const PERSON_CREATION_CONFIG = {
+  ...CREATION_CONFIG,
+  personDefaults: {
+    BusinessPartner: { BusinessPartnerGrouping: 'ZP01' },
+    BusinessPartnerRole: ['FLCU01'],
+    Customer: { CustomerAccountGroup: 'ZP01' },
+    CustomerCompany: {},
+    CustomerSalesArea: { Currency: 'GTQ' },
+  },
+};
+
+function buildContactOnlyArgs(overrides = {}) {
+  const base = buildArgs();
+  return {
+    ...base,
+    company: null,
+    companyExists: false,
+    contact: { idsap: '', firstname: 'Maria', lastname: 'Lopez', cedula: '7654321-0' },
+    contactExists: true,
+    context: {
+      ...base.context,
+      mappings: { companyMappings: COMPANY_MAPPINGS, contactBusinessPartnerMappings: CONTACT_MAPPINGS },
+    },
+    ...overrides,
+  };
+}
+
+function buildResolver({
+  transport,
+  defaultFindSAP = 'BusinessPartner',
+  creationConfig = CREATION_CONFIG,
+  hubspotWebhookAdapter = {
+    getAccessToken: async () => 'token-1',
+    updateBusinessPartnerIds: async () => ({ company: { ok: true } }),
+  },
+}) {
   return new S4DocumentBusinessPartnerResolver({
     transport,
     runtimeRepository: {
       resolveDefaultFindSAP: async () => defaultFindSAP,
     },
     salesDocumentConfigRepository: {
-      getBusinessPartnerCreationConfig: async () => CREATION_CONFIG,
+      getBusinessPartnerCreationConfig: async () => creationConfig,
     },
-    hubspotWebhookAdapter: {
-      getAccessToken: async () => 'token-1',
-      updateBusinessPartnerIds: async () => ({ company: { ok: true } }),
-    },
+    hubspotWebhookAdapter,
     webhookReferenceRepository: { persistReferences: jest.fn() },
     logger: { warn: jest.fn(), info: jest.fn() },
   });
@@ -309,5 +348,120 @@ describe('S4DocumentBusinessPartnerResolver', () => {
     await expect(resolver.findOrCreateForDocument(buildArgs({
       company: { idsap: '', cedula: '1234567-8' },
     }))).rejects.toThrow(/nombre/i);
+  });
+
+  describe('contact-only deals (person business partner)', () => {
+    function buildHubspotSpy() {
+      return {
+        getAccessToken: jest.fn().mockResolvedValue('token-1'),
+        updateBusinessPartnerIds: jest.fn().mockResolvedValue({ contact: { ok: true } }),
+      };
+    }
+
+    it('creates a category 1 partner from the contact mappings and writes the id to the contact', async () => {
+      const request = jest.fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce({ BusinessPartner: '100300' });
+      const hubspotWebhookAdapter = buildHubspotSpy();
+      const resolver = buildResolver({
+        transport: { request },
+        creationConfig: PERSON_CREATION_CONFIG,
+        hubspotWebhookAdapter,
+      });
+      const args = buildContactOnlyArgs();
+
+      const result = await resolver.findOrCreateForDocument(args);
+
+      expect(request.mock.calls[0][0].query.$filter).toBe("to_Customer/BPTaxLongNumber eq '7654321-0'");
+      const createCall = request.mock.calls[1][0];
+      expect(createCall.method).toBe('post');
+      expect(createCall.body).toMatchObject({
+        BusinessPartnerCategory: '1',
+        BusinessPartnerGrouping: 'ZP01',
+        FirstName: 'Maria',
+        LastName: 'Lopez',
+        to_BusinessPartnerRole: [{ BusinessPartnerRole: 'FLCU01' }],
+      });
+      expect(createCall.body).not.toHaveProperty('OrganizationBPName1');
+      expect(result.cardCode).toBe('100300');
+      expect(result.businessPartnerResult.created).toBe(true);
+      expect(result.contactIsBusinessPartner).toBe(true);
+      expect(result.contactEmployeeResult.created).toBe(false);
+      expect(result.dealContactIsContactEmployee).toBe(false);
+      expect(hubspotWebhookAdapter.updateBusinessPartnerIds).toHaveBeenCalledWith(expect.objectContaining({
+        cardCode: '100300',
+        syncContact: true,
+        syncCompany: false,
+      }));
+    });
+
+    it('writes the id to the contact when an existing partner is matched and the contact has no id yet', async () => {
+      const request = jest.fn().mockResolvedValue([{ BusinessPartner: '100301' }]);
+      const hubspotWebhookAdapter = buildHubspotSpy();
+      const resolver = buildResolver({ transport: { request }, hubspotWebhookAdapter });
+
+      const result = await resolver.findOrCreateForDocument(buildContactOnlyArgs());
+
+      expect(result.cardCode).toBe('100301');
+      expect(result.businessPartnerResult.created).toBe(false);
+      expect(hubspotWebhookAdapter.updateBusinessPartnerIds).toHaveBeenCalledWith(expect.objectContaining({
+        cardCode: '100301',
+        syncContact: true,
+        syncCompany: false,
+      }));
+    });
+
+    it('does not rewrite the contact id when the partner was found through the contact id already stored', async () => {
+      const request = jest.fn().mockResolvedValue({ BusinessPartner: '100302' });
+      const hubspotWebhookAdapter = buildHubspotSpy();
+      const resolver = buildResolver({ transport: { request }, hubspotWebhookAdapter });
+
+      const result = await resolver.findOrCreateForDocument(buildContactOnlyArgs({
+        contact: { idsap: '100302', firstname: 'Maria', lastname: 'Lopez' },
+      }));
+
+      expect(result.cardCode).toBe('100302');
+      expect(hubspotWebhookAdapter.updateBusinessPartnerIds).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the company defaults when the tenant has no person defaults', async () => {
+      const request = jest.fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce({ BusinessPartner: '100303' });
+      const resolver = buildResolver({ transport: { request } });
+
+      await resolver.findOrCreateForDocument(buildContactOnlyArgs());
+
+      expect(request.mock.calls[1][0].body).toMatchObject({
+        BusinessPartnerCategory: '1',
+        BusinessPartnerGrouping: 'ZC01',
+      });
+    });
+
+    it('throws a permanent error when there is neither a company nor a contact', async () => {
+      const request = jest.fn();
+      const resolver = buildResolver({ transport: { request } });
+
+      await expect(resolver.findOrCreateForDocument(buildContactOnlyArgs({
+        contact: null,
+        contactExists: false,
+      }))).rejects.toMatchObject({ name: 'PermanentWebhookError', message: expect.stringMatching(/company or a contact/i) });
+      expect(request).not.toHaveBeenCalled();
+    });
+
+    it('keeps the company flow untouched when both a company and a contact exist', async () => {
+      const request = jest.fn().mockResolvedValue({ BusinessPartner: '100053' });
+      const hubspotWebhookAdapter = buildHubspotSpy();
+      const resolver = buildResolver({ transport: { request }, hubspotWebhookAdapter });
+
+      const result = await resolver.findOrCreateForDocument(buildArgs({
+        company: { idsap: '100053', name: 'ACME' },
+        contact: { firstname: 'Maria', lastname: 'Lopez' },
+        contactExists: true,
+      }));
+
+      expect(result.contactIsBusinessPartner).toBe(false);
+      expect(hubspotWebhookAdapter.updateBusinessPartnerIds).not.toHaveBeenCalled();
+    });
   });
 });
