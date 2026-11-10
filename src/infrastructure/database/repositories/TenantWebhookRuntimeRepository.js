@@ -23,6 +23,8 @@ import { resolveSapFlavor } from '#infrastructure/config/SapFlavorConfigReposito
 import {
   ADDRESS_EXTENSION_OBJECT_TYPE,
   ADDRESS_EXTENSION_SOURCE_CONTEXT,
+  ADDRESS_STREET_MAX_LENGTH_CONFIG_KEY,
+  normalizeStreetMaxLength,
 } from '#domain/orders/address-extension.service.js';
 
 // Key intencionalmente escrita "groupCodeDefauls" (sin la "t") — así existe en los tenants.
@@ -191,6 +193,24 @@ export class TenantWebhookRuntimeRepository {
       tenantModels,
       { allowBusinessPartnerFallback: false }
     );
+  }
+
+  // Longest street the tenant's SAP stores. Direct read and NOT tenantConfigurationService.getValue:
+  // that helper writes the fallback into the tenant's database when the key is missing, and this
+  // setting is optional (the default is enough for most tenants).
+  async resolveAddressStreetMaxLength(tenantModels) {
+    const Configuration = tenantModels?.Configuration;
+
+    if (typeof Configuration?.findOne !== 'function') {
+      return normalizeStreetMaxLength(null);
+    }
+
+    const query = Configuration.findOne({ key: ADDRESS_STREET_MAX_LENGTH_CONFIG_KEY });
+    const configuration = typeof query?.lean === 'function'
+      ? await query.lean()
+      : await query;
+
+    return normalizeStreetMaxLength(configuration?.value);
   }
 
   async findOwnerMappingByHubspotOwner({ tenantModels, hubspotCredentialId, hubspotOwnerId }) {

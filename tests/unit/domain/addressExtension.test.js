@@ -1,4 +1,8 @@
-import { buildAddressExtension } from '../../../src/domain/orders/address-extension.service.js';
+import {
+  ADDRESS_STREET_MAX_LENGTH,
+  buildAddressExtension,
+  normalizeStreetMaxLength,
+} from '../../../src/domain/orders/address-extension.service.js';
 import { PermanentWebhookError } from '../../../src/shared/errors/index.js';
 
 describe('buildAddressExtension', () => {
@@ -77,5 +81,107 @@ describe('buildAddressExtension', () => {
       source: { billing_street: '' },
       mappings: [{ sourceField: 'BillToStreet', targetField: 'billing_street' }],
     })).toBeNull();
+  });
+
+  // SAP silently drops the whole street when it is longer than its limit (it answers with
+  // ShipToStreet null and no error), so the document would be created without a delivery address.
+  // The integration only transports data: it never cuts the street, it rejects the event.
+  describe('street length limit', () => {
+    const streetMappings = [
+      { sourceField: 'BillToStreet', targetField: 'billing_street' },
+      { sourceField: 'ShipToStreet', targetField: 'shipping_street' },
+    ];
+
+    it('sends a street of exactly 100 characters as it is', () => {
+      const street = 'a'.repeat(100);
+
+      const result = buildAddressExtension({
+        source: { billing_street: street, shipping_street: street },
+        mappings: streetMappings,
+      });
+
+      expect(result).toEqual({ BillToStreet: street, ShipToStreet: street });
+    });
+
+    it('rejects a street longer than 100 characters instead of cutting it', () => {
+      const call = () => buildAddressExtension({
+        source: { billing_street: 'Calle 1', shipping_street: 'x'.repeat(116) },
+        mappings: streetMappings,
+      });
+
+      expect(call).toThrow(PermanentWebhookError);
+      expect(call).toThrow(/ShipToStreet has 116 characters/);
+      expect(call).toThrow(/at most 100/);
+    });
+
+    it('names every street that is too long in one error', () => {
+      expect(() => buildAddressExtension({
+        source: { billing_street: 'b'.repeat(101), shipping_street: 's'.repeat(116) },
+        mappings: streetMappings,
+      })).toThrow(/BillToStreet has 101 characters and ShipToStreet has 116 characters/);
+    });
+
+    it('never puts the address text in the error', () => {
+      let message = '';
+
+      try {
+        buildAddressExtension({
+          source: { shipping_street: 'x'.repeat(116) },
+          mappings: streetMappings,
+        });
+      } catch (error) {
+        message = error.message;
+      }
+
+      expect(message).not.toContain('xxxxx');
+    });
+
+    it('does not check fields other than the streets', () => {
+      const city = 'c'.repeat(150);
+
+      const result = buildAddressExtension({
+        source: { city },
+        mappings: [{ sourceField: 'ShipToCity', targetField: 'city' }],
+      });
+
+      expect(result).toEqual({ ShipToCity: city });
+    });
+
+    it('accepts a longer street when the tenant raises the limit', () => {
+      const street = 'a'.repeat(150);
+
+      const result = buildAddressExtension({
+        source: { shipping_street: street },
+        mappings: streetMappings,
+        streetMaxLength: 200,
+      });
+
+      expect(result).toEqual({ ShipToStreet: street });
+    });
+
+    it('rejects a street that exceeds a limit the tenant lowered', () => {
+      expect(() => buildAddressExtension({
+        source: { shipping_street: 'a'.repeat(61) },
+        mappings: streetMappings,
+        streetMaxLength: 60,
+      })).toThrow(/ShipToStreet has 61 characters.*at most 60/);
+    });
+  });
+
+  describe('normalizeStreetMaxLength', () => {
+    it.each([
+      [200, 200],
+      ['150', 150],
+      [' 80 ', 80],
+    ])('keeps the usable limit %p as %p', (value, expected) => {
+      expect(normalizeStreetMaxLength(value)).toBe(expected);
+    });
+
+    it.each([[null], [undefined], [0], [-5], [12.5], ['abc'], ['']])(
+      'falls back to the default for the unusable value %p',
+      (value) => {
+        expect(normalizeStreetMaxLength(value)).toBe(ADDRESS_STREET_MAX_LENGTH);
+      }
+    );
   });
 });

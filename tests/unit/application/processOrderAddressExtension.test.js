@@ -61,6 +61,7 @@ function buildDeps() {
       resolveSapErrorBypassConfig: jest.fn().mockResolvedValue({ contactEmployee: false }),
       // Loaded on demand by createDeal, not part of resolveRuntimeContext.
       resolveAddressExtensionMappings: jest.fn().mockResolvedValue([]),
+      resolveAddressStreetMaxLength: jest.fn().mockResolvedValue(100),
     },
     sapOrderAdapter: {
       findOrCreateBusinessPartner: jest.fn().mockResolvedValue({
