@@ -67,6 +67,7 @@ function buildRuntimeRepository(context = buildContext()) {
     resolveSapErrorBypassConfig: jest.fn().mockResolvedValue({ contactEmployee: false }),
     // Loaded on demand by createQuotation, not part of resolveRuntimeContext.
     resolveAddressExtensionMappings: jest.fn().mockResolvedValue([]),
+    resolveAddressStreetMaxLength: jest.fn().mockResolvedValue(100),
   };
 }
 
@@ -411,6 +412,42 @@ describe('ProcessHubspotCreateQuotation', () => {
       expect(error.syncLogWebhookErrors).toHaveLength(1);
       expect(deps.sapOrderAdapter.findOrCreateBusinessPartner).not.toHaveBeenCalled();
       expect(deps.sapQuotationAdapter.createQuotation).not.toHaveBeenCalled();
+    });
+
+    // SAP would drop the street without an error, so the event is rejected instead of creating a
+    // quotation with no delivery address. Nothing is cut and nothing reaches SAP.
+    it('rejects a street longer than the tenant limit before touching SAP', async () => {
+      const deps = buildDeps();
+      deps.runtimeRepository.resolveAddressExtensionMappings.mockResolvedValue(addressExtensionMappings);
+      const useCase = new ProcessHubspotCreateQuotation(deps);
+
+      const error = await useCase
+        .execute({
+          event: buildEvent({ billing_street: 'Calle 1', shipping_street: 'x'.repeat(116) }),
+          tenantModels,
+        })
+        .catch((caught) => caught);
+
+      expect(error).toMatchObject({ name: 'PermanentWebhookError', permanent: true });
+      expect(error.message).toMatch(/ShipToStreet has 116 characters.*at most 100/);
+      expect(error.message).not.toContain('xxxxx');
+      expect(error.syncLogWebhookErrors).toHaveLength(1);
+      expect(deps.runtimeRepository.resolveAddressStreetMaxLength).toHaveBeenCalledWith(tenantModels);
+      expect(deps.sapOrderAdapter.findOrCreateBusinessPartner).not.toHaveBeenCalled();
+      expect(deps.sapQuotationAdapter.createQuotation).not.toHaveBeenCalled();
+    });
+
+    it('sends the whole street when the tenant configured a higher limit', async () => {
+      const deps = buildDeps();
+      deps.runtimeRepository.resolveAddressExtensionMappings.mockResolvedValue(addressExtensionMappings);
+      deps.runtimeRepository.resolveAddressStreetMaxLength.mockResolvedValue(200);
+      const useCase = new ProcessHubspotCreateQuotation(deps);
+      const street = 'x'.repeat(150);
+
+      await useCase.execute({ event: buildEvent({ shipping_street: street }), tenantModels });
+
+      const { quotationPayload } = deps.sapQuotationAdapter.createQuotation.mock.calls[0][0];
+      expect(quotationPayload.AddressExtension).toEqual({ ShipToStreet: street });
     });
 
     it('skips AddressExtension when the tenant has no mappings, even if the payload carries it', async () => {

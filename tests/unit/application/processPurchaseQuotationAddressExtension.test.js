@@ -23,6 +23,7 @@ function buildDeps() {
       resolvePurchaseQuotationDefaults: jest.fn().mockResolvedValue({}),
       // Loaded on demand, not part of resolveRuntimeContext.
       resolveAddressExtensionMappings: jest.fn().mockResolvedValue([]),
+      resolveAddressStreetMaxLength: jest.fn().mockResolvedValue(100),
     },
     sapPurchaseQuotationAdapter: {
       createPurchaseQuotation: jest.fn().mockResolvedValue({

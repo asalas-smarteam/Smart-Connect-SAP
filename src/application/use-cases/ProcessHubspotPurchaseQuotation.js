@@ -126,6 +126,7 @@ export class ProcessHubspotPurchaseQuotation {
         ? null
         : buildAddressExtension({
           source: addressExtension,
+          streetMaxLength: await this.runtimeRepository.resolveAddressStreetMaxLength(tenantModels),
           mappings: await this.runtimeRepository.resolveAddressExtensionMappings({
             tenantModels,
             hubspotCredentialId: hubspotCredentials._id,

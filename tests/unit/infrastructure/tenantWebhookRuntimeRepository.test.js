@@ -144,3 +144,36 @@ describe('TenantWebhookRuntimeRepository.resolveAddressExtensionMappings', () =>
     );
   });
 });
+
+describe('TenantWebhookRuntimeRepository.resolveAddressStreetMaxLength', () => {
+  it('reads the limit the tenant configured under addressStreetMaxLength', async () => {
+    const repository = new TenantWebhookRuntimeRepository();
+    const tenantModels = buildTenantModels();
+    tenantModels.Configuration.findOne.mockReturnValue(createLeanQuery({ key: 'addressStreetMaxLength', value: 200 }));
+
+    await expect(repository.resolveAddressStreetMaxLength(tenantModels)).resolves.toBe(200);
+    expect(tenantModels.Configuration.findOne).toHaveBeenCalledWith({ key: 'addressStreetMaxLength' });
+  });
+
+  it('falls back to 100 when the tenant has no such configuration, without writing it', async () => {
+    const repository = new TenantWebhookRuntimeRepository();
+    const tenantModels = buildTenantModels();
+
+    await expect(repository.resolveAddressStreetMaxLength(tenantModels)).resolves.toBe(100);
+    expect(tenantModels.Configuration.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('falls back to 100 when the configured value is not a positive integer', async () => {
+    const repository = new TenantWebhookRuntimeRepository();
+    const tenantModels = buildTenantModels();
+    tenantModels.Configuration.findOne.mockReturnValue(createLeanQuery({ key: 'addressStreetMaxLength', value: 'many' }));
+
+    await expect(repository.resolveAddressStreetMaxLength(tenantModels)).resolves.toBe(100);
+  });
+
+  it('falls back to 100 when the tenant has no Configuration model', async () => {
+    const repository = new TenantWebhookRuntimeRepository();
+
+    await expect(repository.resolveAddressStreetMaxLength({})).resolves.toBe(100);
+  });
+});
