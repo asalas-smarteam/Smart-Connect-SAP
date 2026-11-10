@@ -68,6 +68,7 @@ describe('S4SalesDocumentAdapter', () => {
       to_Item: [{ SalesQuotationItem: '000010' }],
       DocEntry: 20000123,
       DocNum: 20000123,
+      DocumentNumber: '20000123',
       DocumentLines: [{ LineNum: 10 }],
     });
     expect(result).not.toHaveProperty('raw');
@@ -77,6 +78,7 @@ describe('S4SalesDocumentAdapter', () => {
     expect(normalizeS4QuotationResponse(null)).toEqual({
       DocEntry: null,
       DocNum: null,
+      DocumentNumber: null,
       DocumentLines: [],
     });
   });
@@ -101,6 +103,17 @@ describe('normalizeS4QuotationResponse', () => {
     const result = normalizeS4QuotationResponse({ SalesQuotation: '' });
     expect(result.DocEntry).toBeNull();
     expect(result.DocNum).toBeNull();
+  });
+
+  it('expone un número alfanumérico como DocumentNumber y deja DocEntry/DocNum en null', () => {
+    const result = normalizeS4QuotationResponse({ SalesQuotation: 'TD10007275' });
+    expect(result.DocEntry).toBeNull();
+    expect(result.DocNum).toBeNull();
+    expect(result.DocumentNumber).toBe('TD10007275');
+  });
+
+  it('expone DocumentNumber null cuando el número viene vacío', () => {
+    expect(normalizeS4QuotationResponse({ SalesQuotation: '  ' }).DocumentNumber).toBeNull();
   });
 
   // 0 es un LineNum legítimo en Business One, así que una posición sin número no puede

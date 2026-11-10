@@ -31,6 +31,13 @@ function parseFiniteNumberOrNull(value) {
 // SapDocumentLink acepta en sapLineNum (Number).
 export function normalizeS4QuotationResponse(raw) {
   const documentNumber = parseFiniteNumberOrNull(raw?.SalesQuotation);
+  // S/4 number ranges can carry a prefix (e.g. "AB10007275"), so the number is not always
+  // numeric. DocEntry/DocNum stay numeric-or-null because SapDocumentLink stores them as
+  // Number; the raw text travels separately for consumers that can hold a string.
+  const rawNumber = raw?.SalesQuotation;
+  const documentNumberText = rawNumber === undefined || rawNumber === null
+    ? null
+    : String(rawNumber).trim() || null;
 
   // La entidad de SAP se queda en el nivel superior (como la de B1 en sapAudit.responseSap);
   // los campos normalizados van después para que ganen sobre cualquier campo homónimo.
@@ -38,6 +45,7 @@ export function normalizeS4QuotationResponse(raw) {
     ...raw,
     DocEntry: documentNumber,
     DocNum: documentNumber,
+    DocumentNumber: documentNumberText,
     DocumentLines: readCollection(raw?.to_Item).map((item) => ({
       LineNum: parseFiniteNumberOrNull(item?.SalesQuotationItem),
     })),
