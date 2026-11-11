@@ -169,4 +169,123 @@ describe('buildS4BusinessPartnerCreatePayload', () => {
       salesArea: {},
     })).toThrow(/SalesOrganization, DistributionChannel, Division/);
   });
+
+  describe('person mode', () => {
+    const personBuild = (mappedCompany, overrides = {}) => buildS4BusinessPartnerCreatePayload({
+      mappedCompany,
+      creationConfig: CREATION_CONFIG,
+      salesArea: SALES_AREA,
+      category: 'person',
+      ...overrides,
+    });
+
+    it('builds a category 1 partner with FirstName/LastName and no organization name', () => {
+      const payload = personBuild({
+        FirstName: 'Maria',
+        LastName: 'Lopez',
+        'to_BusinessPartnerAddress.Country': 'GT',
+        'to_Customer.BPTaxLongNumber': '1234567-8',
+      });
+
+      expect(payload).toEqual({
+        BusinessPartnerCategory: '1',
+        BusinessPartnerGrouping: 'ZC01',
+        FirstName: 'Maria',
+        LastName: 'Lopez',
+        to_BusinessPartnerRole: [
+          { BusinessPartnerRole: 'FLCU00' },
+          { BusinessPartnerRole: 'FLCU01' },
+        ],
+        to_BusinessPartnerAddress: [{ Country: 'GT' }],
+        to_Customer: {
+          CustomerAccountGroup: 'ZC01',
+          BPTaxLongNumber: '1234567-8',
+          to_CustomerCompany: [{ CompanyCode: '1000', ReconciliationAccount: '0012100000' }],
+          to_CustomerSalesArea: [{
+            Currency: 'GTQ',
+            PriceListType: 'ZC',
+            SalesOrganization: 'MQGT',
+            DistributionChannel: '01',
+            Division: '00',
+          }],
+        },
+      });
+      expect(payload).not.toHaveProperty('OrganizationBPName1');
+    });
+
+    it('forces category 1 even when the defaults declare the organization category', () => {
+      const payload = personBuild({ FirstName: 'Maria', LastName: 'Lopez', BusinessPartnerCategory: '2' });
+
+      expect(payload.BusinessPartnerCategory).toBe('1');
+    });
+
+    it('splits a mapped full name: first word is FirstName, the rest is LastName', () => {
+      const payload = personBuild({ BusinessPartnerFullName: 'Maria de la Cruz' });
+
+      expect(payload.FirstName).toBe('Maria');
+      expect(payload.LastName).toBe('de la Cruz');
+      expect(payload).not.toHaveProperty('BusinessPartnerFullName');
+      expect(payload).not.toHaveProperty('OrganizationBPName1');
+    });
+
+    it('puts a single-word full name in LastName only', () => {
+      const payload = personBuild({ OrganizationBPName1: 'Madonna' });
+
+      expect(payload.LastName).toBe('Madonna');
+      expect(payload).not.toHaveProperty('FirstName');
+      expect(payload).not.toHaveProperty('OrganizationBPName1');
+    });
+
+    it('prefers mapped FirstName/LastName over a mapped full name', () => {
+      const payload = personBuild({
+        FirstName: 'Ana',
+        LastName: 'Perez',
+        BusinessPartnerFullName: 'Otro Nombre Completo',
+      });
+
+      expect(payload.FirstName).toBe('Ana');
+      expect(payload.LastName).toBe('Perez');
+    });
+
+    it('accepts only a LastName', () => {
+      const payload = personBuild({ LastName: 'Perez' });
+
+      expect(payload.LastName).toBe('Perez');
+      expect(payload).not.toHaveProperty('FirstName');
+    });
+
+    it('throws a permanent error when neither FirstName nor LastName can be derived', () => {
+      expect(() => personBuild({ 'to_Customer.BPTaxLongNumber': '1234567-8' })).toThrow(
+        /FirstName|LastName/
+      );
+    });
+
+    it('uses personDefaults when the creation config provides them', () => {
+      const payload = personBuild(
+        { FirstName: 'Ana', LastName: 'Perez' },
+        {
+          creationConfig: {
+            ...CREATION_CONFIG,
+            personDefaults: {
+              BusinessPartner: { BusinessPartnerGrouping: 'ZP01' },
+              BusinessPartnerRole: ['FLCU01'],
+              Customer: { CustomerAccountGroup: 'ZP01' },
+              CustomerCompany: {},
+              CustomerSalesArea: { Currency: 'USD' },
+            },
+          },
+        }
+      );
+
+      expect(payload.BusinessPartnerGrouping).toBe('ZP01');
+      expect(payload.to_BusinessPartnerRole).toEqual([{ BusinessPartnerRole: 'FLCU01' }]);
+      expect(payload.to_Customer.CustomerAccountGroup).toBe('ZP01');
+      expect(payload.to_Customer).not.toHaveProperty('to_CustomerCompany');
+      expect(payload.to_Customer.to_CustomerSalesArea[0].Currency).toBe('USD');
+    });
+
+    it('still requires a complete sales area', () => {
+      expect(() => personBuild({ FirstName: 'Ana' }, { salesArea: {} })).toThrow(/SalesOrganization/);
+    });
+  });
 });

@@ -106,12 +106,21 @@ export class HubspotWebhookAdapter {
       // la propiedad del negocio. El adapter de S/4 devuelve null cuando la respuesta no trae
       // número; B1 manda siempre un entero, así que para B1 esta guarda decide exactamente lo
       // mismo que antes (incluido el 0, que sigue viajando como "0").
-      if (docEntryProperty && isPresent(orderResponse?.DocEntry)) {
-        dealProperties[docEntryProperty] = String(orderResponse.DocEntry);
+      // S/4 numbers can be alphanumeric, in which case DocEntry/DocNum are null and the raw
+      // text is in DocumentNumber; the numeric value still wins when present (B1, numeric S/4).
+      const docEntryValue = isPresent(orderResponse?.DocEntry)
+        ? orderResponse.DocEntry
+        : orderResponse?.DocumentNumber;
+      const docNumValue = isPresent(orderResponse?.DocNum)
+        ? orderResponse.DocNum
+        : orderResponse?.DocumentNumber;
+
+      if (docEntryProperty && isPresent(docEntryValue)) {
+        dealProperties[docEntryProperty] = String(docEntryValue);
       }
 
-      if (docNumProperty && isPresent(orderResponse?.DocNum)) {
-        dealProperties[docNumProperty] = String(orderResponse.DocNum);
+      if (docNumProperty && isPresent(docNumValue)) {
+        dealProperties[docNumProperty] = String(docNumValue);
       }
 
       if (Object.keys(dealProperties).length > 0) {
