@@ -23,11 +23,14 @@ const CLIENT_PERMISSIONS = [
   'tasks.read',
 ];
 
+const CLIENT_ADMIN_PERMISSIONS = [...CLIENT_PERMISSIONS, 'owners.write'];
+
 const STAFF_PERMISSIONS = [
   'events.read',
   'syncs.read',
   'mappings.read',
   'tasks.read',
+  'owners.write',
   'staff.tickets',
   'staff.users',
   'staff.events.raw',
@@ -41,6 +44,7 @@ describe('panel permissions', () => {
     expect(PANEL_PERMISSIONS.STAFF_EVENTS_RAW).toBe('staff.events.raw');
     expect(PANEL_PERMISSIONS.MAPPINGS_READ).toBe('mappings.read');
     expect(PANEL_PERMISSIONS.TASKS_READ).toBe('tasks.read');
+    expect(PANEL_PERMISSIONS.OWNERS_WRITE).toBe('owners.write');
   });
 
   it('gives smarteam accounts the staff permissions and no client ticket permissions', () => {
@@ -50,11 +54,20 @@ describe('panel permissions', () => {
     expect(permissions.some((permission) => permission.startsWith('tickets.'))).toBe(false);
   });
 
-  it.each(['admin', 'usuario'])('gives a cliente %s the same phase 1 permissions', (role) => {
+  it.each([
+    ['admin', CLIENT_ADMIN_PERMISSIONS],
+    ['usuario', CLIENT_PERMISSIONS],
+  ])('gives a cliente %s its permissions and no staff ones', (role, expected) => {
     const permissions = permissionsFor({ accountType: 'cliente', role });
 
-    expect([...permissions].sort()).toEqual([...CLIENT_PERMISSIONS].sort());
+    expect([...permissions].sort()).toEqual([...expected].sort());
     expect(permissions.some((permission) => permission.startsWith('staff.'))).toBe(false);
+  });
+
+  it('lets only Smarteam and the client admin edit owner mappings (plan 12, O1)', () => {
+    expect(permissionsFor({ accountType: 'smarteam' })).toContain('owners.write');
+    expect(permissionsFor({ accountType: 'cliente', role: 'admin' })).toContain('owners.write');
+    expect(permissionsFor({ accountType: 'cliente', role: 'usuario' })).not.toContain('owners.write');
   });
 
   it.each([

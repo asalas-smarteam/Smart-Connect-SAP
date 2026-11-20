@@ -42,6 +42,11 @@ import { FieldMappingReaderPort } from '#application/ports/panel/field-mapping-r
 import PanelFieldMappings from '#application/use-cases/panel/PanelFieldMappings.js';
 import { OwnerMappingReaderPort } from '#application/ports/panel/owner-mapping-reader.port.js';
 import PanelOwnerMappings from '#application/use-cases/panel/PanelOwnerMappings.js';
+import { OwnerMappingWriterPort } from '#application/ports/panel/owner-mapping-writer.port.js';
+import { CrmOwnerDirectoryPort } from '#application/ports/panel/crm-owner-directory.port.js';
+import PanelOwnerMappingsWrite from '#application/use-cases/panel/PanelOwnerMappingsWrite.js';
+import MongooseOwnerMappingWriter from '#infrastructure/database/repositories/MongooseOwnerMappingWriter.js';
+import HubspotCrmOwnerDirectory from '#infrastructure/hubspot/HubspotCrmOwnerDirectory.js';
 import { ScheduledTaskReaderPort } from '#application/ports/panel/scheduled-task-reader.port.js';
 import { ScheduledRunReaderPort } from '#application/ports/panel/scheduled-run-reader.port.js';
 import PanelScheduledTasks from '#application/use-cases/panel/PanelScheduledTasks.js';
@@ -213,16 +218,34 @@ export function buildPanelFieldMappingUseCases({
   return { fieldMappings: new PanelFieldMappings({ fieldMappingReader, tenantDirectory, logger }) };
 }
 
-// Mapeo de responsables (plan 11): solo lectura. TenantOperationsReader también implementa este
-// puerto.
+// Mapeo de responsables: lectura (plan 11, TenantOperationsReader también implementa ese puerto)
+// y edición (plan 12): códigos del ERP y carga de los responsables del CRM, con límite de 1
+// sincronización por minuto por tenant. Nada abre conexiones al construirse.
 export function buildPanelOwnerMappingUseCases({
   tenantDirectory = new SaaSClientTenantDirectory(),
   ownerMappingReader = new TenantOperationsReader(),
+  ownerMappingWriter = new MongooseOwnerMappingWriter(),
+  crmOwnerDirectory = new HubspotCrmOwnerDirectory(),
+  ownerSyncAttempts = new RedisLoginAttempts({ keyPrefix: 'panel:ownersync:', maxAttempts: 1, windowSeconds: 60 }),
   logger = defaultLogger,
 } = {}) {
   assertPort(tenantDirectory, TenantDirectoryPort);
   assertPort(ownerMappingReader, OwnerMappingReaderPort);
-  return { ownerMappings: new PanelOwnerMappings({ ownerMappingReader, tenantDirectory, logger }) };
+  assertPort(ownerMappingWriter, OwnerMappingWriterPort);
+  assertPort(crmOwnerDirectory, CrmOwnerDirectoryPort);
+  if (ownerSyncAttempts) {
+    assertPort(ownerSyncAttempts, LoginAttemptsPort);
+  }
+  return {
+    ownerMappings: new PanelOwnerMappings({ ownerMappingReader, tenantDirectory, logger }),
+    ownerMappingsWrite: new PanelOwnerMappingsWrite({
+      ownerMappingWriter,
+      crmOwnerDirectory,
+      tenantDirectory,
+      syncAttempts: ownerSyncAttempts,
+      logger,
+    }),
+  };
 }
 
 // Tareas programadas (plan 7): solo lectura. TenantOperationsReader implementa la lectura de
@@ -281,6 +304,10 @@ export function buildPanelUseCases({
   operationsReader,
   fieldMappingReader,
   ownerMappingReader,
+  // Plan 12: edición del mapeo de responsables.
+  ownerMappingWriter,
+  crmOwnerDirectory,
+  ownerSyncAttempts,
   scheduledTaskReader,
   scheduledRunReader,
 } = {}) {
@@ -354,7 +381,14 @@ export function buildPanelUseCases({
     }),
     ...buildPanelOperationUseCases({ tenantDirectory, operationsReader, logger }),
     ...buildPanelFieldMappingUseCases({ tenantDirectory, fieldMappingReader, logger }),
-    ...buildPanelOwnerMappingUseCases({ tenantDirectory, ownerMappingReader, logger }),
+    ...buildPanelOwnerMappingUseCases({
+      tenantDirectory,
+      ownerMappingReader,
+      ownerMappingWriter,
+      crmOwnerDirectory,
+      ownerSyncAttempts,
+      logger,
+    }),
     ...buildPanelScheduledTaskUseCases({ tenantDirectory, scheduledTaskReader, scheduledRunReader, logger }),
   };
 }

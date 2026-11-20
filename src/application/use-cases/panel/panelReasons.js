@@ -22,6 +22,11 @@ export const panelReasons = Object.freeze({
   AMBIGUOUS_CODE: 'AMBIGUOUS_CODE',
   REQUEST_IN_PROGRESS: 'REQUEST_IN_PROGRESS',
   IDEMPOTENCY_KEY_REUSED: 'IDEMPOTENCY_KEY_REUSED',
+  // Edición del mapeo de responsables (contrato 14).
+  STALE_UPDATE: 'STALE_UPDATE',
+  ERP_OWNER_TAKEN: 'ERP_OWNER_TAKEN',
+  CRM_UNAVAILABLE: 'CRM_UNAVAILABLE',
+  TOO_MANY_REQUESTS: 'TOO_MANY_REQUESTS',
 });
 
 // extra.retryAfterSeconds (opcional): sendFailure lo pone como header Retry-After. Solo se

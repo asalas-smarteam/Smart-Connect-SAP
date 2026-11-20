@@ -365,6 +365,37 @@ export default async function panelPlugin(app, options = {}) {
     handler: ownerMappings.list,
   });
 
+  // Plan 12 (contrato 14, O2 y O3): editar los códigos del ERP y traer del CRM los responsables
+  // que faltan. owners.write (Smarteam y admin del cliente); el guard ya exige X-Panel-Request.
+  // POST …/sync y PATCH …/:id no chocan: distinto método.
+  app.route({
+    method: 'PATCH',
+    url: '/owner-mappings/:id',
+    preHandler: [requireClientAccount, requirePermission(P.OWNERS_WRITE)],
+    handler: ownerMappings.update,
+  });
+
+  app.route({
+    method: 'POST',
+    url: '/owner-mappings/sync',
+    preHandler: [requireClientAccount, requirePermission(P.OWNERS_WRITE)],
+    handler: ownerMappings.sync,
+  });
+
+  app.route({
+    method: 'PATCH',
+    url: '/staff/tenants/:tenantKey/owner-mappings/:id',
+    preHandler: [requireStaffAccount, requirePermission(P.OWNERS_WRITE)],
+    handler: ownerMappings.update,
+  });
+
+  app.route({
+    method: 'POST',
+    url: '/staff/tenants/:tenantKey/owner-mappings/sync',
+    preHandler: [requireStaffAccount, requirePermission(P.OWNERS_WRITE)],
+    handler: ownerMappings.sync,
+  });
+
   // Plan 7 (contrato 09, J1): tareas programadas, solo lectura. Cliente con el tenant de la
   // sesión; Smarteam por empresa.
   app.route({

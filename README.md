@@ -571,6 +571,20 @@ Plan: `docs/superpowers/plans/2026-11-19-13-mapeo-responsables.md`. Contrato: `d
 - Devuelve todos los `OwnerMappings` (activos e inactivos) con nombres genéricos (`crmOwnerId`, `erpOwnerId`, `erpEmployeeId`…). Lee con lista blanca: `hubspotCredentialId` y `__v` no salen de la base.
 - Los códigos del ERP van tal cual están guardados: texto, a veces varios separados por coma.
 
+### Edición del mapeo de responsables (plan 12)
+Plan: `docs/superpowers/plans/2026-11-20-14-edicion-responsables.md`. Contrato: `docs/contrato-backend/14-edicion-responsables.md`.
+
+| Método y ruta | Acceso |
+| --- | --- |
+| `PATCH /panel/api/owner-mappings/:id` | `owners.write` (admin del cliente, no `usuario`), cuenta cliente |
+| `POST /panel/api/owner-mappings/sync` | `owners.write`, cuenta cliente |
+| `PATCH /panel/api/staff/tenants/:tenantKey/owner-mappings/:id` | `owners.write`, solo Smarteam |
+| `POST /panel/api/staff/tenants/:tenantKey/owner-mappings/sync` | `owners.write`, solo Smarteam |
+
+- El `PATCH` solo cambia `erpOwnerId` (`sapOwnerId`) y `erpEmployeeId` (`sapOwnerId_2`) con control de versión (`expectedUpdatedAt` contra `updatedAt`, atómico): `stale_update` 409, vendedor repetido por el índice único `erp_owner_taken` 409. Sin cambios reales no escribe nada. No valida contra el ERP.
+- `sync` vuelve a traer los responsables del CRM de cada credencial del tenant (mismo `fetchOwners` y renovación de token del núcleo): inserta los que faltan como el seed y refresca nombre y correo sin mover `updatedAt`. Nunca toca códigos, `active` ni `source`, y nunca borra. 1 por minuto por tenant (429 con `Retry-After`); CRM caído o sin credencial → 502 `crm_unavailable`.
+- Cada cambio real queda en `OwnerMappingHistory` en la base del tenant (quién, cuándo, `from`/`to`); sin TTL. La API admin `/mappings/owners` no cambia.
+
 El contrato con el front está en `docs/contrato-backend/`.
 
 ## 19. Guía de contribución

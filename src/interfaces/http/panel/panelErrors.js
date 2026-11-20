@@ -22,6 +22,11 @@ const REASON_TO_HTTP = Object.freeze({
   [panelReasons.AMBIGUOUS_CODE]: { status: 409, error: 'ambiguous_code' },
   [panelReasons.REQUEST_IN_PROGRESS]: { status: 409, error: 'request_in_progress' },
   [panelReasons.IDEMPOTENCY_KEY_REUSED]: { status: 422, error: 'idempotency_key_reused' },
+  // Edición del mapeo de responsables (contrato 14, O2 y O3). El 429 lleva Retry-After.
+  [panelReasons.STALE_UPDATE]: { status: 409, error: 'stale_update' },
+  [panelReasons.ERP_OWNER_TAKEN]: { status: 409, error: 'erp_owner_taken' },
+  [panelReasons.CRM_UNAVAILABLE]: { status: 502, error: 'crm_unavailable' },
+  [panelReasons.TOO_MANY_REQUESTS]: { status: 429, error: 'too_many_requests' },
 });
 
 export const INVALID_TOKEN_MESSAGE = 'El token no es válido o venció. Crea uno nuevo en Mi cuenta.';

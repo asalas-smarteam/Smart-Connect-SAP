@@ -119,14 +119,17 @@ const panelFakes = await import('../application/panel/panelFakes.js');
 const ticketFakes = await import('../application/panel/ticketFakes.js');
 const operationFakes = await import('../application/panel/operationFakes.js');
 const apiTokenFakes = await import('../application/panel/apiTokenFakes.js');
+const ownerWriteFakes = await import('../application/panel/ownerMappingWriteFakes.js');
 
 const panelStaff = panelFakes.staffUser();
 const panelClient = panelFakes.clientUser();
+// Plan 12: owners.write es solo del admin del cliente (panelClient); el rol usuario no lo tiene.
+const panelClientUsuario = panelFakes.clientUser({ email: 'usuario@acme.test', role: 'usuario' });
 const panelTokens = new HmacSessionToken({ secret: PANEL_SECRET });
 const panelRevokedSessions = new panelFakes.FakeRevokedSessions();
 const panelUseCases = buildPanelUseCases({
   secret: PANEL_SECRET,
-  userRepository: new panelFakes.InMemoryPanelUserRepository([panelStaff, panelClient]),
+  userRepository: new panelFakes.InMemoryPanelUserRepository([panelStaff, panelClient, panelClientUsuario]),
   tenantDirectory: new panelFakes.FakeTenantDirectory(panelFakes.TENANTS),
   passwordHasher: new panelFakes.FakePasswordHasher(),
   temporaryPasswordGenerator: new panelFakes.SequenceTemporaryPassword(),
@@ -140,6 +143,10 @@ const panelUseCases = buildPanelUseCases({
   operationsReader: new operationFakes.FakeOperationsReader(operationFakes.sampleOperations()),
   fieldMappingReader: new operationFakes.FakeFieldMappingReader(operationFakes.sampleFieldMappings()),
   ownerMappingReader: new operationFakes.FakeOwnerMappingReader(operationFakes.sampleOwnerMappings()),
+  // Dobles en memoria: las rutas de edición no hacen I/O real (ni Mongo, ni CRM, ni Redis).
+  ownerMappingWriter: new ownerWriteFakes.InMemoryOwnerMappingWriter(),
+  crmOwnerDirectory: ownerWriteFakes.sampleCrmDirectory(),
+  ownerSyncAttempts: null,
   scheduledTaskReader: new operationFakes.FakeScheduledTaskReader(operationFakes.sampleScheduledTasks()),
   scheduledRunReader: new operationFakes.FakeScheduledRunReader(operationFakes.sampleNextRuns()),
   apiTokenRepository: new apiTokenFakes.InMemoryApiTokenRepository(),
@@ -151,6 +158,7 @@ const panelUseCases = buildPanelUseCases({
 });
 const STAFF_PANEL_COOKIE = `panel_session=${panelTokens.sign({ sub: panelStaff.id, tv: 0, pwdChange: false })}`;
 const CLIENT_PANEL_COOKIE = `panel_session=${panelTokens.sign({ sub: panelClient.id, tv: 0, pwdChange: false })}`;
+const CLIENT_USUARIO_PANEL_COOKIE = `panel_session=${panelTokens.sign({ sub: panelClientUsuario.id, tv: 0, pwdChange: false })}`;
 // Secuencial a propósito: Jest ESM no enlaza bien imports dinámicos en paralelo que comparten
 // dependencias (internalAuth -> env.js).
 const routeModules = [];
@@ -369,6 +377,12 @@ const PANEL_ROUTES = [
   // Plan 11: mapeo de responsables (solo lectura).
   ['GET', '/panel/api/owner-mappings', 'client'],
   ['GET', '/panel/api/staff/tenants/sap_integration_acme/owner-mappings', 'staff account + mappings.read'],
+  // Plan 12: edición del mapeo de responsables (owners.write). 'client' = el admin del cliente
+  // pasa y Smarteam no (ruta de cliente); el rol usuario se prueba aparte.
+  ['PATCH', '/panel/api/owner-mappings/ffffffffffffffffffffffff', 'client'],
+  ['POST', '/panel/api/owner-mappings/sync', 'client'],
+  ['PATCH', '/panel/api/staff/tenants/sap_integration_acme/owner-mappings/ffffffffffffffffffffffff', 'staff account + owners.write'],
+  ['POST', '/panel/api/staff/tenants/sap_integration_acme/owner-mappings/sync', 'staff account + owners.write'],
   // Plan 7: tareas programadas (solo lectura).
   ['GET', '/panel/api/scheduled-tasks', 'client'],
   ['GET', '/panel/api/staff/tenants/sap_integration_acme/scheduled-tasks', 'staff account + tasks.read'],
@@ -436,6 +450,19 @@ describe.each(PANEL_ROUTES)('panel %s %s (%s)', (method, url, guard) => {
     const response = await panelInject(method, url, withPermission);
 
     expect([401, 403]).not.toContain(response.statusCode);
+  });
+});
+
+// Plan 12 (contrato 14, O1): el rol usuario del cliente no tiene owners.write.
+describe.each([
+  ['PATCH', '/panel/api/owner-mappings/ffffffffffffffffffffffff'],
+  ['POST', '/panel/api/owner-mappings/sync'],
+])('panel %s %s with a client usuario', (method, url) => {
+  it('answers 403 forbidden', async () => {
+    const response = await panelInject(method, url, CLIENT_USUARIO_PANEL_COOKIE);
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({ error: 'forbidden' });
   });
 });
 
