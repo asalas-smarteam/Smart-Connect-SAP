@@ -2,11 +2,13 @@ import { jest } from '@jest/globals';
 import mongoose from 'mongoose';
 import TenantOperationsReader, {
   MAX_FIELD_MAPPINGS,
+  MAX_OWNER_MAPPINGS,
   MAX_SCHEDULED_TASKS,
   eventFilter,
   syncFilter,
 } from '../../../src/infrastructure/database/repositories/TenantOperationsReader.js';
 import { FieldMappingReaderPort } from '../../../src/application/ports/panel/field-mapping-reader.port.js';
+import { OwnerMappingReaderPort } from '../../../src/application/ports/panel/owner-mapping-reader.port.js';
 import { ScheduledTaskReaderPort } from '../../../src/application/ports/panel/scheduled-task-reader.port.js';
 import { assertPort } from '../../../src/application/ports/port-validator.js';
 
@@ -303,5 +305,40 @@ describe('TenantOperationsReader — scheduled tasks (plan 7)', () => {
     const { reader } = build({ ClientConfigs: { find: jest.fn(() => find) } });
 
     await expect(reader.listScheduledTasks(TENANT)).rejects.toMatchObject({ code: 'PANEL_QUERY_TIMEOUT' });
+  });
+});
+
+describe('TenantOperationsReader — owner mappings (plan 11)', () => {
+  it('implements the owner mapping reader port', () => {
+    expect(() => assertPort(new TenantOperationsReader(), OwnerMappingReaderPort)).not.toThrow();
+  });
+
+  it('reads every record with a whitelist projection, sorted, with maxTimeMS and the cap', async () => {
+    const docs = [{ _id: 'a', hubspotOwnerId: '1' }];
+    const find = cursor(docs);
+    const OwnerMappings = { find: jest.fn(() => find) };
+    const { reader, connection } = build({ OwnerMappings });
+
+    const result = await reader.listOwnerMappings(TENANT);
+
+    expect(connection.db.collection).toHaveBeenCalledWith('OwnerMappings');
+    const [filter, options] = OwnerMappings.find.mock.calls[0];
+    expect(filter).toEqual({});
+    expect(options.maxTimeMS).toBe(1234);
+    expect(Object.values(options.projection).every((value) => value === 1)).toBe(true);
+    expect(options.projection).not.toHaveProperty('hubspotCredentialId');
+    expect(options.projection).not.toHaveProperty('__v');
+    expect(options.projection).toEqual(expect.objectContaining({ hubspotOwnerId: 1, sapOwnerId: 1, sapOwnerId_2: 1, source: 1 }));
+    expect(find.sort).toHaveBeenCalledWith({ hubspotOwnerName: 1, _id: 1 });
+    expect(find.limit).toHaveBeenCalledWith(MAX_OWNER_MAPPINGS + 1);
+    expect(result).toEqual({ items: docs, truncated: false });
+  });
+
+  it('turns MaxTimeMSExpired into a panel timeout error', async () => {
+    const find = cursor([]);
+    find.toArray.mockRejectedValue(Object.assign(new Error('operation exceeded time limit'), { code: 50 }));
+    const { reader } = build({ OwnerMappings: { find: jest.fn(() => find) } });
+
+    await expect(reader.listOwnerMappings(TENANT)).rejects.toMatchObject({ code: 'PANEL_QUERY_TIMEOUT' });
   });
 });

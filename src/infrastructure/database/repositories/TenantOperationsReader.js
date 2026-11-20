@@ -69,6 +69,23 @@ const FIELD_MAPPING_SORT = Object.freeze({ objectType: 1, sourceContext: 1, sour
 // Tope de seguridad: un tenant real tiene cientos de mapeos.
 export const MAX_FIELD_MAPPINGS = 5000;
 
+// Mapeo de responsables (plan 11): lista blanca con solo los campos de la vista;
+// hubspotCredentialId y __v no salen de la base.
+export const OWNER_MAPPING_PROJECTION = Object.freeze({
+  hubspotOwnerId: 1,
+  hubspotOwnerName: 1,
+  hubspotOwnerEmail: 1,
+  sapOwnerId: 1,
+  sapOwnerName: 1,
+  sapOwnerId_2: 1,
+  active: 1,
+  source: 1,
+  createdAt: 1,
+  updatedAt: 1,
+});
+const OWNER_MAPPING_SORT = Object.freeze({ hubspotOwnerName: 1, _id: 1 });
+export const MAX_OWNER_MAPPINGS = 5000;
+
 // Tareas programadas (plan 7): lista blanca con solo los campos de la vista. Nada de credenciales,
 // consultas, procedimientos ni ids internos sale de la base (contrato 09, J3).
 export const SCHEDULED_TASK_PROJECTION = Object.freeze({
@@ -321,6 +338,18 @@ export class TenantOperationsReader {
       .limit(MAX_FIELD_MAPPINGS + 1)
       .toArray());
     return { items: documents.slice(0, MAX_FIELD_MAPPINGS), truncated: documents.length > MAX_FIELD_MAPPINGS };
+  }
+
+  // Todos los mapeos de responsables del tenant (activos e inactivos), por nombre del responsable
+  // en el CRM. Devuelve { items, truncated }.
+  async listOwnerMappings(tenantKey) {
+    const mappings = await this.collection(tenantKey, 'OwnerMappings');
+    const documents = await this.run(() => mappings
+      .find({}, { projection: OWNER_MAPPING_PROJECTION, maxTimeMS: this.maxTimeMS })
+      .sort(OWNER_MAPPING_SORT)
+      .limit(MAX_OWNER_MAPPINGS + 1)
+      .toArray());
+    return { items: documents.slice(0, MAX_OWNER_MAPPINGS), truncated: documents.length > MAX_OWNER_MAPPINGS };
   }
 
   // Todas las tareas (ClientConfigs) del tenant, activas primero y por nombre. Devuelve

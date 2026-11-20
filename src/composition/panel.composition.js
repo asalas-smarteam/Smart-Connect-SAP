@@ -40,6 +40,8 @@ import { OperationsReaderPort } from '#application/ports/panel/operations-reader
 import PanelOperations from '#application/use-cases/panel/PanelOperations.js';
 import { FieldMappingReaderPort } from '#application/ports/panel/field-mapping-reader.port.js';
 import PanelFieldMappings from '#application/use-cases/panel/PanelFieldMappings.js';
+import { OwnerMappingReaderPort } from '#application/ports/panel/owner-mapping-reader.port.js';
+import PanelOwnerMappings from '#application/use-cases/panel/PanelOwnerMappings.js';
 import { ScheduledTaskReaderPort } from '#application/ports/panel/scheduled-task-reader.port.js';
 import { ScheduledRunReaderPort } from '#application/ports/panel/scheduled-run-reader.port.js';
 import PanelScheduledTasks from '#application/use-cases/panel/PanelScheduledTasks.js';
@@ -211,6 +213,18 @@ export function buildPanelFieldMappingUseCases({
   return { fieldMappings: new PanelFieldMappings({ fieldMappingReader, tenantDirectory, logger }) };
 }
 
+// Mapeo de responsables (plan 11): solo lectura. TenantOperationsReader también implementa este
+// puerto.
+export function buildPanelOwnerMappingUseCases({
+  tenantDirectory = new SaaSClientTenantDirectory(),
+  ownerMappingReader = new TenantOperationsReader(),
+  logger = defaultLogger,
+} = {}) {
+  assertPort(tenantDirectory, TenantDirectoryPort);
+  assertPort(ownerMappingReader, OwnerMappingReaderPort);
+  return { ownerMappings: new PanelOwnerMappings({ ownerMappingReader, tenantDirectory, logger }) };
+}
+
 // Tareas programadas (plan 7): solo lectura. TenantOperationsReader implementa la lectura de
 // ClientConfigs; las próximas ejecuciones salen de BullMQ (Redis), también solo lectura.
 export function buildPanelScheduledTaskUseCases({
@@ -266,6 +280,7 @@ export function buildPanelUseCases({
   invalidTokenIpAttempts,
   operationsReader,
   fieldMappingReader,
+  ownerMappingReader,
   scheduledTaskReader,
   scheduledRunReader,
 } = {}) {
@@ -339,6 +354,7 @@ export function buildPanelUseCases({
     }),
     ...buildPanelOperationUseCases({ tenantDirectory, operationsReader, logger }),
     ...buildPanelFieldMappingUseCases({ tenantDirectory, fieldMappingReader, logger }),
+    ...buildPanelOwnerMappingUseCases({ tenantDirectory, ownerMappingReader, logger }),
     ...buildPanelScheduledTaskUseCases({ tenantDirectory, scheduledTaskReader, scheduledRunReader, logger }),
   };
 }

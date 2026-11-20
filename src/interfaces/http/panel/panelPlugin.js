@@ -10,6 +10,7 @@ import { createPanelStaffTicketsController } from '../controllers/panelStaffTick
 import { createPanelOperationsController } from '../controllers/panelOperations.controller.js';
 import { createPanelTicketMetricsController } from '../controllers/panelTicketMetrics.controller.js';
 import { createPanelFieldMappingsController } from '../controllers/panelFieldMappings.controller.js';
+import { createPanelOwnerMappingsController } from '../controllers/panelOwnerMappings.controller.js';
 import { createPanelScheduledTasksController } from '../controllers/panelScheduledTasks.controller.js';
 import { createPanelApiTokensController } from '../controllers/panelApiTokens.controller.js';
 import { createPanelWorkLogController } from '../controllers/panelWorkLog.controller.js';
@@ -120,6 +121,7 @@ export default async function panelPlugin(app, options = {}) {
   const operations = createPanelOperationsController({ useCases });
   const ticketMetrics = createPanelTicketMetricsController({ useCases });
   const fieldMappings = createPanelFieldMappingsController({ useCases });
+  const ownerMappings = createPanelOwnerMappingsController({ useCases });
   const scheduledTasks = createPanelScheduledTasksController({ useCases });
   const apiTokens = createPanelApiTokensController({ useCases });
   const workLog = createPanelWorkLogController({ useCases });
@@ -345,6 +347,22 @@ export default async function panelPlugin(app, options = {}) {
     url: '/staff/tenants/:tenantKey/field-mappings',
     preHandler: [requireStaffAccount, requirePermission(P.MAPPINGS_READ)],
     handler: fieldMappings.list,
+  });
+
+  // Plan 11 (contrato 13, N1): mapeo de responsables, solo lectura, con el mismo permiso que el
+  // mapeo de campos.
+  app.route({
+    method: 'GET',
+    url: '/owner-mappings',
+    preHandler: [requireClientAccount, requirePermission(P.MAPPINGS_READ)],
+    handler: ownerMappings.list,
+  });
+
+  app.route({
+    method: 'GET',
+    url: '/staff/tenants/:tenantKey/owner-mappings',
+    preHandler: [requireStaffAccount, requirePermission(P.MAPPINGS_READ)],
+    handler: ownerMappings.list,
   });
 
   // Plan 7 (contrato 09, J1): tareas programadas, solo lectura. Cliente con el tenant de la

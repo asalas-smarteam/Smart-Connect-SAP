@@ -139,6 +139,7 @@ const panelUseCases = buildPanelUseCases({
   contextReader: new ticketFakes.FakeContextReader(),
   operationsReader: new operationFakes.FakeOperationsReader(operationFakes.sampleOperations()),
   fieldMappingReader: new operationFakes.FakeFieldMappingReader(operationFakes.sampleFieldMappings()),
+  ownerMappingReader: new operationFakes.FakeOwnerMappingReader(operationFakes.sampleOwnerMappings()),
   scheduledTaskReader: new operationFakes.FakeScheduledTaskReader(operationFakes.sampleScheduledTasks()),
   scheduledRunReader: new operationFakes.FakeScheduledRunReader(operationFakes.sampleNextRuns()),
   apiTokenRepository: new apiTokenFakes.InMemoryApiTokenRepository(),
@@ -365,6 +366,9 @@ const PANEL_ROUTES = [
   // Plan 6: mapeo de campos (solo lectura).
   ['GET', '/panel/api/field-mappings', 'client'],
   ['GET', '/panel/api/staff/tenants/sap_integration_acme/field-mappings', 'staff account + mappings.read'],
+  // Plan 11: mapeo de responsables (solo lectura).
+  ['GET', '/panel/api/owner-mappings', 'client'],
+  ['GET', '/panel/api/staff/tenants/sap_integration_acme/owner-mappings', 'staff account + mappings.read'],
   // Plan 7: tareas programadas (solo lectura).
   ['GET', '/panel/api/scheduled-tasks', 'client'],
   ['GET', '/panel/api/staff/tenants/sap_integration_acme/scheduled-tasks', 'staff account + tasks.read'],

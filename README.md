@@ -560,6 +560,17 @@ Plan: `docs/superpowers/plans/2026-11-04-panel-registro-trabajo.md`. Contrato: `
 - Límites (Redis, con `Retry-After`): 30 pedidos por minuto por token; 5 contraseñas incorrectas cada 15 min al crear un token; 20 tokens inválidos cada 15 min por IP (solo con proxies de confianza).
 - La publicación deja un mensaje público y una entrada de horas (`workLog`, solo visible para Smarteam). Con `Idempotency-Key` la misma clave se recuerda 24 h en `PanelIdempotencyKeys` (sin el resumen ni la nota) y no duplica la entrada.
 
+### Mapeo de responsables (plan 11)
+Plan: `docs/superpowers/plans/2026-11-19-13-mapeo-responsables.md`. Contrato: `docs/contrato-backend/13-mapeo-responsables.md`. Solo lectura.
+
+| Método y ruta | Acceso |
+| --- | --- |
+| `GET /panel/api/owner-mappings` | `mappings.read`, cuenta cliente (tenant de la sesión) |
+| `GET /panel/api/staff/tenants/:tenantKey/owner-mappings` | `mappings.read`, solo Smarteam |
+
+- Devuelve todos los `OwnerMappings` (activos e inactivos) con nombres genéricos (`crmOwnerId`, `erpOwnerId`, `erpEmployeeId`…). Lee con lista blanca: `hubspotCredentialId` y `__v` no salen de la base.
+- Los códigos del ERP van tal cual están guardados: texto, a veces varios separados por coma.
+
 El contrato con el front está en `docs/contrato-backend/`.
 
 ## 19. Guía de contribución

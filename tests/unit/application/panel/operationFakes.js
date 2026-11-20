@@ -381,3 +381,69 @@ export function sampleNextRuns() {
     },
   };
 }
+
+// Lector falso de mapeos de responsables (plan 11). Devuelve los documentos tal cual, con campos
+// internos incluidos, para probar que la vista no los deja pasar.
+export class FakeOwnerMappingReader {
+  constructor(mappingsByTenant = {}) {
+    this.mappingsByTenant = mappingsByTenant;
+    this.touchedTenants = [];
+    this.timeoutNext = false;
+    this.truncateNext = false;
+  }
+
+  async listOwnerMappings(tenantKey) {
+    this.touchedTenants.push(tenantKey);
+    if (this.timeoutNext) {
+      this.timeoutNext = false;
+      throw Object.assign(new Error('timeout'), { code: 'PANEL_QUERY_TIMEOUT' });
+    }
+    const truncated = this.truncateNext;
+    this.truncateNext = false;
+    return { items: clone(this.mappingsByTenant[tenantKey] ?? []), truncated };
+  }
+}
+
+export const OWNER_IDS = {
+  erick: '6a6b94a1cd7c01b21aa58d41',
+  ana: '6a6b94a1cd7c01b21aa58d42',
+  legacy: '6a6b94a1cd7c01b21aa58d43',
+};
+
+export function sampleOwnerMappings() {
+  return {
+    sap_integration_acme: [
+      {
+        _id: OWNER_IDS.erick,
+        hubspotCredentialId: '6a6b94a1cd7c01b21aa58c98',
+        hubspotOwnerId: '82929225',
+        hubspotOwnerName: 'Erick Figueroa',
+        hubspotOwnerEmail: 'ventas8@acme.test',
+        sapOwnerId: '53',
+        sapOwnerName: null,
+        sapOwnerId_2: '67',
+        active: true,
+        source: 'hubspot_seed',
+        createdAt: new Date('2026-07-03T02:03:51.125Z'),
+        updatedAt: new Date('2026-07-03T02:03:51.125Z'),
+        __v: 0,
+      },
+      {
+        _id: OWNER_IDS.ana,
+        hubspotCredentialId: '6a6b94a1cd7c01b21aa58c98',
+        hubspotOwnerId: '91000001',
+        hubspotOwnerName: 'Ana Mora',
+        hubspotOwnerEmail: null,
+        sapOwnerId: '113,758,864',
+        sapOwnerName: 'Ana Mora',
+        sapOwnerId_2: null,
+        active: false,
+        source: 'manual',
+        createdAt: new Date('2026-08-01T10:00:00.000Z'),
+        updatedAt: new Date('2026-09-01T10:00:00.000Z'),
+      },
+      // Documento viejo: número guardado y la mayoría de los campos ausentes.
+      { _id: OWNER_IDS.legacy, hubspotOwnerId: 12345, sapOwnerId: 7 },
+    ],
+  };
+}
