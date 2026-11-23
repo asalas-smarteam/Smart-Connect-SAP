@@ -27,9 +27,14 @@ export async function ensureObjectProperty(accessToken, {
   groupName,
   options,
 }) {
+  // HubSpot rejects a property whose group does not exist for the object type, so every
+  // object type the seed writes to needs its own default group.
   const groupByObjectType = {
     contacts: 'contactinformation',
     companies: 'companyinformation',
+    deal: 'dealinformation',
+    deals: 'dealinformation',
+    products: 'productinformation',
   };
 
   try {
