@@ -188,7 +188,8 @@ export async function seedCreateFieldsHubspot({ hubspotCredential, sapFlavor = D
         { label: 'Reintentar', value: 'retry' },
       ],
     },
-    { objectType: 'products', label: 'Código de producto', name: 'itemCode' },
+    // No `itemCode` product property: HubSpot property names are lowercase, so it could never
+    // be created, and the SAP item code is mapped to the built-in `hs_sku` instead.
   ];
 
   // S/4 exposes the tax id (RNC/cédula) and the customer grouping, which have
