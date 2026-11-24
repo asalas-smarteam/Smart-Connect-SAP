@@ -34,7 +34,7 @@ in the same write, the way the Business One flow does.
 ## Tasks
 
 - [x] T1 `S4StockResolver.fetchStockRows`: optional `materials` argument added to the filter, chunked. Tests first.
-- [ ] T2 Strategy `buildQueryTargets` carries materials if needed, plus new adapter `S4LineItemStockAdapter`
+- [x] T2 Adapter adds materials to the strategy query targets (strategy file unchanged), new adapter `S4LineItemStockAdapter`
       (`resolveStockProperties({ sapConfig, tenantModels, itemCodes })` returning a Map itemCode to properties; empty map
       when not configured). Tests first.
 - [ ] T3 Use case: optional `lineItemStockResolver` and a writable-property filter dependency; one stock call after the price loop,
