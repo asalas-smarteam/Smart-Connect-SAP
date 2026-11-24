@@ -54,4 +54,18 @@ describe('seedCreateFieldsHubspot', () => {
     expect(ensuredField('sap_docentry')).toBeDefined();
     expect(ensuredField('sap_docnum')).toBeDefined();
   });
+
+  // HubSpot rejects property names with uppercase letters and the seed stops at the first
+  // rejection, so one invalid name leaves every property after it uncreated.
+  it.each(['B1', 'S4'])('only ensures lowercase property names for the %s flavor', async (sapFlavor) => {
+    await seedCreateFieldsHubspot({
+      hubspotCredential: { accessToken: 'token-1', _id: 'cred-1' },
+      sapFlavor,
+    });
+
+    const names = mockEnsureObjectProperty.mock.calls.map(([, field]) => field.name);
+
+    expect(names.length).toBeGreaterThan(0);
+    expect(names.filter((name) => name !== name.toLowerCase())).toEqual([]);
+  });
 });
