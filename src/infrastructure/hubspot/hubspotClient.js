@@ -284,6 +284,7 @@ export async function batchReadProductsBySku(token, skus, properties = []) {
 const CRM_BATCH_COLLECTIONS = {
   company: 'companies',
   contact: 'contacts',
+  line_item: 'line_items',
 };
 
 function crmCollection(objectType) {

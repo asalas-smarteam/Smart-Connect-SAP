@@ -97,6 +97,12 @@ export class SyncS4LineItemPricesByPriceList {
     createSapCallRecorder = () => ({ record: (_options, run) => run(), calls: [], droppedCalls: 0 }),
     notifyLineItemPriceOutcome,
     dateProvider,
+    // Opcionales: sin resolver no se consulta stock y el comportamiento es el de siempre.
+    // `lineItemStockResolver` expone `resolveStockProperties({ sapConfig, tenantModels,
+    // itemCodes })` -> Map<itemCode, { propiedad: número }>. `listWritableLineItemPropertyNames`
+    // es `({ token }) => Promise<Set<string>>`; sin ella no se filtran las propiedades.
+    lineItemStockResolver = null,
+    listWritableLineItemPropertyNames = null,
     logger = { warn: () => {} },
   }) {
     // Sin default: la fecha decide qué condiciones de SAP están vigentes, y un default silencioso
@@ -123,7 +129,94 @@ export class SyncS4LineItemPricesByPriceList {
     this.createSapCallRecorder = createSapCallRecorder;
     this.notifyLineItemPriceOutcome = notifyLineItemPriceOutcome;
     this.dateProvider = dateProvider;
+    this.lineItemStockResolver = lineItemStockResolver;
+    this.listWritableLineItemPropertyNames = listWritableLineItemPropertyNames;
     this.logger = logger;
+  }
+
+  // Adjunta `warehouseStockProperties` a las líneas ya valorizadas. NUNCA lanza: el stock es un
+  // complemento del precio, y cualquier fallo se registra, se audita y se descarta para que el
+  // precio se escriba igual. HubSpot rechaza el lote ENTERO si una propiedad no existe, así que
+  // las propiedades se filtran contra las escribibles del portal (sin cambiarles el nombre: la
+  // integración no altera datos del cliente) y las omitidas quedan como aviso en el audit.
+  // Devuelve el bloque de audit, o null si no había nada que hacer.
+  async attachWarehouseStock({
+    enrichedLineItems, callRecorder, sapConfig, tenantModels, token, tenantKey, dealId,
+  }) {
+    if (!this.lineItemStockResolver || enrichedLineItems.length === 0) {
+      return null;
+    }
+
+    const itemCodes = [...new Set(enrichedLineItems.map((lineItem) => lineItem.itemCode))];
+
+    try {
+      // Plain object en lugar de Map: el grabador serializa la respuesta al audit.
+      const stockByItemCode = new Map(Object.entries(await callRecorder.record(
+        {
+          target: 'sap',
+          method: 'GET',
+          path: '/API_MATERIAL_STOCK_SRV/A_MatlStkInAcctMod',
+          params: { materials: itemCodes.join(',') },
+        },
+        async () => Object.fromEntries(
+          await this.lineItemStockResolver.resolveStockProperties({
+            sapConfig,
+            tenantModels,
+            itemCodes,
+          })
+        )
+      )));
+
+      if (![...stockByItemCode.values()].some((props) => Object.keys(props ?? {}).length > 0)) {
+        return null;
+      }
+
+      const writable = this.listWritableLineItemPropertyNames
+        ? await this.listWritableLineItemPropertyNames({ token })
+        : null;
+      const skipped = new Set();
+
+      for (const lineItem of enrichedLineItems) {
+        const properties = Object.entries(stockByItemCode.get(lineItem.itemCode) ?? {})
+          .filter(([name]) => {
+            if (!writable || writable.has(name)) {
+              return true;
+            }
+            skipped.add(name);
+            return false;
+          });
+
+        if (properties.length > 0) {
+          lineItem.warehouseStockProperties = Object.fromEntries(properties);
+        }
+      }
+
+      const warnings = [...skipped].map((property) => ({
+        code: 'stockPropertyNotWritable',
+        property,
+        message: `Stock property "${property}" does not exist or is read-only on line items; skipped`,
+      }));
+
+      if (warnings.length > 0) {
+        this.logger.warn?.({
+          msg: 'S4 line item prices: stock properties skipped, not writable on line items',
+          tenantKey,
+          dealId,
+          properties: [...skipped],
+        });
+      }
+
+      return { warnings };
+    } catch (error) {
+      this.logger.warn?.({
+        msg: 'S4 line item prices: warehouse stock could not be resolved; writing prices only',
+        tenantKey,
+        dealId,
+        error: error.message,
+      });
+
+      return { warnings: [], error: { message: error.message } };
+    }
   }
 
   async execute(payload, { tenantModels, tenant, tenantKey }) {
@@ -412,12 +505,23 @@ export class SyncS4LineItemPricesByPriceList {
         });
       }
 
+      const warehouseStock = await this.attachWarehouseStock({
+        enrichedLineItems,
+        callRecorder,
+        sapConfig,
+        tenantModels,
+        token,
+        tenantKey,
+        dealId,
+      });
+
       auditTrail.rounds = [{
         salesArea,
         customerPriceListType,
         effectivePriceListType,
         enrichedLineItems,
         skippedLineItems,
+        ...(warehouseStock ? { warehouseStock } : {}),
       }];
 
       if (enrichedLineItems.length === 0) {

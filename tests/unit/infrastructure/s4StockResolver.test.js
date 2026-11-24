@@ -120,4 +120,74 @@ describe('S4StockResolver', () => {
 
     expect(transport.fetchAll).not.toHaveBeenCalled();
   });
+
+  describe('materials filter', () => {
+    const filterOf = (call) => decodeURIComponent(call[0].query.$filter);
+
+    it('adds a Material OR group to the filter when the target carries materials', async () => {
+      const transport = buildTransport({ MQGT: [] });
+      const resolver = new S4StockResolver({ transport });
+
+      await resolver.fetchStockRows([
+        { plant: 'MQGT', storageLocations: ['0008'], materials: ['1001', '1002'] },
+      ]);
+
+      expect(transport.fetchAll).toHaveBeenCalledTimes(1);
+      expect(filterOf(transport.fetchAll.mock.calls[0])).toBe(
+        "Plant eq 'MQGT' and StorageLocation eq '0008'"
+        + " and (Material eq '1001' or Material eq '1002') and MatlWrhsStkQtyInMatlBaseUnit gt 0"
+      );
+    });
+
+    it('renders a single material without a group and escapes quotes', async () => {
+      const transport = buildTransport({ DPDO: [] });
+      const resolver = new S4StockResolver({ transport });
+
+      await resolver.fetchStockRows([{ plant: 'DPDO', storageLocations: null, materials: ["A'B"] }]);
+
+      expect(filterOf(transport.fetchAll.mock.calls[0])).toBe(
+        "Plant eq 'DPDO' and Material eq 'A''B' and MatlWrhsStkQtyInMatlBaseUnit gt 0"
+      );
+    });
+
+    it('chunks materials (20 per request) and concatenates the rows', async () => {
+      const transport = { fetchAll: jest.fn(async () => [{ Material: 'x' }]) };
+      const resolver = new S4StockResolver({ transport });
+      const materials = Array.from({ length: 45 }, (_, i) => `M${i}`);
+
+      const rows = await resolver.fetchStockRows([{ plant: 'MQGT', storageLocations: null, materials }]);
+
+      expect(transport.fetchAll).toHaveBeenCalledTimes(3);
+      const counts = transport.fetchAll.mock.calls.map(
+        (call) => (filterOf(call).match(/Material eq/g) || []).length
+      );
+      expect(counts).toEqual([20, 20, 5]);
+      expect(rows).toHaveLength(3);
+    });
+
+    it('deduplicates materials and ignores blank ones', async () => {
+      const transport = buildTransport({ MQGT: [] });
+      const resolver = new S4StockResolver({ transport });
+
+      await resolver.fetchStockRows([
+        { plant: 'MQGT', storageLocations: null, materials: ['1001', '1001', '', null] },
+      ]);
+
+      expect(filterOf(transport.fetchAll.mock.calls[0])).toBe(
+        "Plant eq 'MQGT' and Material eq '1001' and MatlWrhsStkQtyInMatlBaseUnit gt 0"
+      );
+    });
+
+    it('treats an empty materials list like no materials (current behavior)', async () => {
+      const transport = buildTransport({ MQGT: [] });
+      const resolver = new S4StockResolver({ transport });
+
+      await resolver.fetchStockRows([{ plant: 'MQGT', storageLocations: null, materials: [] }]);
+
+      expect(transport.fetchAll).toHaveBeenCalledTimes(1);
+      expect(filterOf(transport.fetchAll.mock.calls[0])).toBe(
+        "Plant eq 'MQGT' and MatlWrhsStkQtyInMatlBaseUnit gt 0"
+      );
+    });
+  });
 });

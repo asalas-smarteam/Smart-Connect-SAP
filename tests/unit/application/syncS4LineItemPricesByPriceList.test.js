@@ -34,6 +34,8 @@ function buildDeps({
   updateDealAmount = jest.fn(async () => ({ payload: {}, response: {} })),
   createSapCallRecorder,
   notifyLineItemPriceOutcome = jest.fn(async () => {}),
+  lineItemStockResolver,
+  listWritableLineItemPropertyNames,
 } = {}) {
   const priceListClient = {
     fetchCustomerSalesAreas: jest.fn(async () => salesAreas),
@@ -65,6 +67,8 @@ function buildDeps({
       dateProvider: () => new Date('2026-08-18T00:00:00.000Z'),
       logger: { warn: jest.fn(), info: jest.fn() },
       ...(createSapCallRecorder ? { createSapCallRecorder } : {}),
+      ...(lineItemStockResolver ? { lineItemStockResolver } : {}),
+      ...(listWritableLineItemPropertyNames ? { listWritableLineItemPropertyNames } : {}),
     }),
   };
 }
@@ -807,5 +811,175 @@ describe('SyncS4LineItemPricesByPriceList', () => {
     expect(transport.fetchAll).toHaveBeenCalledTimes(1);
     expect(hubspotPriceClient.updateLineItems).not.toHaveBeenCalled();
     expect(hubspotPriceClient.updateDealAmount).not.toHaveBeenCalled();
+  });
+
+  describe('warehouse stock on the line items', () => {
+    const PAYLOAD = {
+      dealId: '77',
+      customer: '105049',
+      salesOrganization: 'FQCR',
+      distributionChannel: '01',
+      lineItems: [
+        { id: '1', itemCode: '80000017', quantity: 1 },
+        { id: '2', itemCode: '80000017', quantity: 2 },
+      ],
+    };
+    const stockMap = () => new Map([['80000017', { stock_a: 5, stock_b: 0 }]]);
+    const resolverReturning = (map = stockMap()) => ({
+      resolveStockProperties: jest.fn(async () => map),
+    });
+
+    it('attaches the stock properties and passes them to updateLineItems', async () => {
+      const lineItemStockResolver = resolverReturning();
+      const listWritableLineItemPropertyNames = jest.fn(
+        async () => new Set(['stock_a', 'stock_b', 'price'])
+      );
+      const { useCase, hubspotPriceClient } = buildDeps({
+        lineItemStockResolver, listWritableLineItemPropertyNames,
+      });
+
+      const result = await useCase.execute(PAYLOAD, CONTEXT);
+
+      // One call for the distinct item codes, and the writable names fetched once.
+      expect(lineItemStockResolver.resolveStockProperties).toHaveBeenCalledTimes(1);
+      expect(lineItemStockResolver.resolveStockProperties).toHaveBeenCalledWith({
+        sapConfig: expect.objectContaining({ tenantKey: 'multiquimica', serviceLayerBaseUrl: 'https://sap' }),
+        tenantModels: CONTEXT.tenantModels,
+        itemCodes: ['80000017'],
+      });
+      expect(listWritableLineItemPropertyNames).toHaveBeenCalledTimes(1);
+      expect(listWritableLineItemPropertyNames).toHaveBeenCalledWith({ token: 'token' });
+
+      const sent = hubspotPriceClient.updateLineItems.mock.calls[0][0].enrichedLineItems;
+      expect(sent).toHaveLength(2);
+      sent.forEach((item) => {
+        expect(item.warehouseStockProperties).toEqual({ stock_a: 5, stock_b: 0 });
+        expect(item.Price).toBe(1.28);
+      });
+      expect(result.data.lineItems[0].warehouseStockProperties).toEqual({ stock_a: 5, stock_b: 0 });
+    });
+
+    it('shows the stock call in the audit', async () => {
+      const { useCase } = buildDeps({
+        lineItemStockResolver: resolverReturning(),
+        listWritableLineItemPropertyNames: async () => new Set(['stock_a', 'stock_b']),
+        createSapCallRecorder,
+      });
+
+      const result = await useCase.execute(PAYLOAD, CONTEXT);
+
+      expect(result.audit.calls.some((call) => call.path === '/API_MATERIAL_STOCK_SRV/A_MatlStkInAcctMod'))
+        .toBe(true);
+    });
+
+    it('skips a configured property that does not exist in the portal, audits it and still writes the price', async () => {
+      const { useCase, hubspotPriceClient } = buildDeps({
+        lineItemStockResolver: resolverReturning(),
+        listWritableLineItemPropertyNames: async () => new Set(['stock_a']),
+      });
+
+      const result = await useCase.execute(PAYLOAD, CONTEXT);
+
+      const sent = hubspotPriceClient.updateLineItems.mock.calls[0][0].enrichedLineItems;
+      expect(sent[0].warehouseStockProperties).toEqual({ stock_a: 5 });
+      expect(sent[0].Price).toBe(1.28);
+      expect(result.audit.rounds[0].warehouseStock.warnings).toEqual([
+        expect.objectContaining({ code: 'stockPropertyNotWritable', property: 'stock_b' }),
+      ]);
+      expect(result.meta.dealUpdated).toBe(true);
+    });
+
+    it('attaches nothing when no stock property is writable', async () => {
+      const { useCase, hubspotPriceClient } = buildDeps({
+        lineItemStockResolver: resolverReturning(),
+        listWritableLineItemPropertyNames: async () => new Set(),
+      });
+
+      await useCase.execute(PAYLOAD, CONTEXT);
+
+      const sent = hubspotPriceClient.updateLineItems.mock.calls[0][0].enrichedLineItems;
+      expect(sent[0]).not.toHaveProperty('warehouseStockProperties');
+    });
+
+    it('does not filter when no writable-names function is provided', async () => {
+      const { useCase, hubspotPriceClient } = buildDeps({ lineItemStockResolver: resolverReturning() });
+
+      await useCase.execute(PAYLOAD, CONTEXT);
+
+      const sent = hubspotPriceClient.updateLineItems.mock.calls[0][0].enrichedLineItems;
+      expect(sent[0].warehouseStockProperties).toEqual({ stock_a: 5, stock_b: 0 });
+    });
+
+    it('still writes the price, logs and audits when the stock call fails', async () => {
+      const lineItemStockResolver = {
+        resolveStockProperties: jest.fn(async () => { throw new Error('S/4 stock unavailable'); }),
+      };
+      const { useCase, hubspotPriceClient } = buildDeps({
+        lineItemStockResolver, createSapCallRecorder,
+      });
+
+      const result = await useCase.execute(PAYLOAD, CONTEXT);
+
+      const sent = hubspotPriceClient.updateLineItems.mock.calls[0][0].enrichedLineItems;
+      expect(sent[0]).not.toHaveProperty('warehouseStockProperties');
+      expect(sent[0].Price).toBe(1.28);
+      expect(result.audit.rounds[0].warehouseStock.error).toEqual(
+        expect.objectContaining({ message: 'S/4 stock unavailable' })
+      );
+      expect(result.meta.dealUpdated).toBe(true);
+    });
+
+    it('still writes the price when fetching the writable names fails, without sending stock unfiltered', async () => {
+      const { useCase, hubspotPriceClient } = buildDeps({
+        lineItemStockResolver: resolverReturning(),
+        listWritableLineItemPropertyNames: async () => { throw new Error('HubSpot properties down'); },
+      });
+
+      const result = await useCase.execute(PAYLOAD, CONTEXT);
+
+      const sent = hubspotPriceClient.updateLineItems.mock.calls[0][0].enrichedLineItems;
+      expect(sent[0]).not.toHaveProperty('warehouseStockProperties');
+      expect(result.audit.rounds[0].warehouseStock.error.message).toBe('HubSpot properties down');
+    });
+
+    it('changes nothing when the resolver returns no properties (no stock configuration)', async () => {
+      const baseline = buildDeps();
+      const withEmpty = buildDeps({
+        lineItemStockResolver: resolverReturning(new Map()),
+        listWritableLineItemPropertyNames: jest.fn(async () => new Set()),
+      });
+
+      const expected = await baseline.useCase.execute(PAYLOAD, CONTEXT);
+      const result = await withEmpty.useCase.execute(PAYLOAD, CONTEXT);
+
+      expect(result.data).toEqual(expected.data);
+      expect(result.meta).toEqual(expected.meta);
+      expect(result.audit.rounds).toEqual(expected.audit.rounds);
+      expect(withEmpty.hubspotPriceClient.updateLineItems.mock.calls[0][0].enrichedLineItems)
+        .toEqual(baseline.hubspotPriceClient.updateLineItems.mock.calls[0][0].enrichedLineItems);
+    });
+
+    it('does not call stock at all without a resolver (current behavior)', async () => {
+      const { useCase } = buildDeps({ createSapCallRecorder });
+
+      const result = await useCase.execute(PAYLOAD, CONTEXT);
+
+      expect(result.audit.calls.some((call) => String(call.path).includes('API_MATERIAL_STOCK'))).toBe(false);
+    });
+
+    it('does not touch stock in the no-sales-area fallback path', async () => {
+      const lineItemStockResolver = resolverReturning();
+      const { useCase, hubspotPriceClient } = buildDeps({
+        salesAreas: [],
+        lineItemStockResolver,
+        listWritableLineItemPropertyNames: jest.fn(async () => new Set(['stock_a'])),
+      });
+
+      await expect(useCase.execute(PAYLOAD, CONTEXT)).rejects.toThrow('is not registered in sales area');
+
+      expect(lineItemStockResolver.resolveStockProperties).not.toHaveBeenCalled();
+      const zeroed = hubspotPriceClient.updateLineItems.mock.calls[0][0].enrichedLineItems;
+      zeroed.forEach((item) => expect(item).not.toHaveProperty('warehouseStockProperties'));
+    });
   });
 });
