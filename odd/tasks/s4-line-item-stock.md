@@ -40,7 +40,7 @@ in the same write, the way the Business One flow does.
 - [x] T3 Use case: optional `lineItemStockResolver` and a writable-property filter dependency; one stock call after the price loop,
       assign `warehouseStockProperties`, audit the call and the skipped properties, swallow errors. Tests first.
 - [x] T4 Composition wiring explicit (not a silent default) with a composition test asserting the wiring.
-- [ ] T5 Verify: unit suites green; manual run against the real S/4 is done by the user with the VPN.
+- [x] T5 (automated part) Verify: unit suites green; manual run against the real S/4 is done by the user with the VPN.
 
 ## Acceptance
 
@@ -51,4 +51,9 @@ in the same write, the way the Business One flow does.
 
 ## Progress
 
-Not started.
+T1 76650f2, T2 c6f9923, T3 2eb4e65, T4 53de0e7 (route: one delegated writer for all tasks).
+T5: all unit suites green (stock resolver 15, adapter 10, use case 39, composition 9, strategy 27,
+warehouse enrichment 22, webhook 15); node --check OK on new/changed files.
+Pending (user, with VPN): live run against S/4. Unverified: the OData `Material eq` filter on
+A_MatlStkInAcctMod, the Material number format (zero padding) versus hs_sku, and that tenants
+without stock config still get one audit call entry for the stock lookup (no HTTP call is made).
