@@ -9,6 +9,7 @@ import * as hubspotClient from '#infrastructure/hubspot/hubspotClient.js';
 import { buildNotifyLineItemPriceOutcome } from '#infrastructure/hubspot/lineItemPriceNoteNotifier.service.js';
 import { getWebhookFailureNotificationConfig } from '#infrastructure/config/webhookFailureNotification.config.js';
 import logger from '#infrastructure/logger/logger.js';
+import S4LineItemStockAdapter from '#infrastructure/sap/products/S4LineItemStockAdapter.js';
 import syncLogAdapter from '#infrastructure/sync/SyncLogAdapter.js';
 import requestTenantModelsAdapter from '#infrastructure/tenants/RequestTenantModelsAdapter.js';
 import s4PriceListLineItemPriceWebhookService from '#infrastructure/webhook/s4PriceListLineItemPriceWebhook.service.js';
@@ -26,7 +27,10 @@ export function createS4PriceListClient({ sapConfig }) {
   });
 }
 
-export function buildSyncS4LineItemPrices({ syncLogGateway } = {}) {
+export function buildSyncS4LineItemPrices({
+  syncLogGateway,
+  listWritablePropertyNames = hubspotClient.listWritablePropertyNames,
+} = {}) {
   return new SyncS4LineItemPricesByPriceList({
     credentialRepository: new TenantLineItemPriceConfigRepository(),
     createPriceListClient: createS4PriceListClient,
@@ -50,6 +54,12 @@ export function buildSyncS4LineItemPrices({ syncLogGateway } = {}) {
     // dependencias sin cablear tres veces en este repo, y esta decide la fecha con la que se
     // filtra la vigencia de las condiciones en SAP.
     dateProvider: () => new Date(),
+    // Explicit for the same reason: without them the use case runs but never writes stock.
+    // The stock resolver is a no-op for tenants without the S/4 warehouse stock configuration.
+    lineItemStockResolver: new S4LineItemStockAdapter(),
+    // HubSpot rejects the whole batch when one property does not exist, so the stock properties
+    // are filtered against the writable line item properties of the portal.
+    listWritableLineItemPropertyNames: ({ token }) => listWritablePropertyNames(token, 'line_items'),
     logger,
   });
 }

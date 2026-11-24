@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import {
   buildS4LineItemPriceControllerDependencies,
   buildSyncS4LineItemPrices,
@@ -6,6 +7,7 @@ import { S4PriceListClient } from '../../../src/infrastructure/sap/S4PriceListCl
 import SyncS4LineItemPricesByPriceList from '../../../src/application/use-cases/SyncS4LineItemPricesByPriceList.js';
 import { S4PriceListLineItemPriceWebhookService } from '../../../src/infrastructure/webhook/s4PriceListLineItemPriceWebhook.service.js';
 import lineItemPriceWebhookPayloadAdapter from '../../../src/infrastructure/webhook/LineItemPriceWebhookPayloadAdapter.js';
+import { S4LineItemStockAdapter } from '../../../src/infrastructure/sap/products/S4LineItemStockAdapter.js';
 import { buildLineItemPriceControllerDependencies } from '../../../src/composition/line-item-prices.composition.js';
 
 describe('s4-line-item-prices.composition', () => {
@@ -32,6 +34,26 @@ describe('s4-line-item-prices.composition', () => {
     // si la composición deja de cablearlo, buildSyncS4LineItemPrices lanza y este test se cae.
     expect(typeof useCase.dateProvider).toBe('function');
     expect(useCase.dateProvider()).toBeInstanceOf(Date);
+  });
+
+  // Same pattern as above: without these two pieces the use case still runs, just without
+  // stock, and no application-layer test would notice.
+  it('wires the warehouse stock resolver and the writable-property filter', () => {
+    const useCase = buildSyncS4LineItemPrices();
+
+    expect(useCase.lineItemStockResolver).toBeInstanceOf(S4LineItemStockAdapter);
+    expect(typeof useCase.lineItemStockResolver.resolveStockProperties).toBe('function');
+    expect(typeof useCase.listWritableLineItemPropertyNames).toBe('function');
+  });
+
+  it('the property filter lists the line_items properties with the received token', async () => {
+    const listWritablePropertyNames = jest.fn(async () => new Set(['stock_a']));
+    const useCase = buildSyncS4LineItemPrices({ listWritablePropertyNames });
+
+    const result = await useCase.listWritableLineItemPropertyNames({ token: 'test-token' });
+
+    expect(listWritablePropertyNames).toHaveBeenCalledWith('test-token', 'line_items');
+    expect(result).toEqual(new Set(['stock_a']));
   });
 
   // M4 de la revisión final: la suite sólo ejercía buildSyncS4LineItemPrices, así que el cableado

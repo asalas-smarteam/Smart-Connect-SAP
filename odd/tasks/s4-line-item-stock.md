@@ -39,7 +39,7 @@ in the same write, the way the Business One flow does.
       when not configured). Tests first.
 - [x] T3 Use case: optional `lineItemStockResolver` and a writable-property filter dependency; one stock call after the price loop,
       assign `warehouseStockProperties`, audit the call and the skipped properties, swallow errors. Tests first.
-- [ ] T4 Composition wiring explicit (not a silent default) with a composition test asserting the wiring.
+- [x] T4 Composition wiring explicit (not a silent default) with a composition test asserting the wiring.
 - [ ] T5 Verify: unit suites green; manual run against the real S/4 is done by the user with the VPN.
 
 ## Acceptance
