@@ -59,7 +59,7 @@ export function buildSyncS4LineItemPrices({
     lineItemStockResolver: new S4LineItemStockAdapter(),
     // HubSpot rejects the whole batch when one property does not exist, so the stock properties
     // are filtered against the writable line item properties of the portal.
-    listWritableLineItemPropertyNames: ({ token }) => listWritablePropertyNames(token, 'line_items'),
+    listWritableLineItemPropertyNames: ({ token }) => listWritablePropertyNames(token, 'line_item'),
     logger,
   });
 }

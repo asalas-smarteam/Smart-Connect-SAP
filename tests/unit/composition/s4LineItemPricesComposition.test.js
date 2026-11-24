@@ -46,13 +46,13 @@ describe('s4-line-item-prices.composition', () => {
     expect(typeof useCase.listWritableLineItemPropertyNames).toBe('function');
   });
 
-  it('the property filter lists the line_items properties with the received token', async () => {
+  it('the property filter lists the line_item object type properties with the received token', async () => {
     const listWritablePropertyNames = jest.fn(async () => new Set(['stock_a']));
     const useCase = buildSyncS4LineItemPrices({ listWritablePropertyNames });
 
     const result = await useCase.listWritableLineItemPropertyNames({ token: 'test-token' });
 
-    expect(listWritablePropertyNames).toHaveBeenCalledWith('test-token', 'line_items');
+    expect(listWritablePropertyNames).toHaveBeenCalledWith('test-token', 'line_item');
     expect(result).toEqual(new Set(['stock_a']));
   });
 

@@ -57,3 +57,9 @@ warehouse enrichment 22, webhook 15); node --check OK on new/changed files.
 Pending (user, with VPN): live run against S/4. Unverified: the OData `Material eq` filter on
 A_MatlStkInAcctMod, the Material number format (zero padding) versus hs_sku, and that tenants
 without stock config still get one audit call entry for the stock lookup (no HTTP call is made).
+
+Correction (live test): the stock path failed with "Unsupported CRM batch object type: line_items" because
+hubspotClient `crmCollection()` only mapped company and contact. Added `line_item: 'line_items'` to
+CRM_BATCH_COLLECTIONS and the composition now calls `listWritablePropertyNames(token, 'line_item')`. A new test
+(tests/unit/infrastructure/hubspotClientWritableProperties.test.js) calls the real client with axios mocked and asserts
+the `/crm/v3/properties/line_items` request. Commit: see git log (fix(s4): use the line_item object type).
