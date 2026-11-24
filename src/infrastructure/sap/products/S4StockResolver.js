@@ -37,7 +37,29 @@ export function isAllPlantsTarget(target) {
 // because some field references that Plant) and absent only on the explicit
 // all-plants marker; StorageLocation is only added when the target is not a
 // whole-Plant wildcard, rendered as an OR group when there are several.
-function buildFilter(target) {
+// Materials per request when a target carries a `materials` list. Keeps the OData
+// $filter (and the URL) small. The Material clause itself is not verified live.
+export const MATERIALS_PER_REQUEST = 20;
+
+function normalizeMaterials(materials) {
+  if (!Array.isArray(materials)) {
+    return [];
+  }
+
+  return [...new Set(
+    materials.map((material) => String(material ?? '').trim()).filter(Boolean)
+  )];
+}
+
+function chunk(list, size) {
+  const chunks = [];
+  for (let i = 0; i < list.length; i += size) {
+    chunks.push(list.slice(i, i + size));
+  }
+  return chunks;
+}
+
+function buildFilter(target, materials = []) {
   const conditions = isAllPlantsTarget(target)
     ? []
     : [`Plant eq '${escapeODataLiteral(target.plant)}'`];
@@ -46,6 +68,11 @@ function buildFilter(target) {
     const members = target.storageLocations.map(
       (code) => `StorageLocation eq '${escapeODataLiteral(code)}'`
     );
+    conditions.push(members.length === 1 ? members[0] : `(${members.join(' or ')})`);
+  }
+
+  if (materials.length > 0) {
+    const members = materials.map((code) => `Material eq '${escapeODataLiteral(code)}'`);
     conditions.push(members.length === 1 ? members[0] : `(${members.join(' or ')})`);
   }
 
@@ -62,7 +89,9 @@ export class S4StockResolver {
     this.transport = transport;
   }
 
-  // targets: [{ plant, storageLocations: string[] | null }] -> flat row[].
+  // targets: [{ plant, storageLocations: string[] | null, materials?: string[] }] -> flat row[].
+  // An optional `materials` list restricts the query to those materials, in chunks
+  // of MATERIALS_PER_REQUEST; without it the target is fetched whole.
   // One fetchAll per target (each already auto-paginates), run concurrently
   // since the targets are independent Plants. A target with neither a plant nor
   // the explicit all-plants marker is a malformed configuration and is dropped.
@@ -74,15 +103,20 @@ export class S4StockResolver {
       return [];
     }
 
-    const rowsByTarget = await Promise.all(
-      validTargets.map((target) => this.transport.fetchAll({
+    const requests = validTargets.flatMap((target) => {
+      const materials = normalizeMaterials(target.materials);
+      const groups = materials.length > 0 ? chunk(materials, MATERIALS_PER_REQUEST) : [[]];
+
+      return groups.map((group) => this.transport.fetchAll({
         path: MATERIAL_STOCK_PATH,
         query: {
           $select: MATERIAL_STOCK_SELECT,
-          $filter: enc(buildFilter(target)),
+          $filter: enc(buildFilter(target, group)),
         },
-      }))
-    );
+      }));
+    });
+
+    const rowsByTarget = await Promise.all(requests);
 
     return rowsByTarget.flat().filter(Boolean);
   }
