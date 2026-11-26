@@ -24,6 +24,24 @@ function buildErrorDetails(error, endpoint, method) {
   };
 }
 
+// The raw axios error carries the whole request: the bearer token, the sent
+// body and the socket. Callers print the wrapped error as-is, so keeping it as
+// `cause` leaked all of that into the logs and rotated them within hours. Keep
+// only what callers classify on.
+function sanitizeCause(error) {
+  const cause = new Error(error?.message);
+  cause.name = error?.name ?? 'Error';
+  if (error?.code !== undefined) cause.code = error.code;
+  if (error?.response) {
+    cause.response = {
+      status: error.response.status,
+      statusText: error.response.statusText,
+      data: error.response.data,
+    };
+  }
+  return cause;
+}
+
 // `expectedStatuses` are statuses the caller drives a decision from rather than
 // treating as failures (a 409 while bisecting a conflicting chunk). They still
 // throw -- only the log level changes, so a healthy run does not report hundreds
@@ -64,7 +82,7 @@ async function hubspotRequest(method, endpoint, token, data, { expectedStatuses 
         errorDetails.statusText ?? ''
       }`.trim(),
     );
-    wrappedError.cause = error;
+    wrappedError.cause = sanitizeCause(error);
     wrappedError.details = errorDetails;
     // Preserved across the wrap: callers decide between reconciling and
     // replaying based on whether the write may already have landed.
