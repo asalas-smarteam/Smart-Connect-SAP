@@ -384,6 +384,7 @@ export async function resolveBusinessPartnerForDocument({
     propertiesFlags,
     creationDefaults: creationConfig.defaults,
     consumerFinalIdentity,
+    consumerFinalPlaceholders: consumerFinalNitConfig?.placeholders ?? null,
   });
 
   auditTrail.payload_SAP.businessPartner = businessPartnerResult.requestPayload;

@@ -154,4 +154,31 @@ describe('findOrCreateBusinessPartner with a consumer-final tax id', () => {
     // The tax id that gets created is still the placeholder, so the identity replaces it.
     expect(postOf(adapter).data.FederalTaxID).toBe(CUI);
   });
+
+  it('uses a tenant-specific placeholder to trigger the lookup by identity', async () => {
+    const adapter = buildAdapter({ existing: { CardCode: 'CL8' } });
+
+    const result = await adapter.findOrCreateBusinessPartner({
+      ...BASE_ARGS,
+      mappedCompany: { CardName: 'ACME', FederalTaxID: 'CONSUMIDOR-FINAL' },
+      consumerFinalIdentity: CUI,
+      consumerFinalPlaceholders: ['CONSUMIDORFINAL'],
+    });
+
+    expect(filterOf(adapter)).toEqual([`FederalTaxID eq '${CUI}'`]);
+    expect(result).toMatchObject({ cardCode: 'CL8', created: false });
+  });
+
+  it('does not treat the legacy placeholder as consumer final when custom ones are configured', async () => {
+    const adapter = buildAdapter({ existing: { CardCode: 'CL9' } });
+
+    await adapter.findOrCreateBusinessPartner({
+      ...BASE_ARGS,
+      mappedCompany: { CardName: 'ACME', FederalTaxID: CF_NIT },
+      consumerFinalIdentity: CUI,
+      consumerFinalPlaceholders: ['CONSUMIDORFINAL'],
+    });
+
+    expect(filterOf(adapter)).toEqual([`FederalTaxID eq '${CF_NIT}'`]);
+  });
 });

@@ -20,6 +20,8 @@ For tenants that opt in, when the business partner tax id resolved for a deal is
 - [x] T3 Implementation (GREEN) + full unit suite (baseline: 4 time-dependent suites already fail on main).
 - [ ] T4 Commit(s) on the branch; PR against main (user authorizes push/PR).
 
+- [x] T5 Follow-up: configurable placeholders (see Follow-up).
+
 ## Route
 Delegated direct: one writer (2+ non-trivial files + exploration). Evidence: mapping needs >5 lookups.
 
@@ -30,3 +32,9 @@ Created 2026-11-26 16:02 local.
 - T2 RED: 4 suites / 10 tests failed for missing behavior (consumerFinalIdentity ignored, resolveConsumerFinalNitConfig undefined).
 - T3 GREEN: 4 suites, 95 tests pass. Full `npm test`: 293 suites pass, 4 fail (internalTenant, sendMappedItemsToHubspot, lineItemPriceWebhook.service, serviceLayerService; 9 tests), identical on base via git stash.
 - Note: worktree had no node_modules; symlinked from the main checkout for test runs (untracked, not committed).
+
+## Follow-up: configurable placeholders
+Config becomes `{ "enabled": true, "identityProperty": "cui", "placeholders": ["00000000C.F."] }`. Entries and the tested tax id are normalized (uppercase, no dots/dashes/spaces) and compared for exact equality; absent, non-array, empty or all-invalid `placeholders` falls back to the generic `^0*CF$` pattern, so the deployed config without the field is unchanged.
+- Flow: `normalizeConsumerFinalNitConfig` -> `resolveConsumerFinalNitConfig` -> `webhookQuotationSupport` passes `consumerFinalPlaceholders` -> `findOrCreateBusinessPartner` -> `isConsumerFinalNit(value, placeholders)` (new optional arg).
+- Evidence: see commit; RED then GREEN on the four related suites, full suite shows only the 4 baseline failing suites.
+

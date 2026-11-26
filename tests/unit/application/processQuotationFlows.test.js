@@ -594,6 +594,11 @@ describe('ProcessHubspotCreateQuotation', () => {
       expect(args.consumerFinalIdentity).toBe('2345678901234');
     });
 
+    it('passes the tenant placeholders along with the identity', async () => {
+      const args = await run({ enabled: true, identityProperty: 'cui', placeholders: ['00000000CF'] });
+      expect(args.consumerFinalPlaceholders).toEqual(['00000000CF']);
+    });
+
     it('passes no identity when disabled or when the deal has no value', async () => {
       expect((await run({ enabled: false, identityProperty: null })).consumerFinalIdentity).toBeNull();
       expect((await run({ enabled: true, identityProperty: 'cui' }, baseEvent)).consumerFinalIdentity)
