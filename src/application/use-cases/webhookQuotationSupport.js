@@ -1,5 +1,6 @@
 import { mapHubspotToSapFields } from '#domain/orders/order-builder.service.js';
-import { resolveHubspotSapId } from '../services/webhook-payload.service.js';
+import { resolveEventPayload, resolveHubspotSapId } from '../services/webhook-payload.service.js';
+import { resolveConsumerFinalIdentity } from '#domain/business-partners/consumer-final-nit.service.js';
 import {
   buildContactEmployeeFailureMessage,
   recordContactEmployeeFailures,
@@ -354,6 +355,15 @@ export async function resolveBusinessPartnerForDocument({
   const payloadStrategy = businessPartnerPayloadStrategyFactory
     .getStrategy(creationConfig.payloadStrategy);
 
+  // Opt-in per tenant: the national id of the deal replaces the consumer-final placeholder.
+  // The deal is read from the event payload this function already receives.
+  const consumerFinalNitConfig = await runtimeRepository
+    .resolveConsumerFinalNitConfig?.(context.tenantModels);
+  const consumerFinalIdentity = resolveConsumerFinalIdentity({
+    config: consumerFinalNitConfig,
+    deal: resolveEventPayload({ payload }).deal,
+  });
+
   const businessPartnerResult = await sapOrderAdapter.findOrCreateBusinessPartner({
     sapConfig,
     tenantModels: context.tenantModels,
@@ -373,6 +383,7 @@ export async function resolveBusinessPartnerForDocument({
     mappedContactEmployees,
     propertiesFlags,
     creationDefaults: creationConfig.defaults,
+    consumerFinalIdentity,
   });
 
   auditTrail.payload_SAP.businessPartner = businessPartnerResult.requestPayload;

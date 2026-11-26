@@ -9,6 +9,7 @@ import {
   buildContactEmployeeUpdatePayload,
 } from '#domain/business-partners/upsert-sap-fields.service.js';
 import LegacyWhitelistBusinessPartnerPayloadStrategy from '#domain/business-partners/strategies/legacy-whitelist-bp-payload.strategy.js';
+import { isConsumerFinalNit } from '#domain/business-partners/consumer-final-nit.service.js';
 import { PermanentWebhookError } from '#shared/errors/index.js';
 import {
   escapeODataString,
@@ -211,6 +212,9 @@ export class SapWebhookOrderAdapter {
     mappedContactEmployees = [],
     propertiesFlags = {},
     creationDefaults = null,
+    // National id of the person, resolved by the caller only for tenants that opted in.
+    // Replaces the consumer-final placeholder as tax id; null leaves everything as is.
+    consumerFinalIdentity = null,
   }) {
     const mappedCardCode = toNonEmptyString(mappedCompany?.CardCode || mappedContact?.CardCode);
     const mappedEmail = toNonEmptyString(mappedCompany?.EmailAddress || mappedContact?.EmailAddress);
@@ -234,9 +238,15 @@ export class SapWebhookOrderAdapter {
       ? mappedPriceListNum
       : await resolveDefaultPriceListNum(tenantModels);
     const defaultFindSAP = await resolveDefaultFindSAP(tenantModels);
-    const defaultFindSAPValue = toNonEmptyString(
+    const identity = toNonEmptyString(consumerFinalIdentity);
+    const mappedFindValue = toNonEmptyString(
       mappedCompany?.[defaultFindSAP] || mappedContact?.[defaultFindSAP]
     );
+    const defaultFindSAPValue = identity
+      && defaultFindSAP === 'FederalTaxID'
+      && isConsumerFinalNit(mappedFindValue)
+      ? identity
+      : mappedFindValue;
 
     const upsertFieldsBP = Array.isArray(upsertConfig?.fieldsUpdated_BP)
       ? upsertConfig.fieldsUpdated_BP
@@ -303,9 +313,11 @@ export class SapWebhookOrderAdapter {
       ? (company?.name || company?.company || company?.hs_name)
       : resolveContactDisplayName(contact);
     const cardName = toNonEmptyString(mappedCompany?.CardName || mappedContact?.CardName || fallbackName);
-    const federalTaxId = companyExists
+    const mappedFederalTaxId = companyExists
       ? mappedCompany?.FederalTaxID
       : mappedContact?.FederalTaxID;
+    const useIdentityAsTaxId = Boolean(identity) && isConsumerFinalNit(mappedFederalTaxId);
+    const federalTaxId = useIdentityAsTaxId ? identity : mappedFederalTaxId;
 
     if (!cardName) {
       throw new PermanentWebhookError('CardName is required to create Business Partner');
@@ -337,6 +349,9 @@ export class SapWebhookOrderAdapter {
     // Ver la guardia de regresión en
     // tests/unit/domain/businessPartnerPayloadStrategies.test.js.
     const mappedBusinessPartner = { ...mappedContact, ...mappedCompany };
+    if (useIdentityAsTaxId) {
+      mappedBusinessPartner.FederalTaxID = identity;
+    }
 
     const payload = payloadStrategy.buildCreatePayload({
       mappedBusinessPartner,

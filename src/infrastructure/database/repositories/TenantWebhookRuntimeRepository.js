@@ -11,6 +11,10 @@ import {
   PURCHASE_QUOTATION_DEFAULTS_CONFIG_KEY,
   normalizePurchaseQuotationDefaults,
 } from '#infrastructure/config/purchaseQuotationDefaults.config.js';
+import {
+  CONSUMER_FINAL_NIT_CONFIG_KEY,
+  normalizeConsumerFinalNitConfig,
+} from '#domain/business-partners/consumer-final-nit.service.js';
 import { resolvePriceListFromConfigValue } from '#domain/prices/price-list-config.service.js';
 import { PermanentWebhookError } from '#shared/errors/index.js';
 import { normalizePositiveInteger, toNonEmptyString } from '#shared/utils/string.utils.js';
@@ -327,6 +331,17 @@ export class TenantWebhookRuntimeRepository {
       'defaultFindSAP',
       'EmailAddress'
     );
+  }
+
+  // Opt-in: { enabled, identityProperty }. Disabled when the key is absent.
+  async resolveConsumerFinalNitConfig(tenantModels) {
+    const value = await tenantConfigurationService.getValue(
+      tenantModels,
+      CONSUMER_FINAL_NIT_CONFIG_KEY,
+      null
+    );
+
+    return normalizeConsumerFinalNitConfig(value);
   }
 
   // upsertDataSAP: whether an already-existing BusinessPartner/ContactEmployee

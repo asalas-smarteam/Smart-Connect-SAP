@@ -573,6 +573,41 @@ describe('ProcessHubspotCreateQuotation', () => {
     );
   });
 
+  describe('consumer-final tax id identity', () => {
+    const cfEvent = {
+      ...baseEvent,
+      payload: {
+        ...baseEvent.payload,
+        deal: { hs_object_id: '59680314911', cui: ' 2345678901234 ' },
+      },
+    };
+
+    async function run(config, event = cfEvent) {
+      const deps = buildDeps();
+      deps.runtimeRepository.resolveConsumerFinalNitConfig = jest.fn().mockResolvedValue(config);
+      await new ProcessHubspotCreateQuotation(deps).execute({ event, tenantModels });
+      return deps.sapOrderAdapter.findOrCreateBusinessPartner.mock.calls[0][0];
+    }
+
+    it('passes the deal identity value when the tenant opted in', async () => {
+      const args = await run({ enabled: true, identityProperty: 'cui' });
+      expect(args.consumerFinalIdentity).toBe('2345678901234');
+    });
+
+    it('passes no identity when disabled or when the deal has no value', async () => {
+      expect((await run({ enabled: false, identityProperty: null })).consumerFinalIdentity).toBeNull();
+      expect((await run({ enabled: true, identityProperty: 'cui' }, baseEvent)).consumerFinalIdentity)
+        .toBeNull();
+    });
+
+    it('passes no identity when the runtime repository does not expose the config', async () => {
+      const deps = buildDeps();
+      await new ProcessHubspotCreateQuotation(deps).execute({ event: cfEvent, tenantModels });
+      expect(deps.sapOrderAdapter.findOrCreateBusinessPartner.mock.calls[0][0].consumerFinalIdentity)
+        .toBeNull();
+    });
+  });
+
   it('reuses the already-resolved HubSpot token instead of calling getAccessToken again to write back ContactEmployee codes', async () => {
     const deps = buildDeps();
     deps.sapOrderAdapter.findOrCreateBusinessPartner.mockResolvedValue({
