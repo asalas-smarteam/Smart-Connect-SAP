@@ -333,7 +333,7 @@ export class TenantWebhookRuntimeRepository {
     );
   }
 
-  // Opt-in: { enabled, identityProperty }. Disabled when the key is absent.
+  // Opt-in: { enabled, identityProperty, placeholders }. Disabled when the key is absent.
   async resolveConsumerFinalNitConfig(tenantModels) {
     const value = await tenantConfigurationService.getValue(
       tenantModels,

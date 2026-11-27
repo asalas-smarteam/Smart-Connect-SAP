@@ -215,6 +215,8 @@ export class SapWebhookOrderAdapter {
     // National id of the person, resolved by the caller only for tenants that opted in.
     // Replaces the consumer-final placeholder as tax id; null leaves everything as is.
     consumerFinalIdentity = null,
+    // Tenant-specific placeholders; null/empty keeps the generic consumer-final pattern.
+    consumerFinalPlaceholders = null,
   }) {
     const mappedCardCode = toNonEmptyString(mappedCompany?.CardCode || mappedContact?.CardCode);
     const mappedEmail = toNonEmptyString(mappedCompany?.EmailAddress || mappedContact?.EmailAddress);
@@ -244,7 +246,7 @@ export class SapWebhookOrderAdapter {
     );
     const defaultFindSAPValue = identity
       && defaultFindSAP === 'FederalTaxID'
-      && isConsumerFinalNit(mappedFindValue)
+      && isConsumerFinalNit(mappedFindValue, consumerFinalPlaceholders)
       ? identity
       : mappedFindValue;
 
@@ -316,7 +318,7 @@ export class SapWebhookOrderAdapter {
     const mappedFederalTaxId = companyExists
       ? mappedCompany?.FederalTaxID
       : mappedContact?.FederalTaxID;
-    const useIdentityAsTaxId = Boolean(identity) && isConsumerFinalNit(mappedFederalTaxId);
+    const useIdentityAsTaxId = Boolean(identity) && isConsumerFinalNit(mappedFederalTaxId, consumerFinalPlaceholders);
     const federalTaxId = useIdentityAsTaxId ? identity : mappedFederalTaxId;
 
     if (!cardName) {

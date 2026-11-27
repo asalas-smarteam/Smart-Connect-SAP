@@ -1,5 +1,6 @@
 import {
   isConsumerFinalNit,
+  normalizeConsumerFinalPlaceholders,
   normalizeConsumerFinalNitConfig,
   resolveConsumerFinalIdentity,
 } from '../../../src/domain/business-partners/consumer-final-nit.service.js';
@@ -52,7 +53,21 @@ describe('normalizeConsumerFinalNitConfig', () => {
     expect(normalizeConsumerFinalNitConfig({ enabled: true, identityProperty: ' cui ' })).toEqual({
       enabled: true,
       identityProperty: 'cui',
+      placeholders: [],
     });
+  });
+
+  it('normalizes the configured placeholders and drops invalid entries', () => {
+    expect(normalizeConsumerFinalNitConfig({
+      enabled: true,
+      identityProperty: 'cui',
+      placeholders: [' 0000-0000 c.f. ', '', '  ', 5, null, 'X.Y'],
+    })).toEqual({ enabled: true, identityProperty: 'cui', placeholders: ['00000000CF', 'XY'] });
+  });
+
+  it('yields no placeholders when the field is not an array', () => {
+    expect(normalizeConsumerFinalNitConfig({ enabled: true, identityProperty: 'cui', placeholders: 'CF' }))
+      .toEqual({ enabled: true, identityProperty: 'cui', placeholders: [] });
   });
 });
 
@@ -76,4 +91,31 @@ describe('resolveConsumerFinalIdentity', () => {
     expect(resolveConsumerFinalIdentity({ config, deal: { cui: '2345 67890 1234' } }))
       .toBe('2345 67890 1234');
   });
+});
+
+describe('isConsumerFinalNit with custom placeholders', () => {
+  const placeholders = normalizeConsumerFinalPlaceholders(['00000000C.F.', 'consumidor-final']);
+
+  it.each(['00000000C.F.', '0000 0000 c-f', 'Consumidor Final', 'consumidor.final'])(
+    'matches %p',
+    (value) => {
+      expect(isConsumerFinalNit(value, placeholders)).toBe(true);
+    }
+  );
+
+  it.each(['C.F.', '000000000C.F.', '1234567-8', 'consumidor', null, ''])(
+    'does not match %p (exact match only, no legacy pattern)',
+    (value) => {
+      expect(isConsumerFinalNit(value, placeholders)).toBe(false);
+    }
+  );
+
+  it.each([undefined, null, [], 'CF', [' ', 3, null]])(
+    'falls back to the legacy pattern when placeholders is %p',
+    (list) => {
+      expect(isConsumerFinalNit('00000000C.F.', list)).toBe(true);
+      expect(isConsumerFinalNit('C.F.', list)).toBe(true);
+      expect(isConsumerFinalNit('1234567-8', list)).toBe(false);
+    }
+  );
 });

@@ -17,8 +17,22 @@ describe('TenantWebhookRuntimeRepository.resolveConsumerFinalNitConfig', () => {
     await expect(repository.resolveConsumerFinalNitConfig({})).resolves.toEqual({
       enabled: true,
       identityProperty: 'cui',
+      placeholders: [],
     });
     expect(getValue).toHaveBeenCalledWith({}, 'consumerFinalNit', null);
+  });
+
+  it('carries the normalized placeholders', async () => {
+    getValue.mockResolvedValue({
+      enabled: true,
+      identityProperty: 'cui',
+      placeholders: ['00000000C.F.', ' ', 7],
+    });
+    await expect(repository.resolveConsumerFinalNitConfig({})).resolves.toEqual({
+      enabled: true,
+      identityProperty: 'cui',
+      placeholders: ['00000000CF'],
+    });
   });
 
   it('is disabled when the key is absent', async () => {
